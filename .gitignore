@@ -1,0 +1,33 @@
+# BMAD reference (local install)
+_bmad/
+_bmad-output/
+
+# OS junk
+.DS_Store
+__MACOSX/
+
+# Dependencies
+node_modules/
+
+# MEDULLA local state
+.medulla
+
+# Build artifacts
+cli-agent/dist/
+cli-agent/build/
+dist/
+.venv-publish/
+__pycache__
+.medulla/human.md
+.venv-publish
+.medulla/logs
+
+# skk things
+.run-me.md
+config.local.json
+opencode.json
+.medulla/logs
+.medulla/human.md
+
+# Claude local settings (машина-специфично)
+.claude/settings.local.json
