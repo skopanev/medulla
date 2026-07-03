@@ -19,12 +19,40 @@ import os
 import signal
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 from .output import eprint, log, init_log_file, close_log_target, set_verbose
 from .pipeline import load_pipeline, validate_pipeline
 from .executor import runtime_diagnostics, confirm_non_docker_max_permissions
 from .runner import run_pipeline
+
+
+def _resolve_task_id(ns) -> str:
+    """Resolve a stable per-run id so parallel runs in one workdir don't
+    collide on shared state (vars file, log dir, bridge dir, pid files).
+
+    Priority: explicit --var MEDULLA_TASK_ID=... > env MEDULLA_TASK_ID
+    (set by parent docker.py / resume) > generated uuid hex.
+    """
+    for v in (ns.var or []):
+        if "=" in v:
+            k, val = v.split("=", 1)
+            if k == "MEDULLA_TASK_ID" and val:
+                return val
+    existing = os.environ.get("MEDULLA_TASK_ID", "").strip()
+    if existing:
+        return existing
+    return uuid.uuid4().hex[:8]
+
+
+def _resolve_bridge_path(task_id: str) -> str:
+    """Per-run host-builder bridge dir so cleanup of one run doesn't wipe
+    another's bridge. Defaults to the legacy shared path when no task_id."""
+    base = os.environ.get("TMPDIR", "/tmp").rstrip("/")
+    if task_id:
+        return f"{base}/medulla-bridge-{task_id}"
+    return f"{base}/medulla-bridge"
 
 
 def _find_script(name: str) -> Path | None:
@@ -79,9 +107,16 @@ def resolve_pipeline_path(workflow: str | None, command: str | None, pipeline: s
 def main() -> int:
     ns, extra = parse_args(sys.argv[1:])
 
+    # Resolve + publish the per-run id BEFORE anything reads shared state.
+    # All isolation (vars file, log dir, bridge dir) keys off this env var.
+    task_id = _resolve_task_id(ns)
+    os.environ["MEDULLA_TASK_ID"] = task_id
+    if not os.environ.get("MEDULLA_BRIDGE"):
+        os.environ["MEDULLA_BRIDGE"] = _resolve_bridge_path(task_id)
+
     eprint(
         f"[medulla] startup pid={os.getpid()} ppid={os.getppid()} "
-        f"docker={int(ns.docker)} cwd={Path.cwd()}"
+        f"docker={int(ns.docker)} cwd={Path.cwd()} task_id={task_id}"
     )
 
     set_verbose("--verbose" in extra)

@@ -3,7 +3,7 @@
 # Usage: ./host-builder.sh /path/to/project
 set -uo pipefail
 
-BRIDGE="${TMPDIR:-/tmp}/medulla-bridge"
+BRIDGE="${MEDULLA_BRIDGE:-${TMPDIR:-/tmp}/medulla-bridge}"
 WORKSPACE="${1:-.}"
 
 C_RESET='\033[0m' C_DIM='\033[2m' C_GREEN='\033[32m' C_RED='\033[31m' C_CYAN='\033[36m' C_YELLOW='\033[33m'

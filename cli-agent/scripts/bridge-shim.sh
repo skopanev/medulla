@@ -2,7 +2,7 @@
 # bridge-shim.sh — generic bridge shim for host-delegated tools
 # Symlink as /usr/local/bin/<tool> → bridge-shim; detects tool name from $0.
 
-BRIDGE="/tmp/medulla-bridge"
+BRIDGE="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
 TOOL="$(basename "$0")"
 
 # version check always works (for env banner / preflight)

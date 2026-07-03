@@ -50,12 +50,13 @@ if [ -z "${GEMINI_API_KEY:-}" ] && [ -n "${GOOGLE_API_KEY:-}" ]; then
 fi
 
 # host-builder bridge check
-if [ -d /tmp/medulla-bridge ]; then
+BRIDGE="${MEDULLA_BRIDGE:-/tmp/medulla-bridge}"
+if [ -d "$BRIDGE" ]; then
     PING_ID="ping.$$"
-    echo "id:$PING_ID ping" > /tmp/medulla-bridge/request
+    echo "id:$PING_ID ping" > "$BRIDGE/request"
     sleep 1
-    if [ -f "/tmp/medulla-bridge/exit_code.$PING_ID" ]; then
-        rm -f "/tmp/medulla-bridge/response.$PING_ID" "/tmp/medulla-bridge/exit_code.$PING_ID"
+    if [ -f "$BRIDGE/exit_code.$PING_ID" ]; then
+        rm -f "$BRIDGE/response.$PING_ID" "$BRIDGE/exit_code.$PING_ID"
         echo "✓ host-builder connected"
     else
         echo "⚠ host-builder not responding (bridge mounted but no listener)"

@@ -319,7 +319,7 @@ def runtime_diagnostics() -> None:
     else:
         eprint(f"runtime: bridge_shim not-installed")
 
-    bridge = Path("/tmp/medulla-bridge")
+    bridge = Path(os.environ.get("MEDULLA_BRIDGE", "/tmp/medulla-bridge"))
     bridge_state = "mounted" if bridge.is_dir() else "not-mounted"
     eprint(f"runtime: host_bridge {bridge_state}")
 

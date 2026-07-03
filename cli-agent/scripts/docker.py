@@ -73,6 +73,8 @@ def build_run_command(image, volumes, args, container_name: str) -> list[str]:
         "VERTEX_LOCATION",
         "INTERCOM_TOKEN",
         "INTERCOM_ADMIN_ID",
+        "MEDULLA_TASK_ID",
+        "MEDULLA_BRIDGE",
     ):
         val = os.environ.get(key)
         if val:
@@ -233,10 +235,12 @@ def build_volumes(claude_home):
     # agy (Antigravity CLI) keys — extract from macOS Keychain and mount as temp files
     _mount_agy_keys(vols)
 
-    # host-builder bridge for macOS native builds
-    bridge = Path(os.environ.get("TMPDIR", "/tmp")) / "medulla-bridge"
+    # host-builder bridge for macOS native builds. Per-run bridge dir so
+    # parallel runs don't share/clobber one bridge.
+    bridge = Path(os.environ.get("MEDULLA_BRIDGE",
+                                 Path(os.environ.get("TMPDIR", "/tmp")) / "medulla-bridge"))
     if bridge.is_dir():
-        add(bridge, "/tmp/medulla-bridge")
+        add(bridge, str(bridge))
 
     return vols
 

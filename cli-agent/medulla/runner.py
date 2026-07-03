@@ -21,6 +21,20 @@ from .executor import run_shell, run_agent
 NEXT_ITEM = "__next_item__"
 
 
+def _task_id() -> str:
+    return os.environ.get("MEDULLA_TASK_ID", "").strip()
+
+
+def _bridge_dir() -> Path:
+    return Path(os.environ.get("MEDULLA_BRIDGE", "/tmp/medulla-bridge"))
+
+
+def _emulator_pid_file() -> Path:
+    tid = _task_id()
+    name = f"emulator.{tid}.pid" if tid else "emulator.pid"
+    return Path.cwd() / ".medulla" / name
+
+
 def _parse_llm(llm_val: str, model_override: str | None = None) -> tuple[str, str | None]:
     """Parse 'executor:model' or plain 'executor' string."""
     if ":" in llm_val:
@@ -254,8 +268,8 @@ def _cleanup_bridge_bg():
     _kill_pidfile(dev_pid_file)
     _stop_container(dev_container_file)
 
-    pid_file = Path.cwd() / ".medulla" / "emulator.pid"
-    bridge = Path("/tmp/medulla-bridge")
+    pid_file = _emulator_pid_file()
+    bridge = _bridge_dir()
     if pid_file.is_file() and bridge.is_dir():
         pid = pid_file.read_text().strip()
         if pid:
@@ -269,10 +283,12 @@ def _cleanup_bridge_bg():
 
     _kill_pidfile(host_builder_pid_file)
     if target_dir:
-        (Path(target_dir) / ".medulla" / "emulator.pid").unlink(missing_ok=True)
+        tid = _task_id()
+        ename = f"emulator.{tid}.pid" if tid else "emulator.pid"
+        (Path(target_dir) / ".medulla" / ename).unlink(missing_ok=True)
     _unlink(analyze_chunk)
     _unlink(target_cursor_file)
-    bridge = Path("/tmp/medulla-bridge")
+    bridge = _bridge_dir()
     if bridge.is_dir():
         try:
             for child in bridge.iterdir():
@@ -312,6 +328,13 @@ def run_pipeline(path: Path, dry_run: bool = False, verbose: bool = False, cli_v
     pipeline_dir = path.parent
     workdir = Path.cwd()
     vars_map = {k: str(v) for k, v in (data.get("vars") or {}).items()}
+    # Seed MEDULLA_TASK_ID into vars so metrics, resume, and templates see it.
+    # The id is resolved + published to env by cli.py at startup; persist it so
+    # an interrupted run resumes against the same isolated state file.
+    tid = os.environ.get("MEDULLA_TASK_ID", "").strip()
+    if tid:
+        vars_map["MEDULLA_TASK_ID"] = tid
+        save_var("MEDULLA_TASK_ID", tid)
     disk_vars = load_vars()
     vars_map.update(disk_vars)
     if cli_vars:

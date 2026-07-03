@@ -167,7 +167,11 @@ def eprint(msg: str) -> None:
 def init_log_file() -> None:
     global LOG_DIR, METRICS_PATH
     start_ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    LOG_DIR = Path(".medulla") / "logs" / start_ts
+    tid = os.environ.get("MEDULLA_TASK_ID", "").strip()
+    # Per-run suffix so parallel runs starting in the same second don't
+    # collide on metrics.jsonl / round logs.
+    suffix = f"-{tid}" if tid else ""
+    LOG_DIR = Path(".medulla") / "logs" / f"{start_ts}{suffix}"
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     METRICS_PATH = LOG_DIR / "metrics.jsonl"
     set_log_target(LOG_DIR / "round_000_boot.log")
