@@ -31,3 +31,5 @@ opencode.json
 
 # Claude local settings (машина-специфично)
 .claude/settings.local.json
+.medulla/medulla
+.medulla/scripts

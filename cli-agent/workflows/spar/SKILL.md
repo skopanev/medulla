@@ -35,26 +35,30 @@ Cover:
   the panel can attack it.
 - **The stuck point.** Where your reasoning runs out, what data
   you don't have, what you genuinely cannot decide alone.
-- **Files in the repo (use them).** The panel runs as full agents —
-  claude-code, codex, opencode — each with file-read tools and the
-  project workspace as their cwd (the panel runs in Docker: paths
-  outside the workspace are NOT visible to it). Files matter not
-  just for the *answer* but for the *context the panel needs to
-  answer well*: the code the question is about, strategy or
-  architecture docs, prior decisions, design notes, README files.
-  **Instruct the panel to read what's relevant** — be concrete about
-  file paths, line ranges, grep patterns. Don't paste large snippets
-  into the prompt when you can point at the source; pasting wastes
-  tokens the panel could spend reasoning.
-- **Framing.** Pick what fits:
+- **Files in the repo (point, don't paste).** The panel runs as full
+  agents with file-read and search tools. Point them at files and
+  directories — "look at `src/payments/`, the deposit handler, the
+  infra config for staging" — and let them dig. Don't paste specific
+  lines or snippets; that wastes tokens and anchors them on what you
+  think matters. Give direction, not extracts.
+- **Sibling repos (mount them read-only).** If the question involves
+  code outside the current workspace: `--mount ../folder1 [--mount ../folder2] ...`
+  Point the panel at them in the prompt — they can't search what
+  isn't mounted.
+- **Framing.** Give the situation, not just your solution. Your ideas
+  belong in the brief — but as options to consider, not as the only
+  path. Leave room for the panel to say "you're solving the wrong
+  problem" or "here's an option you didn't consider." If you hand
+  them a fully-formed plan, they'll critique the plan instead of
+  questioning whether it's the right plan. If you do pick a format,
+  these are starting points, not a menu:
    - Sparring with verdicts (COMMIT / DRAW / INSUFFICIENT) for
      binary or near-binary calls with stakes.
    - Multiple-lens roleplay (assign each panelist a distinct role —
      skeptic, devil's advocate, operator, contrarian) for relational,
      organizational, or judgment calls.
    - Red-team for plans about to execute.
-   - Whatever else suits the situation. These are starting points,
-     not a menu.
+   - Whatever else suits the situation.
 - **Demands.** Depth, dissent, the strongest counter, the blind
   spot you're least likely to see. Forbid sycophancy. Mark cited
   facts `(R)` for confident recall, `(G)` for guess. Cap each
