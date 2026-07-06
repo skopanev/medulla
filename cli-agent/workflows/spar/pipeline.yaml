@@ -13,7 +13,7 @@
 # Panel composition lives in the `panel` stage list: one
 # "slug|executor|model|effort" line per panelist (model and effort optional),
 # dispatched by scripts/panelist.sh (CLI flags mirror medulla/executor.py).
-# effort sets reasoning depth: opencode -> opencode.json reasoningEffort,
+# effort sets reasoning depth: opencode -> OPENCODE_CONFIG_CONTENT reasoningEffort,
 # codex -> -c model_reasoning_effort. The panelist prompt is assembled by panelist.sh:
 # prompts/spar.md preamble + question.md + the output-file contract.
 #

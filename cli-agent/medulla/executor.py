@@ -199,17 +199,19 @@ def run_shell(command: str, cwd: Path, dry_run: bool, timeout_sec: int, signal_c
     return run_command([shell, "-lc", command], cwd, timeout_sec, signal_cb=signal_cb, executor_hint="shell")
 
 
-def _ensure_opencode_permissions(cwd: Path, model: str | None = None, effort: str | None = None, timeout_ms: int = 3600000) -> None:
-    """Write opencode.json with permission=allow if not already present.
+def _set_opencode_config_env(model: str | None = None, effort: str | None = None, timeout_ms: int = 3600000) -> None:
+    """Set OPENCODE_CONFIG_CONTENT so headless `opencode run` gets permission=allow.
+
+    Delivered via env (opencode's OPENCODE_CONFIG_CONTENT) rather than an
+    opencode.json in the project tree — the on-disk file used to linger after
+    every run (gitignored, but physically present) and got stale-reused across
+    runs. The env layers on top of any real project config without touching it.
 
     When `effort` is set and `model` is a provider/model id (e.g.
     "zai-coding-plan/glm-5.2"), bind reasoningEffort for that model so the
     headless `opencode run` invocation reasons at the requested depth.
     `timeout_ms` sets the provider request timeout (default 5m is too short).
     """
-    cfg = cwd / "opencode.json"
-    if cfg.exists():
-        return
     import json
     data: dict = {"$schema": "https://opencode.ai/config.json", "permission": "allow"}
     if model and "/" in model:
@@ -220,7 +222,7 @@ def _ensure_opencode_permissions(cwd: Path, model: str | None = None, effort: st
         if effort:
             pblock["models"] = {model_id: {"options": {"reasoningEffort": effort}}}
         data["provider"] = {provider: pblock}
-    cfg.write_text(json.dumps(data) + "\n", encoding="utf-8")
+    os.environ["OPENCODE_CONFIG_CONTENT"] = json.dumps(data)
 
 
 def run_agent(executor: str, model: str | None, prompt: str, cwd: Path, dry_run: bool, timeout_sec: int, signal_cb=None, effort: str | None = None) -> tuple[str, int, bool]:
@@ -256,7 +258,7 @@ def run_agent(executor: str, model: str | None, prompt: str, cwd: Path, dry_run:
         cmd += [f"Execute. {prompt_ref}"]
     elif executor == "opencode":
         # Ensure opencode config allows all permissions (needed inside Docker)
-        _ensure_opencode_permissions(cwd, model, effort, inner_ms)
+        _set_opencode_config_env(model, effort, inner_ms)
         cmd = ["opencode", "run", "--agent", "build"]
         if model:
             cmd += ["-m", model]

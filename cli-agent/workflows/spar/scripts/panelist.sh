@@ -59,21 +59,24 @@ INNER_MS=$((INNER_S * 1000))
 rc=1
 case "$EXECUTOR" in
   opencode)
-    if [ ! -f opencode.json ]; then
-      if [ "${MODEL#*/}" != "$MODEL" ]; then
-        # provider-level timeout=60m (default is 5m and kills long reasoning);
-        # reasoningEffort per-model only when requested.
-        if [ -n "$EFFORT" ]; then
-          MOPT="\"options\":{\"reasoningEffort\":\"$EFFORT\"}"
-        else
-          MOPT="\"options\":{}"
-        fi
-        printf '{"$schema":"https://opencode.ai/config.json","permission":"allow","provider":{"%s":{"options":{"timeout":%s},"models":{"%s":{%s}}}}}\n' \
-          "${MODEL%%/*}" "$INNER_MS" "${MODEL#*/}" "$MOPT" > opencode.json
+    # Deliver permission=allow + provider timeout (+ per-model effort) via env,
+    # NOT an opencode.json in the project tree: the on-disk file used to linger
+    # after runs (gitignored but physically present) and got stale-reused. The
+    # env layers on top of any real project config without touching it.
+    if [ "${MODEL#*/}" != "$MODEL" ]; then
+      # provider-level timeout=60m (default is 5m and kills long reasoning);
+      # reasoningEffort per-model only when requested.
+      if [ -n "$EFFORT" ]; then
+        MOPT="\"options\":{\"reasoningEffort\":\"$EFFORT\"}"
       else
-        printf '{"$schema":"https://opencode.ai/config.json","permission":"allow"}\n' > opencode.json
+        MOPT="\"options\":{}"
       fi
+      OPENCODE_CONFIG_CONTENT=$(printf '{"$schema":"https://opencode.ai/config.json","permission":"allow","provider":{"%s":{"options":{"timeout":%s},"models":{"%s":{%s}}}}}' \
+        "${MODEL%%/*}" "$INNER_MS" "${MODEL#*/}" "$MOPT")
+    else
+      OPENCODE_CONFIG_CONTENT='{"$schema":"https://opencode.ai/config.json","permission":"allow"}'
     fi
+    export OPENCODE_CONFIG_CONTENT
     opencode run --agent build ${MODEL:+-m "$MODEL"} "Execute." "@$PROMPT_FILE" >"$LOG_FILE" 2>&1
     rc=$?
     ;;
