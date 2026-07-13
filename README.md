@@ -69,6 +69,7 @@ nodes:
       You are panelist {{input.slug}} ({{input_index}}/{{input_count}}).
       Critique the plan: {{file:plan.md}}
       Write your verdict to reviews/{{input.slug}}.md
+    post: 'test -s "reviews/{{input.slug}}.md"'   # verdict = artifact exists, not agent mood
     on_signal: {__done__: apply}
 
   apply:
@@ -116,6 +117,23 @@ Action (exactly one of `shell` / `agent`):
 | `max_attempts` | attempts per runner, default 1. Primary gets N, then fallback gets N. Retryable outcomes: non-zero exit, timeout (recorded as rc 124), and **silence** — an agent body exiting 0 with no known signal (the most common agent flake: the work happened, the tag didn't). Silence retries on the **primary only** and never triggers fallback (another model drops the tag just as often; blind fallback duplicates side effects); after all attempts it classifies as `__default__`. Shell silence is deterministic and is not retried |
 | `fallback` | alternate agent action after primary attempts are exhausted. Agent-only (a fallback for shell is meaningless); a fallback has no fallback |
 | `ignore_exit_code` | rc != 0 doesn't classify the body as failed; outcome comes from signals. **Forbidden in pool nodes** — `min_success` already owns that role |
+
+Hooks around the body — `pre` / `post` (shell-only; rendered like everything else). These are not lifecycle hooks but **deterministic voices in the signal channel** — the only way to put shell before/after an agent body (you can't append a line to a prompt):
+
+| `pre` — once per node run, before the body renders | Effect |
+|---|---|
+| emits a routing signal | body and `post` are **skipped**, the signal routes (guard: "already done / not needed") |
+| emits `var` | applied **before** the body renders — env prep, the prompt sees fresh vars |
+| exits non-zero | `__failed__` (preparation broke), body never runs |
+| exits 0, silent | normal path |
+
+| `post` — after **every** attempt, before signal resolution; sees `MEDULLA_BODY_RC` / `MEDULLA_BODY_SIGNAL` | Effect |
+|---|---|
+| exits non-zero | the **attempt failed** → body+post retry within `max_attempts`, then fallback ("try until the artifact exists": `post: test -s out.md`) |
+| exits 0 + emits a signal | **overrides** the body's signal (the agent said planned, the plan is garbage → route needs_rework) |
+| exits 0, silent | the body's outcome stands |
+
+In pools both run per input: a `pre` guard skips already-done inputs (manifest `ok: true` with the guard's signal); a `post` check is the truth channel for agent inputs — CLIs exit 0 even when the model did nothing, so without `post` a pool's `min_success` counts air.
 
 Pool (presence of `inputs` turns the action into a pool):
 
@@ -316,4 +334,4 @@ The v1 engine is removed; this table is the dictionary for porting old pipelines
 
 ### Reserved (designed, not implemented — in priority order)
 
-`backoff` / `retry_delay` (retry storms hit provider rate limits; first in line) · `stall_timeout` (no-stdout watchdog for hung agents; partially covered today by per-harness flags — codex `stream_idle_timeout_ms`, agy `--print-timeout`) · manifest attempt states (`claimed|started|completed`) + per-node resume policy `rerun|skip|probe` (exactly-once is impossible; make duplicate side effects detectable) · `check:` (post-condition on an action, verdict replaces rc, retried with the body) · `resume:` (continue a node's session — phase 2) · `cancel_rest` (race joins) · `on_input_fail: abort` (fail-fast pools) · `format:` on sources (override sniffing) · `finally` (best-effort only, if reality ever demands it) · agent-block defaults.
+`backoff` / `retry_delay` (retry storms hit provider rate limits; first in line) · `stall_timeout` (no-stdout watchdog for hung agents; partially covered today by per-harness flags — codex `stream_idle_timeout_ms`, agy `--print-timeout`) · manifest attempt states (`claimed|started|completed`) + per-node resume policy `rerun|skip|probe` (exactly-once is impossible; make duplicate side effects detectable) · `resume:` (continue a node's session — phase 2) · `cancel_rest` (race joins) · `on_input_fail: abort` (fail-fast pools) · `format:` on sources (override sniffing) · `finally` (best-effort only, if reality ever demands it) · agent-block defaults.
