@@ -113,7 +113,7 @@ Action (exactly one of `shell` / `agent`):
 | `agent` | `{harness, model, effort, args}` — one entity, one block. Scalar shortcut: `agent: codex` ≡ `agent: {harness: codex}`. `args` is a raw CLI escape hatch — non-portable across harnesses |
 | `prompt` | agent input (not config). Never quote signal syntax literally in prompts — describe it ("emit signal planned"); the engine delivers the syntax to the agent |
 | `timeout` | per **attempt**, seconds |
-| `max_attempts` | attempts per runner, default 1. Primary gets N, then fallback gets N |
+| `max_attempts` | attempts per runner, default 1. Primary gets N, then fallback gets N. Retryable outcomes: non-zero exit, timeout (recorded as rc 124), and **silence** — an agent body exiting 0 with no known signal (the most common agent flake: the work happened, the tag didn't). Silence retries on the **primary only** and never triggers fallback (another model drops the tag just as often; blind fallback duplicates side effects); after all attempts it classifies as `__default__`. Shell silence is deterministic and is not retried |
 | `fallback` | alternate agent action after primary attempts are exhausted. Agent-only (a fallback for shell is meaningless); a fallback has no fallback |
 | `ignore_exit_code` | rc != 0 doesn't classify the body as failed; outcome comes from signals. **Forbidden in pool nodes** — `min_success` already owns that role |
 
@@ -158,7 +158,7 @@ Terminal nodes (right side):
 | `__exit_ok__` | end the run, exit 0 |
 | `__exit_fail__` | end the run, exit 2; the routing signal's body becomes the error message |
 
-A known signal emitted before a non-zero exit wins over the exit code. Pool bodies' signals never route — they are recorded in the manifest (law of layers: inputs produce data, joins produce transitions). Bare `done`/`failed` on decision nodes are ordinary user signals with no special meaning. User nodes may not be named `__*__` or `on/off/yes/no/true/false` (YAML 1.1 boolean traps).
+Signals are read from **stdout only**; stderr goes verbatim to the attempt log (a traceback that happens to echo signal text must never route the graph). A known signal emitted before a non-zero exit wins over the exit code. Pool bodies' signals never route — they are recorded in the manifest (law of layers: inputs produce data, joins produce transitions). Bare `done`/`failed` on decision nodes are ordinary user signals with no special meaning. User nodes may not be named `__*__` or `on/off/yes/no/true/false` (YAML 1.1 boolean traps).
 
 ### Templates & environment
 
@@ -169,8 +169,9 @@ A known signal emitted before a non-zero exit wins over the exit code. Pool bodi
 | `{{input}}` | the input; objects render as compact JSON |
 | `{{input.a.b:-default}}` | dot-walk into object inputs. Missing field without a default = hard render error |
 | `{{input_index}}` (1-based), `{{input_count}}` | position / total |
+| `{{last.node}}`, `{{last.signal}}`, `{{last.message}}`, `{{last.rc}}` | outcome of the previously completed node — transient tokens (not vars: no persistence, no fold-law constraints). The bridge for agent-bodied handlers whose prompts can't read env |
 
-Render model: phase 1 — file inclusion; phase 2 — one simultaneous, **inert** pass of var/input substitution. **Files are code, values are data**: mustache inside included files resolves fully; mustache inside var/input *values* stays literal (injection-safe by construction). Every scalar field of an action is a template (that's why an ensemble is just a pool with per-input `harness`/`model`). A field rendering to an empty string counts as absent — for optional agent fields only; empty `shell`/`prompt`/`harness` is an error. Rendering happens **once per node run**, before attempt 1; retries reuse the same rendered text. A render error is an engine crash (`E_RENDER`), not a routable failure.
+Render model: phase 1 — file inclusion; phase 2 — one simultaneous, **inert** pass of var/input substitution. **Files are code, values are data**: mustache inside included files resolves fully; mustache inside var/input *values* stays literal (injection-safe by construction). Every scalar field of an action is a template (that's why an ensemble is just a pool with per-input `harness`/`model`). A field rendering to an empty string counts as absent — for optional agent fields only; empty `shell`/`prompt`/`harness` is an error. Rendering happens **once per node run**, before attempt 1; retries reuse the same rendered text. A render error on a decision node (phantom input) is an engine crash (`E_RENDER`) — the template itself is broken. A render error for **one pool input** fails that input only (manifest row `reason: render` with the template path and input index) — one malformed row of producer data must not kill the other inputs.
 
 Environment (data should flow to shell via env, templates are for slugs/paths — quoting-safe):
 
@@ -179,6 +180,8 @@ Environment (data should flow to shell via env, templates are for slugs/paths �
 | `MEDULLA_INPUT` | the input as JSON |
 | `MEDULLA_INPUT_INDEX` / `MEDULLA_INPUT_COUNT` | position / total |
 | `MEDULLA_INPUT_<KEY>` | each flat scalar field of an object input, uppercased |
+| `MEDULLA_INPUT_KEY` / `MEDULLA_ATTEMPT_ID` | stable input identity `(index, hash)` / unique attempt id — the idempotency keys for bodies that mutate the outside world (branches, PRs, tickets) |
+| `MEDULLA_LAST_NODE` / `_SIGNAL` / `_MESSAGE` / `_RC` | outcome of the previously completed node, published before every transition; `MEDULLA_LAST_EVENT_JSON` carries the same as one JSON object. Timeout is recognizable as rc 124 |
 | `MEDULLA_MANIFEST_<NODE>` | path to a pool node's manifest (dashes → underscores) |
 | `MEDULLA_RUN_ID` / `MEDULLA_RUN_DIR` | run id (settable from outside for correlation; else generated) / this run's directory. Put artifacts in `$MEDULLA_RUN_DIR/artifacts/` |
 | `MEDULLA_TIMEOUT_S` | resolved step timeout, for CLIs that need to size their own |
@@ -198,7 +201,26 @@ Two failure classes. The test: *can it be fixed by changing data/prompts/retryin
 | 2 | workflow failure | the graph routed to `__exit_fail__` — fix the task/inputs |
 | 130 | interrupt | — |
 
-Crash codes: `E_VALIDATION` (schema/XOR/unknown target/boolean node names/bare keys in pool routing), `E_RENDER` (missing file, depth > 10, missing input field, empty required render), `E_DEADLINE` (pipeline timeout), `E_INPUTS` (source exited non-zero — a broken producer is not an empty queue), `E_INPUTS_LIMIT` (> 10k), `E_HARNESS`, `E_INTERNAL`.
+Crash codes: `E_VALIDATION` (schema/XOR/unknown target/boolean node names/bare keys in pool routing/defaults-inherited self-edges), `E_RENDER` (broken decision-node template: missing file, depth > 10, empty required render), `E_DEADLINE` (pipeline timeout), `E_INPUTS` (source exited non-zero — a broken producer is not an empty queue), `E_INPUTS_LIMIT` (> 10k), `E_HARNESS`, `E_INTERNAL`.
+
+`E_HARNESS` is razor-thin by design: **only** "harness binary missing / unresolvable". An agent process dying unexpectedly (OOM, segfault, API hiccup) is always a non-zero exit — class B, retryable. If that boundary drifts, transient flakes start crashing whole runs.
+
+#### Handling errors in the graph
+
+Handlers are **ordinary nodes routed before the terminal** — never a body on the terminal (`kill -9` makes exit hooks an illusion; a node has a timeout, attempts and its own log). The error payload arrives through the same channels as all data: `$MEDULLA_LAST_*` for shell, `{{last.*}}` for prompts. Global catch-all is three lines of `defaults`:
+
+```yaml
+defaults:
+  on_signal: {__failed__: notify, __default__: notify}   # root supervisor
+
+nodes:
+  notify:
+    shell: 'curl -s "$HOOK" -d "text=[medulla] $MEDULLA_LAST_NODE ($MEDULLA_LAST_SIGNAL): $MEDULLA_LAST_MESSAGE"'
+    timeout: 30
+    on_signal: {__default__: __exit_fail__, __failed__: __exit_fail__}   # own dunders explicit!
+```
+
+A node-level edge beats the defaults catch-all, which beats built-ins — a three-tier supervision chain. The validator rejects a defaults-inherited edge that points at its own node (`notify` failing into `notify` would loop); explicit self-loops remain legal (retry pattern). A pool's `__failed__` message is pre-aggregated: `"2/5 inputs ok (min_success=3); rc!=0 x2, timeout x1, render x0"` — the manifest has the rest. Class A is not catchable in the graph by definition: the graph itself is what's broken.
 
 The error **message is the body of the signal** that routed to `__exit_fail__` (engine facts carry their own: `__failed__` → rc/join stats, `__empty__` → "source returned 0 inputs", `__default__` → tail of stdout). Every run ends with an atomic `outcome.json`:
 
@@ -217,7 +239,7 @@ The error **message is the body of the signal** that routed to `__exit_fail__` (
 
 **Finish** — atomic `outcome.json`, exit 0/2; crashes write `outcome.json` with the `E_*` code and exit 1; SIGINT → best-effort outcome, exit 130.
 
-**Resume** — pick the latest run without `outcome.json` (or `--run <dir>`): reload the **snapshot** config (a run's config is immutable), vars, journal position; an interrupted pool continues from the manifest done-mask (input identity = `(index, hash)`; sources are never re-executed on resume); an interrupted decision node re-runs whole (body idempotence is the author's concern). The deadline is fresh per invocation.
+**Resume** — pick the latest run without `outcome.json` or with `outcome: interrupted` (or `--run <dir>`): reload the **snapshot** config (a run's config is immutable), vars, journal position; an interrupted pool continues from the manifest done-mask (input identity = `(index, hash)`; sources are never re-executed on resume); an interrupted decision node re-runs whole (body idempotence is the author's concern). The deadline is fresh per invocation.
 
 ### Layout
 
@@ -261,6 +283,14 @@ Retention: on start, keep the newest `keep_runs` finished runs; directories with
 - **Heterogeneous pool**: inputs carry `role`/`prompt` fields; the node prompt is the template (code, vars resolve), input fragments are inserted inert.
 - **Entry cleanup** (crash-only): there is no `finally`; exit hooks are an illusion under `kill -9`. Clean stale state idempotently at the start of the node/run that needs it clean.
 - **Parallel tickets**: the engine guarantees vars isolation; file/git isolation is the body's job (`git worktree` per input) and disjointness is the producer script's contract.
+- **DLQ (repair node)**: failed pool inputs are structured data — re-enqueue only them, never the whole pool:
+  ```yaml
+  retry-failed:
+    inputs: {shell: "jq -c 'select(.ok|not) | .input' $MEDULLA_MANIFEST_APPLY"}
+    max_parallel: 2
+    shell: 'bash scripts/fix_one.sh "$MEDULLA_INPUT_ID"'
+    on_signal: {__done__: report, __empty__: report}
+  ```
 
 ### Migrating from v1
 
@@ -284,6 +314,6 @@ The v1 engine is removed; this table is the dictionary for porting old pipelines
 | gemini executor | removed (use `agy`) |
 | exit codes 0/1/2/3 ad-hoc | 0 = ok, 1 = engine crash, 2 = workflow fail, 130 = interrupt |
 
-### Reserved (designed, not implemented)
+### Reserved (designed, not implemented — in priority order)
 
-`check:` (post-condition on an action, verdict replaces rc, retried with the body) · `resume:` (continue a node's session — phase 2) · `cancel_rest` (race joins) · `on_input_fail: abort` (fail-fast pools) · `format:` on sources (override sniffing) · `finally` (best-effort only, if reality ever demands it) · agent-block defaults.
+`backoff` / `retry_delay` (retry storms hit provider rate limits; first in line) · `stall_timeout` (no-stdout watchdog for hung agents; partially covered today by per-harness flags — codex `stream_idle_timeout_ms`, agy `--print-timeout`) · manifest attempt states (`claimed|started|completed`) + per-node resume policy `rerun|skip|probe` (exactly-once is impossible; make duplicate side effects detectable) · `check:` (post-condition on an action, verdict replaces rc, retried with the body) · `resume:` (continue a node's session — phase 2) · `cancel_rest` (race joins) · `on_input_fail: abort` (fail-fast pools) · `format:` on sources (override sniffing) · `finally` (best-effort only, if reality ever demands it) · agent-block defaults.
