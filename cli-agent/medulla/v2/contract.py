@@ -94,8 +94,8 @@ def _parse_action(raw: dict, where: str, allow_fallback: bool = True) -> Action:
         raise _err(f"{where}: exactly one of 'shell' / 'agent' is required")
     if has_shell and "prompt" in raw:
         raise _err(f"{where}: 'prompt' belongs to agent actions only")
-    if has_shell and not isinstance(raw["shell"], str):
-        raise _err(f"{where}: shell must be a string")
+    if has_shell and (not isinstance(raw["shell"], str) or not raw["shell"].strip()):
+        raise _err(f"{where}: shell must be a non-empty string")
 
     fallback = None
     if raw.get("fallback") is not None:
@@ -137,16 +137,14 @@ def _parse_inputs(raw, where: str) -> InputsSpec:
     if isinstance(raw, dict):
         if "shell" not in raw or not isinstance(raw["shell"], str):
             raise _err(f"{where}: inputs source must be {{shell: \"cmd\"}}")
-        unknown = set(raw) - {"shell", "timeout", "format"}
+        if "format" in raw:
+            raise _err(f"{where}: 'format' is reserved and not implemented yet — sniffing decides")
+        unknown = set(raw) - {"shell", "timeout"}
         if unknown:
             raise _err(f"{where}: unknown inputs fields: {sorted(unknown)}")
-        fmt = raw.get("format")
-        if fmt is not None and fmt not in ("lines", "jsonl", "json_array"):
-            raise _err(f"{where}: format must be lines|jsonl|json_array")
         return InputsSpec(
             shell=raw["shell"],
             shell_timeout=_opt_int(raw.get("timeout"), f"{where}: inputs.timeout") or DEFAULT_SOURCE_TIMEOUT,
-            format=fmt,
         )
     if isinstance(raw, str):
         raise _err(
@@ -276,6 +274,8 @@ def load_pipeline(path: Path) -> Pipeline:
             raise _err(f"defaults.on_signal: keys and targets must be strings ({sig!r})")
         if sig in CHANNEL_SIGNALS:
             raise _err(f"defaults.on_signal: '{sig}' is a channel signal and never routes")
+        if DUNDER_RE.match(sig) and sig not in ENGINE_FACTS:
+            raise _err(f"defaults.on_signal: unknown engine signal '{sig}'")
     d_ignore = defaults_raw.get("ignore_exit_code")
     if d_ignore is not None and not isinstance(d_ignore, bool):
         raise _err("defaults.ignore_exit_code must be a boolean")

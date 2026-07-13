@@ -62,7 +62,6 @@ class InputsSpec:
     data: list | None = None            # YAML list = data
     shell: str | None = None            # {shell: cmd} = source
     shell_timeout: int = DEFAULT_SOURCE_TIMEOUT
-    format: str | None = None           # reserved: lines|jsonl|json_array
 
 
 @dataclass

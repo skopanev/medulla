@@ -4,6 +4,7 @@ Pools land in part 3; agent adapters in part 5; pre/post hooks in part 2.
 """
 from __future__ import annotations
 
+import json
 import sys
 import time
 from pathlib import Path
@@ -15,7 +16,7 @@ from .errors import (
     EngineCrash, E_DEADLINE, E_HARNESS, E_INTERNAL, E_RENDER, E_VALIDATION,
 )
 from .model import (
-    CHANNEL_SIGNALS, EXIT_FAIL, EXIT_OK, Pipeline, Node, Action,
+    CHANNEL_SIGNALS, ENGINE_FACTS, EXIT_FAIL, EXIT_OK, Pipeline, Node, Action,
     SIG_DEFAULT, SIG_FAILED, TERMINALS,
 )
 from .procrun import run as proc_run
@@ -54,14 +55,16 @@ class Engine:
 
     def _check_deadline(self) -> None:
         rem = self._remaining()
-        if rem is not None and rem <= 2:
+        if rem is not None and rem <= 0:
             raise EngineCrash(E_DEADLINE, f"pipeline timeout ({self.p.timeout}s) exhausted")
 
     def _clamp(self, timeout_s: int) -> float:
+        """Clamp a child timeout to the remaining run budget — a fast child under a
+        small remaining budget must still get its chance (contract: clamp, not crash)."""
         rem = self._remaining()
         if rem is None:
             return float(timeout_s)
-        if rem <= 2:
+        if rem <= 0:
             raise EngineCrash(E_DEADLINE, f"pipeline timeout ({self.p.timeout}s) exhausted")
         return min(float(timeout_s), rem)
 
@@ -75,14 +78,18 @@ class Engine:
             env["MEDULLA_LAST_SIGNAL"] = str(self.last.get("signal", ""))
             env["MEDULLA_LAST_MESSAGE"] = str(self.last.get("message", ""))
             env["MEDULLA_LAST_RC"] = str(self.last.get("rc", ""))
+            env["MEDULLA_LAST_EVENT_JSON"] = json.dumps(self.last, ensure_ascii=False)
         return env
 
     # ── signals from captured stdout (stdout only — stderr never routes) ──
     def _scan_stdout(self, stdout: str, node: Node, apply_state: bool):
         """Returns (first_known_signal, its_body). Channel signals: var applies only
         when apply_state=True (concluding attempt, fold law); update logs on that
-        pass only, so the peek scan doesn't duplicate lines."""
-        known = self.p.known_signals(node) - set(CHANNEL_SIGNALS)
+        pass only, so the peek scan doesn't duplicate lines.
+
+        Engine facts are excluded: a body printing <signal:__failed__> must never
+        route — dunders are the engine's voice, not the body's (namespace law)."""
+        known = self.p.known_signals(node) - set(CHANNEL_SIGNALS) - set(ENGINE_FACTS)
         first_sig, first_body = None, ""
         pending_vars: dict[str, str] = {}
         for name, attrs, body in extract_signals(stdout):
@@ -114,8 +121,9 @@ class Engine:
         """Returns (outcome_signal, message, stats)."""
         action = node.action
         if action.kind != "shell":
+            # E_HARNESS is razor-thin (binary missing only) — not-implemented is internal
             raise EngineCrash(
-                E_HARNESS,
+                E_INTERNAL,
                 "agent adapters land in part 5 of the build — use shell bodies for now",
                 node=node.name,
             )
@@ -125,6 +133,9 @@ class Engine:
             rendered = render(action.shell, self.p.dir, self.vars, last=self.last)
         except RenderError as exc:
             raise EngineCrash(E_RENDER, str(exc), node=node.name)
+        if not rendered.strip():
+            raise EngineCrash(E_RENDER, "shell rendered empty (broken template or empty field)",
+                              node=node.name)
         (step_dir / "body.sh").write_text(rendered, encoding="utf-8")
 
         max_attempts = self.p.action_max_attempts(action)
@@ -139,9 +150,12 @@ class Engine:
             total_attempts += 1
             self._check_deadline()
             log_path = step_dir / f"attempt-{total_attempts}-shell.txt"
+            effective_timeout = self._clamp(timeout_s)
             result = proc_run(
-                rendered, self.workdir, self._clamp(timeout_s),
-                extra_env=self._base_env(), log_path=log_path,
+                rendered, self.workdir, effective_timeout,
+                extra_env={**self._base_env(),
+                           "MEDULLA_TIMEOUT_S": str(int(effective_timeout))},
+                log_path=log_path,
             )
             # signals from a not-yet-final attempt must not mutate state:
             # peek first, apply vars only if this attempt concludes the node

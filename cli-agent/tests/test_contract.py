@@ -247,6 +247,28 @@ nodes:
     assert p.defaults.on_signal["__failed__"] == "notify"
 
 
+def test_empty_shell_rejected(tmp_path):
+    assert "non-empty" in load_err(tmp_path, MINIMAL.replace('shell: "true"', 'shell: ""'))
+
+
+def test_defaults_unknown_dunder_rejected(tmp_path):
+    assert "unknown engine signal" in load_err(
+        tmp_path, MINIMAL + "\ndefaults:\n  on_signal: {__bogus__: __exit_ok__}\n")
+
+
+def test_inputs_format_reserved(tmp_path):
+    text = """
+version: "2"
+start: a
+nodes:
+  a:
+    inputs: {shell: "echo x", format: lines}
+    shell: "true"
+    on_signal: {__done__: __exit_ok__}
+"""
+    assert "reserved" in load_err(tmp_path, text)
+
+
 def test_normalization(tmp_path):
     text = """
 version: "2"
