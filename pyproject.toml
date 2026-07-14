@@ -30,5 +30,5 @@ packages = [
 "medulla.pipelines" = "cli-agent/pipelines"
 
 [tool.setuptools.package-data]
-"medulla.scripts" = ["*.py", "*.sh"]
+"medulla.scripts" = ["*.py", "*.sh", "Dockerfile.default"]
 "medulla.pipelines" = ["**/*"]

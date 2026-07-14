@@ -122,10 +122,9 @@ def resolve_dockerfile(workflow: str | None, cli_vars: dict) -> Path:
     vars_map = data.get("vars") or {}
     df = vars_map.get("DOCKERFILE")
     if not df:
-        raise SystemExit(
-            f"error: vars.DOCKERFILE not set in {pipeline_yaml} "
-            f"(and no --var DOCKERFILE=... passed)"
-        )
+        # no vars.DOCKERFILE = the packaged default image (all four harnesses):
+        # pipelines that don't care share one build; declare the var to diverge
+        return SCRIPT_DIR / "Dockerfile.default"
     p = Path(df)
     return p if p.is_absolute() else (workflow_dir / p)
 
@@ -138,7 +137,8 @@ def image_tag_for(workflow: str, dockerfile: Path) -> str:
     rebuild without a manual --build (a new hash is an absent image)."""
     import hashlib
     digest = hashlib.sha256(dockerfile.read_bytes()).hexdigest()[:12]
-    return f"medulla-{Path(workflow).name}:{digest}"
+    name = "default" if dockerfile == SCRIPT_DIR / "Dockerfile.default" else Path(workflow).name
+    return f"medulla-{name}:{digest}"
 
 
 def ensure_image(image, build, workflow, cli_vars, dockerfile=None):

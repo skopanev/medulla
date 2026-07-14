@@ -17,8 +17,6 @@ version: "2"
 start: prepare
 timeout: 3600
 
-vars:
-  DOCKERFILE: Dockerfile   # scripts/docker.py resolves the image from this
 
 defaults:
   timeout: 1800
