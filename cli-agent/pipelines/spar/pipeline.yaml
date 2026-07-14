@@ -17,6 +17,9 @@ version: "2"
 start: prepare
 timeout: 3600
 
+vars:
+  DOCKERFILE: Dockerfile   # scripts/docker.py resolves the image from this
+
 defaults:
   timeout: 1800
 
@@ -75,10 +78,11 @@ nodes:
   synthesize:
     shell: |
       out="$ROUND_DIR/synthesized.md"
-      total=$(jq -s length "$MEDULLA_MANIFEST_PANEL")
-      ok=$(jq -s 'map(select(.ok)) | length' "$MEDULLA_MANIFEST_PANEL")
+      rows=$(jq -s 'group_by(.key) | map(.[-1])' "$MEDULLA_MANIFEST_PANEL")   # resume appends: latest row per input wins
+      total=$(echo "$rows" | jq length)
+      ok=$(echo "$rows" | jq 'map(select(.ok)) | length')
       : > "$out"
-      for slug in $(jq -s -r 'map(select(.ok) | .input.slug) | .[]' "$MEDULLA_MANIFEST_PANEL"); do
+      for slug in $(echo "$rows" | jq -r 'map(select(.ok) | .input.slug) | .[]'); do
         f="$ROUND_DIR/$slug.md"
         [ -f "$f" ] || continue
         { echo "# $slug"; echo; cat "$f"; echo; echo "---"; echo; } >> "$out"

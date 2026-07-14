@@ -40,10 +40,11 @@ SIGNAL_PROTOCOL = """
 
 ## Signal protocol (engine-provided)
 
-To emit a signal named NAME, print this on its own line in your final message
-(replace NAME and the body; do not wrap it in backticks or quotes):
+To emit a signal named some-name, print this on its own line in your final
+message, replacing <name> with the signal name and the body with your message
+(no backticks, no quotes):
 
-<signal:NAME>short message</signal:NAME>
+<signal:<name>>short message</signal:</name>>
 
 Emit a signal only when the task tells you to. Print it as plain text in your
 answer — never via a shell command or a file.

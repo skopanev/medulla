@@ -362,7 +362,7 @@ def main():
     # Extract workflow for Dockerfile resolution
     workflow = None
     for j, a in enumerate(args):
-        if a in ("-w", "--workflow") and j + 1 < len(args):
+        if a in ("-w", "--workflow", "--pipeline") and j + 1 < len(args):
             workflow = args[j + 1]
             break
 

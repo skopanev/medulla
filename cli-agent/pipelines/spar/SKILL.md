@@ -64,15 +64,14 @@ Cover:
 
 Mechanical contract — invoke verbatim, substituting your built prompt
 for the heredoc body (quoted 'EOF' keeps `$(...)`, backticks and
-quotes in the prompt inert; `--stage prepare` is mandatory — it
-prevents a stale interrupted run from answering the previous question):
+quotes in the prompt inert):
 
     QUESTION="$(cat <<'EOF'
     <your prompt>
     EOF
     )"
-    medulla --docker -w .medulla/workflows/spar --stage prepare --var "QUESTION=$QUESTION" >&2
-    cat "$(ls -td .medulla/workflows/spar/runs/* | head -1)/synthesized.md"
+    medulla --docker -w .medulla/pipelines/spar --var "QUESTION=$QUESTION" >&2
+    cat "$(ls -td .medulla/pipelines/spar/runs/* | head -1)/artifacts/synthesized.md"
 
 The cat'd output is the panel's combined takes, separated by headers.
 A `WARNING: only N/4 panelists delivered` line means partial delivery —

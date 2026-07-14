@@ -27,9 +27,11 @@ def entry() -> int:
 
 
 def _find_docker_py() -> Path | None:
+    here = Path(__file__).resolve().parent
     candidates = [
         Path.cwd() / ".medulla" / "scripts" / "docker.py",
-        Path(__file__).resolve().parent.parent / "scripts" / "docker.py",
+        here.parent / "scripts" / "docker.py",   # source: cli-agent/scripts
+        here / "scripts" / "docker.py",          # installed: site-packages/medulla/scripts
     ]
     for c in candidates:
         if c.is_file():
