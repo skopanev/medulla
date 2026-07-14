@@ -87,11 +87,15 @@ def _opt_int(v, where: str, minimum: int = 1) -> int | None:
     return v
 
 
-def _parse_action(raw: dict, where: str, allow_fallback: bool = True) -> Action:
+def _parse_action(raw: dict, where: str, allow_fallback: bool = True,
+                  is_fallback: bool = False) -> Action:
     has_shell = "shell" in raw
     has_agent = "agent" in raw
     if has_shell == has_agent:
         raise _err(f"{where}: exactly one of 'shell' / 'agent' is required")
+    # a fallback may omit prompt (inherits the primary's rendered text)
+    if has_agent and not is_fallback and not isinstance(raw.get("prompt"), str):
+        raise _err(f"{where}: agent actions require 'prompt'")
     if has_shell and "prompt" in raw:
         raise _err(f"{where}: 'prompt' belongs to agent actions only")
     if has_shell and (not isinstance(raw["shell"], str) or not raw["shell"].strip()):
@@ -106,7 +110,8 @@ def _parse_action(raw: dict, where: str, allow_fallback: bool = True) -> Action:
         fb = raw["fallback"]
         if not isinstance(fb, dict):
             raise _err(f"{where}: fallback must be a mapping")
-        fb_action = _parse_action(fb, f"{where}.fallback", allow_fallback=False)
+        fb_action = _parse_action(fb, f"{where}.fallback", allow_fallback=False,
+                                  is_fallback=True)
         if fb_action.kind != "agent":
             raise _err(f"{where}: fallback must be an agent action")
         fallback = fb_action
@@ -265,7 +270,8 @@ def load_pipeline(path: Path) -> Pipeline:
         fb = defaults_raw["fallback"]
         if not isinstance(fb, dict):
             raise _err("defaults.fallback must be a mapping")
-        d_fallback = _parse_action(fb, "defaults.fallback", allow_fallback=False)
+        d_fallback = _parse_action(fb, "defaults.fallback", allow_fallback=False,
+                                   is_fallback=True)
         if d_fallback.kind != "agent":
             raise _err("defaults.fallback must be an agent action")
     d_on_signal = defaults_raw.get("on_signal") or {}

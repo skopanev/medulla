@@ -190,6 +190,7 @@ start: a
 nodes:
   a:
     agent: codex
+    prompt: "p"
     fallback:
       agent: opus
       fallback: {agent: sonnet}
@@ -277,6 +278,7 @@ timeout: 0
 nodes:
   a:
     agent: codex
+    prompt: "p"
     on_signal: {ok: __exit_ok__}
   b:
     inputs: {shell: "echo x", timeout: 5}

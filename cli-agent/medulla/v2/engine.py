@@ -40,6 +40,12 @@ def _tail(text: str, n: int = 400) -> str:
     return text[-n:] if len(text) > n else text
 
 
+def _timeout_env(seconds: float) -> str:
+    """Env representation of a clamped timeout: never "0" for a live budget —
+    an agent CLI sizing its own timeout from this must not read "no limit"."""
+    return str(max(1, int(round(seconds))))
+
+
 # ── structured signal scan (foundation for pool manifests) ──────────────────
 
 @dataclass
@@ -147,14 +153,15 @@ class Engine:
     def _known(self, node: Node) -> set[str]:
         return self.p.known_signals(node) - set(CHANNEL_SIGNALS) - set(ENGINE_FACTS)
 
-    def _render_or_crash(self, text: str, node: Node, what: str) -> str:
+    def _render_or_crash(self, text: str, node: Node, what: str, required: bool = True) -> str:
         """Decision-context render: any breakage is a pipeline bug -> E_RENDER.
+        required=False: an optional field rendering empty counts as absent (contract).
         Part-3 pools pass their own render_fn with fail-the-input semantics."""
         try:
             rendered = render(text, self.p.dir, self.vars, last=self.last)
         except RenderError as exc:
             raise EngineCrash(E_RENDER, f"{what}: {exc}", node=node.name)
-        if not rendered.strip():
+        if required and not rendered.strip():
             raise EngineCrash(E_RENDER, f"{what} rendered empty (broken template or empty field)",
                               node=node.name)
         return rendered
@@ -175,31 +182,43 @@ class Engine:
         apply_pre_vars,
         attempt_ns: str,
         known: set[str],
+        env_fn=None,
     ) -> AttemptsOutcome:
+        # env_fn: callable -> dict, the base env for hooks and bodies. Decision nodes
+        # default to self._base_env (pre vars land in self.vars and are picked up on
+        # the next call); part-3 pool workers pass their own (base + input ctx + local
+        # pre-vars overlay) so parallel inputs never touch shared engine state.
+        if env_fn is None:
+            env_fn = self._base_env
         action = node.action
 
+        pre_updates: list[str] = []
+        primary_tag = "shell" if action.kind == "shell" else action.agent.harness
         if node.pre is not None:
             pre_rendered = render_fn(node.pre, "pre")
             hook_timeout = self._clamp(HOOK_TIMEOUT_S)
-            pre_env = {**self._base_env(),
-                       "MEDULLA_TIMEOUT_S": str(int(hook_timeout)),
-                       "MEDULLA_HARNESS": "pre"}
+            pre_env = {**env_fn(),
+                       "MEDULLA_TIMEOUT_S": _timeout_env(hook_timeout),
+                       "MEDULLA_HARNESS": primary_tag}
             pre_res = proc_run(pre_rendered, self.workdir, hook_timeout,
                                extra_env=pre_env, log_path=step_dir / "pre.txt")
             pre_scan = scan_stdout(pre_res.stdout, known)
+            pre_updates = pre_scan.updates
+            # a known signal wins over rc — same grammar as everywhere else
+            if pre_scan.first_known is not None:
+                apply_pre_vars(pre_scan.vars)     # env prep applies before the guard routes
+                return AttemptsOutcome(           # guard: body and post are skipped
+                    signal=pre_scan.first_known, message=pre_scan.first_body,
+                    attempts=0, rc=pre_res.rc, guarded=True, updates=pre_updates,
+                )
             if pre_res.rc != 0:
                 return AttemptsOutcome(
                     signal=SIG_FAILED,
                     message=f"pre hook failed: rc={pre_res.rc}; stderr: {_tail(pre_res.stderr)}",
                     attempts=0, rc=pre_res.rc, timed_out=pre_res.timed_out,
-                    updates=pre_scan.updates,
+                    updates=pre_updates,
                 )
             apply_pre_vars(pre_scan.vars)   # env prep BEFORE the body renders
-            if pre_scan.first_known is not None:
-                return AttemptsOutcome(       # guard: body and post are skipped
-                    signal=pre_scan.first_known, message=pre_scan.first_body,
-                    attempts=0, rc=0, guarded=True, updates=pre_scan.updates,
-                )
 
         post_rendered = render_fn(node.post, "post") if node.post else None
 
@@ -207,11 +226,13 @@ class Engine:
         phase = "primary"
         fallback = self.p.action_fallback(action) if action.kind == "agent" else None
         fallback_used = False
-        harness_name: str | None = None
+        # contract: "primary gets N, then fallback gets N" — a fallback without its
+        # own max_attempts inherits the primary's effective budget
+        phase_budget = self.p.action_max_attempts(action)
 
-        body_cmd, prompt_text = self._prepare_body(current, node, step_dir, render_fn, phase)
-        if current.kind == "agent":
-            harness_name = current.agent.harness
+        body_cmd, prompt_text, agent_spec = self._prepare_body(
+            current, node, step_dir, render_fn, phase)
+        harness_name = agent_spec.harness if agent_spec else None
 
         attempt = 0
         total = 0
@@ -227,9 +248,9 @@ class Engine:
             self._check_deadline()
             eff = self._clamp(self.p.action_timeout(current))
             attempt_id = f"{attempt_ns}.{phase[0]}{attempt}"
-            tag = "shell" if current.kind == "shell" else current.agent.harness
-            env = {**self._base_env(),
-                   "MEDULLA_TIMEOUT_S": str(int(eff)),
+            tag = "shell" if current.kind == "shell" else agent_spec.harness
+            env = {**env_fn(),
+                   "MEDULLA_TIMEOUT_S": _timeout_env(eff),
                    "MEDULLA_ATTEMPT_ID": attempt_id,
                    "MEDULLA_HARNESS": tag}
 
@@ -238,17 +259,19 @@ class Engine:
 
             raw_text = result.stdout
             if current.kind == "agent":
-                raw_text = resolve_harness(current.agent).filter_stdout(raw_text)
+                raw_text = resolve_harness(agent_spec).filter_stdout(raw_text)
             body_scan = scan_stdout(raw_text, known)
 
             post_rc = post_signal = None
             post_scan = ScanResult()
             if post_rendered is not None:
+                hook_timeout = self._clamp(HOOK_TIMEOUT_S)
                 post_env = {**env,
+                            "MEDULLA_TIMEOUT_S": _timeout_env(hook_timeout),
                             "MEDULLA_BODY_RC": str(result.rc),
                             "MEDULLA_BODY_SIGNAL": body_scan.first_known or ""}
                 post_res = proc_run(post_rendered, self.workdir,
-                                    self._clamp(HOOK_TIMEOUT_S), extra_env=post_env,
+                                    hook_timeout, extra_env=post_env,
                                     log_path=step_dir / f"post-{total}.txt")
                 post_scan = scan_stdout(post_res.stdout, known)
                 post_rc, post_signal = post_res.rc, post_scan.first_known
@@ -261,7 +284,7 @@ class Engine:
             )
             move = next_move(
                 decision, kind=current.kind, phase=phase, attempt=attempt,
-                max_attempts=self.p.action_max_attempts(current),
+                max_attempts=phase_budget,
                 has_fallback=fallback is not None,
             )
 
@@ -274,15 +297,19 @@ class Engine:
                 phase = "fallback"
                 attempt = 0
                 fallback_used = True
-                harness_name = current.agent.harness
-                body_cmd, prompt_text = self._prepare_body(
+                if fallback.max_attempts is not None:
+                    phase_budget = fallback.max_attempts
+                body_cmd, prompt_text, agent_spec = self._prepare_body(
                     current, node, step_dir, render_fn, phase, inherited_prompt=prompt_text)
+                harness_name = agent_spec.harness if agent_spec else None
                 continue
 
-            # DONE — collect state from the concluding attempt only (fold law)
+            # DONE — state signals are collected from a ROUTED (successful) outcome
+            # only: a __default__ conclusion is a communication failure, its vars
+            # must not leak into whatever the graph does next (fold law)
             pending: dict[str, str] = {}
-            updates = body_scan.updates + post_scan.updates
-            if decision.verdict in (Verdict.ROUTE, Verdict.SILENT):
+            updates = pre_updates + body_scan.updates + post_scan.updates
+            if decision.verdict is Verdict.ROUTE:
                 pending = {**body_scan.vars, **post_scan.vars}   # post wins on conflict
 
             signal = move.signal
@@ -302,16 +329,29 @@ class Engine:
                 rc=result.rc, timed_out=result.timed_out,
                 fallback_used=fallback_used, concluding_phase=phase,
                 harness=harness_name,
-                model=current.agent.model if current.kind == "agent" else None,
+                model=agent_spec.model if agent_spec else None,
                 pending_vars=pending, updates=updates,
             )
 
     def _prepare_body(self, action: Action, node: Node, step_dir: Path,
                       render_fn, phase: str, inherited_prompt: str | None = None):
-        """Returns (command_for_procrun, rendered_prompt_text_or_None)."""
+        """Returns (command_for_procrun, rendered_prompt_text_or_None, rendered_AgentSpec_or_None).
+
+        Every scalar agent field is a template (contract: an ensemble is just a pool
+        with per-input harness/model). Optional fields rendering empty count as absent."""
         if action.kind == "shell":
-            return render_fn(action.shell, "shell"), None
-        adapter = resolve_harness(action.agent)
+            return render_fn(action.shell, "shell"), None, None
+
+        spec = action.agent
+        harness = render_fn(spec.harness, "agent.harness").strip()
+        model = render_fn(spec.model, "agent.model", required=False) if spec.model else None
+        effort = render_fn(spec.effort, "agent.effort", required=False) if spec.effort else None
+        args = [render_fn(a, "agent.args", required=False) or a for a in spec.args]
+        from .model import AgentSpec
+        rendered_spec = AgentSpec(harness=harness, model=model or None,
+                                  effort=effort or None, args=args)
+
+        adapter = resolve_harness(rendered_spec)
         if action.prompt is not None:
             prompt_text = render_fn(action.prompt, "prompt")
         elif inherited_prompt is not None:
@@ -320,12 +360,13 @@ class Engine:
             raise EngineCrash(E_RENDER, "agent action has no prompt", node=node.name)
         prompt_file = step_dir / ("prompt.md" if phase == "primary" else "prompt-fallback.md")
         prompt_file.write_text(prompt_text, encoding="utf-8")
-        return adapter.build_argv(action.agent, prompt_file), prompt_text
+        return adapter.build_argv(rendered_spec, prompt_file), prompt_text, rendered_spec
 
     # ── decision node: the seam + decision-node policy (fold law application) ──
     def _run_decision(self, node: Node, step_dir: Path, step_no: int):
         known = self._known(node)
-        render_fn = lambda text, what: self._render_or_crash(text, node, what)
+        render_fn = lambda text, what, required=True: self._render_or_crash(
+            text, node, what, required)
         outcome = self._run_attempts(
             node, step_dir, render_fn,
             apply_pre_vars=self._apply_vars,    # decision = max_parallel 1: vars apply live
@@ -333,10 +374,11 @@ class Engine:
         )
         for u in outcome.updates:
             log(f"update: {u}")
-        self._apply_vars(outcome.pending_vars)  # body/post vars: concluding attempt only
+        self._apply_vars(outcome.pending_vars)  # body/post vars: routed outcome only
         return outcome.signal, outcome.message, {
             "attempts": outcome.attempts, "rc": outcome.rc, "timed_out": outcome.timed_out,
             "fallback": outcome.fallback_used, "harness": outcome.harness,
+            "model": outcome.model,
         }
 
     # ── main loop ──
@@ -373,8 +415,8 @@ class Engine:
                 "step": step, "node": node.name, "kind": "decision",
                 "attempts": stats.get("attempts"), "rc": stats.get("rc"),
                 "timed_out": stats.get("timed_out"), "fallback": stats.get("fallback"),
-                "harness": stats.get("harness"), "signal": signal_name,
-                "next": target, "duration_s": duration,
+                "harness": stats.get("harness"), "model": stats.get("model"),
+                "signal": signal_name, "next": target, "duration_s": duration,
             })
             log(f"step {step} | {node.name} -> {signal_name} -> {target} ({duration}s)")
 

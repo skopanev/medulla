@@ -35,7 +35,7 @@ class FakeAdapter(HarnessAdapter):
     def build_argv(self, spec: AgentSpec, prompt_file: Path) -> list[str]:
         if not spec.model:
             raise EngineCrash(E_HARNESS, "fake harness: model must be a script path")
-        return ["bash", spec.model, str(prompt_file)]
+        return ["bash", spec.model, str(prompt_file), *spec.args]
 
 
 def resolve(spec: AgentSpec) -> HarnessAdapter:
