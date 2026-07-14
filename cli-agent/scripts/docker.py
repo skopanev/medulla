@@ -130,7 +130,18 @@ def resolve_dockerfile(workflow: str | None, cli_vars: dict) -> Path:
     return p if p.is_absolute() else (workflow_dir / p)
 
 
-def ensure_image(image, build, workflow, cli_vars):
+def image_tag_for(workflow: str, dockerfile: Path) -> str:
+    """Per-pipeline, content-addressed image tag: medulla-<name>:<sha of Dockerfile>.
+
+    Pipelines with different Dockerfiles must never share a tag (the first
+    builder would silently win), and editing a Dockerfile must trigger a
+    rebuild without a manual --build (a new hash is an absent image)."""
+    import hashlib
+    digest = hashlib.sha256(dockerfile.read_bytes()).hexdigest()[:12]
+    return f"medulla-{Path(workflow).name}:{digest}"
+
+
+def ensure_image(image, build, workflow, cli_vars, dockerfile=None):
     if not build:
         result = subprocess.run(
             ["docker", "image", "inspect", image],
@@ -140,7 +151,7 @@ def ensure_image(image, build, workflow, cli_vars):
             return 0
         print(f"image '{image}' not found, building...", file=sys.stderr)
 
-    dockerfile = resolve_dockerfile(workflow, cli_vars)
+    dockerfile = dockerfile or resolve_dockerfile(workflow, cli_vars)
     if not dockerfile.is_file():
         raise SystemExit(f"error: Dockerfile not found: {dockerfile}")
     context = Path.cwd()
@@ -327,7 +338,6 @@ def run_docker(image, volumes, args):
 
 
 def main():
-    image = os.environ.get("MEDULLA_IMAGE", DEFAULT_IMAGE)
     args = sys.argv[1:]
 
     build = "--build" in args
@@ -366,7 +376,21 @@ def main():
             workflow = args[j + 1]
             break
 
-    rc = ensure_image(image, build, workflow, cli_vars)
+    # Image resolution: MEDULLA_IMAGE env wins; otherwise the tag is derived
+    # per-pipeline from the Dockerfile's content, so pipelines never share a
+    # tag and a Dockerfile edit rebuilds automatically.
+    dockerfile = None
+    image = os.environ.get("MEDULLA_IMAGE")
+    if image is None:
+        if workflow:
+            dockerfile = resolve_dockerfile(workflow, cli_vars)
+            if not dockerfile.is_file():
+                raise SystemExit(f"error: Dockerfile not found: {dockerfile}")
+            image = image_tag_for(workflow, dockerfile)
+        else:
+            image = DEFAULT_IMAGE
+
+    rc = ensure_image(image, build, workflow, cli_vars, dockerfile=dockerfile)
     if rc != 0:
         return rc
 
