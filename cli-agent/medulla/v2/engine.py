@@ -461,6 +461,13 @@ class Engine:
             apply_pre_vars=self._apply_vars,    # decision = max_parallel 1: vars apply live
             attempt_ns=f"{step_no:03d}", known=known,
         )
+        if outcome.timed_out and (rem := self._remaining()) is not None and rem <= 0:
+            # killed by the exhausted RUN budget, not its own timeout: a __failed__
+            # here would be exit 2 (not resumable) — this is E_DEADLINE, same law
+            # as deadline-killed pool inputs
+            raise EngineCrash(E_DEADLINE,
+                              f"pipeline timeout ({self.p.timeout}s) exhausted during "
+                              f"node '{node.name}'", node=node.name)
         for u in outcome.updates:
             log(f"update: {u}")
         self._apply_vars(outcome.pending_vars)  # body/post vars: routed outcome only
@@ -473,7 +480,12 @@ class Engine:
     # ── pool machinery ────────────────────────────────────────────────────────
 
     def _materialize_inputs(self, node: Node, step_dir: Path) -> list:
-        """Snapshot inputs into steps/NNN-<node>/inputs.json (resume foundation)."""
+        """Snapshot inputs into steps/NNN-<node>/inputs.json (resume foundation).
+        An existing snapshot short-circuits everything: sources are NEVER
+        re-executed on resume (contract), and the caps/kind checks already passed."""
+        snapshot = step_dir / "inputs.json"
+        if snapshot.is_file():
+            return json.loads(snapshot.read_text(encoding="utf-8"))
         spec = node.pool.inputs
         if spec.data is not None:
             inputs = list(spec.data)
@@ -618,8 +630,19 @@ class Engine:
         pool_vars = dict(self.vars)                    # snapshot: workers never read live vars
         workers = min(total, pool.max_parallel or total)
         sequential = workers == 1
-        rows: list[dict] = []
         deadline_hit = False
+
+        # resume: seed the done-mask from existing rows — identity is (index, key),
+        # never index alone (a changed input at the same index must re-run)
+        old_rows = self.store.read_manifest(manifest_path)
+        done = {(r.get("index"), r.get("key")) for r in old_rows if r.get("ok")}
+        rows: list[dict] = list(old_rows)
+        pending_inputs = [
+            (i, v) for i, v in enumerate(inputs, start=1)
+            if (i, f"{i}:{_input_hash(v)}") not in done
+        ]
+        if old_rows:
+            log(f"pool resume: {len(done)} inputs done, {len(pending_inputs)} to run")
 
         def guarded_run(idx: int, value):
             if self._remaining() is not None and self._remaining() <= 0:
@@ -639,7 +662,7 @@ class Engine:
             return row
 
         if sequential:
-            for i, value in enumerate(inputs, start=1):
+            for i, value in pending_inputs:
                 row = guarded_run(i, value)
                 if row is None:
                     deadline_hit = True
@@ -651,7 +674,7 @@ class Engine:
             first_crash: EngineCrash | None = None
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool_exec:
                 futures = {pool_exec.submit(guarded_run, i, v): i
-                           for i, v in enumerate(inputs, start=1)}
+                           for i, v in pending_inputs}
                 for fut in concurrent.futures.as_completed(futures):
                     try:
                         row = fut.result()
@@ -675,18 +698,54 @@ class Engine:
                               f"({len(rows)}/{total} inputs concluded; manifest rows survive)",
                               node=node.name)
 
-        ok_count = sum(1 for r in rows if r["ok"])
+        # join over old + new rows, keyed by input identity: an input is ok iff
+        # ANY row matches its (index, key) with ok=true (stale/orphan rows inert)
+        ok_keys = {(r.get("index"), r.get("key")) for r in rows if r.get("ok")}
+        input_keys = [(i, f"{i}:{_input_hash(v)}") for i, v in enumerate(inputs, start=1)]
+        ok_count = sum(1 for ik in input_keys if ik in ok_keys)
         stats = {"inputs_total": total, "inputs_ok": ok_count, "min_success": min_success}
         if ok_count >= min_success:
             return SIG_DONE, f"{ok_count}/{total} inputs ok", stats
         by_class: dict[str, int] = {}
+        latest_by_key = {}
         for r in rows:
-            if not r["ok"]:
-                by_class[r["reason"]] = by_class.get(r["reason"], 0) + 1
+            latest_by_key[(r.get("index"), r.get("key"))] = r
+        for ik in input_keys:
+            if ik in ok_keys:
+                continue
+            row = latest_by_key.get(ik)
+            reason = row["reason"] if row else "missing"
+            by_class[reason] = by_class.get(reason, 0) + 1
         breakdown = ", ".join(f"{k} x{v}" for k, v in sorted(by_class.items()))
         ms_text = "all" if pool.min_success is None else str(min_success)
         return SIG_FAILED, (f"{ok_count}/{total} inputs ok (min_success={ms_text}); "
                             f"failures: {breakdown}"), stats
+
+    # ── resume: rebuild engine state from the journal ──
+    def replay(self) -> str:
+        """Returns the node to continue from. The journal logs COMPLETED steps only,
+        so the last row's `next` IS the interrupted/never-started node."""
+        rows = self.store.read_journal()
+        saved_vars = self.store.read_vars()
+        if saved_vars is not None:
+            self.vars = saved_vars
+        current = self.p.start
+        for row in rows:
+            current = row.get("next", current)
+            self.steps = row.get("step", self.steps)
+            self.last = {"node": row.get("node", ""), "signal": row.get("signal", ""),
+                         "message": row.get("message", ""), "rc": row.get("rc", "")}
+            if row.get("kind") == "pool":
+                mp = (self.store.steps_dir / f"{row['step']:03d}-{row['node']}" / "manifest.jsonl")
+                self.manifests[row["node"]] = mp
+        self.store.set_step_counter(self.steps)   # or step dirs silently collide from 001
+        if current in TERMINALS:
+            raise EngineCrash(E_VALIDATION,
+                              f"run already reached {current} — nothing to resume")
+        if current not in self.p.nodes:
+            raise EngineCrash(E_VALIDATION, f"resume: unknown node '{current}' in journal")
+        log(f"resume: {len(rows)} completed step(s), continuing at '{current}'")
+        return current
 
     # ── main loop ──
     def run(self, start_override: str | None = None) -> dict:
@@ -720,7 +779,8 @@ class Engine:
             self.last = {"node": node.name, "signal": signal_name, "message": message,
                          "rc": stats.get("rc", "")}
             journal_row = {"step": step, "node": node.name, "kind": journal_kind,
-                           "signal": signal_name, "next": target, "duration_s": duration}
+                           "signal": signal_name, "next": target, "duration_s": duration,
+                           "message": _tail(message, 400)}   # resume rebuilds last.message from this
             if journal_kind == "pool":
                 journal_row.update({k: stats.get(k) for k in
                                     ("inputs_total", "inputs_ok", "min_success")})
@@ -748,16 +808,72 @@ class Engine:
             current = target
 
 
+RESUMABLE_OUTCOMES = {"interrupted", "crashed"}   # + no outcome.json at all.
+# `crashed` is a documented deviation from the contract's letter: the #1 resume
+# trigger is E_DEADLINE, which is a caught crash; config-class crashes just
+# crash again identically (same immutable snapshot) — no harm, no data loss.
+
+
+def find_resumable(pipeline_dir: Path) -> Path | None:
+    runs_dir = pipeline_dir / "runs"
+    if not runs_dir.is_dir():
+        return None
+    for run in sorted((p for p in runs_dir.iterdir() if p.is_dir()),
+                      key=lambda p: p.name, reverse=True):   # ts prefix sorts by time
+        if not (run / "pipeline.yaml").is_file():
+            continue
+        outcome_path = run / "outcome.json"
+        if not outcome_path.is_file():
+            return run
+        try:
+            outcome = json.loads(outcome_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return run                          # torn outcome write = hard-killed mid-finish
+        if outcome.get("outcome") in RESUMABLE_OUTCOMES:
+            return run
+    return None
+
+
 def run_pipeline(
     pipeline_path: Path,
     cli_vars: dict[str, str] | None = None,
     start_override: str | None = None,
     workdir: Path | None = None,
+    resume_dir: Path | None = None,
 ) -> int:
     """Load, run, write outcome.json, return the process exit code (0/1/2/130)."""
+    from .rundir import RunLocked, prune_runs
     workdir = workdir or Path.cwd()
     store = None
     try:
+        if resume_dir is not None:
+            resume_dir = Path(resume_dir)
+            outcome_path = resume_dir / "outcome.json"
+            if outcome_path.is_file():
+                try:
+                    prior = json.loads(outcome_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    prior = {}
+                if prior.get("outcome") not in RESUMABLE_OUTCOMES:
+                    log(f"run {resume_dir.name} already finished "
+                        f"(outcome={prior.get('outcome', '?')}); "
+                        f"delete outcome.json to force a re-run")
+                    return 1
+                outcome_path.unlink()           # resuming: the run is live again
+            # the SNAPSHOT is the run's config — the live pipeline.yaml may have moved on
+            pipeline = load_pipeline(resume_dir / "pipeline.yaml")
+            pipeline.dir = Path(pipeline_path).parent if Path(pipeline_path).is_file() \
+                else Path(pipeline_path)
+            store = RunStore.open(resume_dir)
+            log(f"resume {store.run_id} -> {store.dir}")
+            engine = Engine(pipeline, store, workdir)
+            current = engine.replay()
+            outcome = engine.run(start_override=current)
+            outcome["duration_s"] = round(
+                (__import__("datetime").datetime.now() - store.started_at).total_seconds(), 2)
+            store.write_outcome(outcome)
+            return outcome["exit_code"]
+
         pipeline = load_pipeline(Path(pipeline_path))
         if cli_vars:
             from .contract import _validate_var_name
@@ -765,11 +881,15 @@ def run_pipeline(
                 _validate_var_name(k, "--var")
             pipeline.vars.update({k: str(v) for k, v in cli_vars.items()})
         store = RunStore.create(pipeline.dir, pipeline.path.read_text(encoding="utf-8"))
+        prune_runs(pipeline.dir, pipeline.keep_runs, pipeline.timeout)
         log(f"run {store.run_id} -> {store.dir}")
         engine = Engine(pipeline, store, workdir)
         outcome = engine.run(start_override)
         store.write_outcome(outcome)
         return outcome["exit_code"]
+    except RunLocked as locked:
+        log(str(locked))
+        return 1
     except EngineCrash as crash:
         outcome = {
             "outcome": "crashed", "exit_code": 1,
@@ -783,3 +903,6 @@ def run_pipeline(
         if store is not None:
             store.write_outcome({"outcome": "interrupted", "exit_code": 130})
         return 130
+    finally:
+        if store is not None:
+            store.close()                      # release the flock (same-process reruns/tests)
