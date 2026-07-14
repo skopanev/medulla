@@ -21,6 +21,7 @@ BOOLEAN_TRAP_NAMES = {"on", "off", "yes", "no", "true", "false"}
 DEFAULT_ACTION_TIMEOUT = 1800
 DEFAULT_PIPELINE_TIMEOUT = 86400
 DEFAULT_SOURCE_TIMEOUT = 60
+HOOK_TIMEOUT_S = 60                 # pre/post are one-line artifact tests, not workloads
 DEFAULT_KEEP_RUNS = 20
 INPUTS_HARD_CAP = 10_000
 TIMEOUT_RC = 124  # timeout is recognizable as rc 124 (contract)

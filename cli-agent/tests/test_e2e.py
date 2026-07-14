@@ -378,19 +378,22 @@ nodes:
     assert run_pipeline(path, workdir=work) == 0
 
 
-def test_agent_not_implemented_is_e_internal(tmp_path):
+def test_unwired_real_harness_is_e_internal(tmp_path):
+    # panel-held razor: E_HARNESS = binary missing/unresolvable ONLY;
+    # "not wired yet" is an engine limitation -> E_INTERNAL
     text = """
 version: "2"
 start: a
 nodes:
   a:
     agent: codex
+    prompt: "p"
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup_pipeline(tmp_path, text)
     assert run_pipeline(path, workdir=work) == 1
     _, outcome, _ = read_run(path.parent)
-    assert outcome["error"]["code"] == "E_INTERNAL"    # E_HARNESS is binary-missing only
+    assert outcome["error"]["code"] == "E_INTERNAL"
 
 
 def test_run_id_from_env(tmp_path, monkeypatch):

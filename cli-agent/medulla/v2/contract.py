@@ -208,8 +208,10 @@ def _parse_node(name: str, raw: dict, where: str) -> Node:
             )
 
     for hook in ("pre", "post"):
-        if raw.get(hook) is not None and not isinstance(raw[hook], str):
-            raise _err(f"{where}: {hook} must be a shell string")
+        if raw.get(hook) is not None and (
+            not isinstance(raw[hook], str) or not raw[hook].strip()
+        ):
+            raise _err(f"{where}: {hook} must be a non-empty shell string")
 
     return Node(name=name, action=action, pool=pool,
                 pre=raw.get("pre"), post=raw.get("post"), on_signal=dict(on_signal))
