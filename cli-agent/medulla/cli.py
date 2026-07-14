@@ -13,6 +13,17 @@ from pathlib import Path
 
 def entry() -> int:
     argv = sys.argv[1:]
+
+    # documented subcommands (before any flag parsing)
+    if argv and argv[0] == "init":
+        from .init import run_init
+        return run_init()
+    if argv and argv[0] == "install-skill":
+        from .install_skill import run_install_skill
+        return run_install_skill(argv[1:])
+    if argv and argv[0] == "upgrade":
+        return subprocess.call(["pipx", "upgrade", "medulla"])
+
     if "--docker" in argv:
         argv = [a for a in argv if a != "--docker"]
         docker_py = _find_docker_py()

@@ -1,8 +1,8 @@
-"""The v2 engine: boot -> node loop -> finish.
+"""The medulla engine: boot -> node loop -> finish.
 
-Part-2 scope: decision nodes with shell AND agent (fake harness) bodies, pre/post
-hook execution, full attempts+fallback via the _run_attempts seam (pools in part 3
-reuse it with their own render_fn). Pools land in part 3; real adapters in part 5.
+One machine: every node runs through the _run_attempts seam (pre -> guard ->
+body attempts primary->fallback with post per attempt); a node with inputs is
+a pool of seam calls, a node without is a pool of one phantom input.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .signals import extract_signals  # v1 utility, pure text extraction — kept
+from .signals import extract_signals
 from .classify import Move, Verdict, classify_attempt, next_move
 from .contract import load_pipeline, VAR_NAME_RE
 from .errors import (

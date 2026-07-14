@@ -257,3 +257,20 @@ def test_cli_usage_errors_exit_1(tmp_path):
         except SystemExit as exc:
             rc = exc.code
         assert rc == 1                                          # never argparse's 2
+
+
+def test_entry_dispatches_documented_subcommands(tmp_path, monkeypatch):
+    # final-panel blocker: init/install-skill/upgrade were documented but
+    # unreachable — the v2 shim lost the dispatch when v1 was deleted
+    import medulla.cli as shim
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["medulla", "init"])
+    assert shim.entry() == 0
+    assert (tmp_path / ".medulla").is_dir()
+
+    called = {}
+    monkeypatch.setattr("subprocess.call",
+                        lambda argv: (called.setdefault("argv", argv), 0)[1])
+    monkeypatch.setattr("sys.argv", ["medulla", "upgrade"])
+    assert shim.entry() == 0
+    assert called["argv"] == ["pipx", "upgrade", "medulla"]

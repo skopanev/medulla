@@ -5,7 +5,7 @@ Lays down only what medulla needs to run in-place and inside docker:
   .medulla/
     medulla/           symlink → the installed medulla package
     scripts/           symlink → the installed package's scripts/
-                       (docker.py, host-builder.sh, bridge-shim.sh, init-docker.sh)
+                       (docker.py, host-builder.sh, init-docker.sh)
     snapshot/          empty state dir for per-round artifacts
 
 The runtime is SYMLINKED to the active (global) install rather than copied,

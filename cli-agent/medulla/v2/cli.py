@@ -59,6 +59,16 @@ environment the engine provides to bodies and hooks (agents: read this, it is th
     MEDULLA_BODY_RC / MEDULLA_BODY_SIGNAL
                             the body attempt's exit code and its raw signal (if any)
 
+docker (host-side, handled by scripts/docker.py before the engine starts):
+    medulla --docker -w <dir> ...   run inside the pipeline's image
+    --build                         force a no-cache image rebuild
+    --mount <dir> / --mount-rw <dir>  extra mounts under /workspace/<name>
+    image resolution precedence:    MEDULLA_IMAGE env > --var IMAGE >
+                                    vars.IMAGE > build from (--var DOCKERFILE >
+                                    vars.DOCKERFILE > packaged default)
+
+subcommands: init (bootstrap .medulla/ here), install-skill <name>, upgrade
+
 environment the engine reads:
     MEDULLA_RETRY_DELAY_S   pause between attempts / before fallback (default 2)
     MEDULLA_RUN_ID          pre-seed the run id
