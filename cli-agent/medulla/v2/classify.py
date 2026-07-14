@@ -27,7 +27,8 @@ class Verdict(Enum):
 @dataclass
 class AttemptDecision:
     verdict: Verdict
-    signal: str | None = None  # set for ROUTE
+    signal: str | None = None        # set for ROUTE
+    failure_class: str | None = None  # for RETRY: "post" | "timeout" | "rc"
 
 
 def classify_attempt(
@@ -40,16 +41,16 @@ def classify_attempt(
     ignore_exit_code: bool,
 ) -> AttemptDecision:
     if post_rc is not None and post_rc != 0:
-        return AttemptDecision(Verdict.RETRY)                # post veto: attempt failed
+        return AttemptDecision(Verdict.RETRY, failure_class="post")   # post veto
     if post_rc == 0 and post_signal is not None:
         return AttemptDecision(Verdict.ROUTE, post_signal)   # post override
     if body_signal is not None:
         return AttemptDecision(Verdict.ROUTE, body_signal)   # signal beats rc
     if timed_out:
-        return AttemptDecision(Verdict.RETRY)                # ignore_exit_code never excuses a kill
+        return AttemptDecision(Verdict.RETRY, failure_class="timeout")
     if rc == 0 or ignore_exit_code:
         return AttemptDecision(Verdict.SILENT)
-    return AttemptDecision(Verdict.RETRY)
+    return AttemptDecision(Verdict.RETRY, failure_class="rc")
 
 
 class Move(Enum):
@@ -71,12 +72,18 @@ def next_move(
     attempt: int,              # 1-based, within the current phase
     max_attempts: int,
     has_fallback: bool,
+    pool_mode: bool = False,
 ) -> LoopMove:
     if decision.verdict is Verdict.ROUTE:
         return LoopMove(Move.DONE, decision.signal)
 
     if decision.verdict is Verdict.SILENT:
-        # silence: agent retries on the PRIMARY only; shell silence is deterministic
+        if pool_mode:
+            # pool bodies write data, not signals (law of layers): silence at rc 0
+            # is the normal successful outcome — DONE with no signal, no retries
+            return LoopMove(Move.DONE, None)
+        # decision nodes: silence is a failure to communicate — agent retries on
+        # the PRIMARY only; shell silence is deterministic
         if kind == "agent" and phase == "primary" and attempt < max_attempts:
             return LoopMove(Move.RETRY_SAME)
         return LoopMove(Move.DONE, SIG_DEFAULT)

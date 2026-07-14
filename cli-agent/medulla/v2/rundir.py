@@ -49,6 +49,13 @@ class RunStore:
             with open(self.dir / "journal.jsonl", "a", encoding="utf-8") as f:
                 f.write(line + "\n")
 
+    # ── pool manifest: crash-safe done-mask, one complete line per write ──
+    def manifest_append(self, manifest_path: Path, row: dict) -> None:
+        line = json.dumps(row, ensure_ascii=False)
+        with self._journal_lock:
+            with open(manifest_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")   # single write: a crash can only truncate the tail
+
     # ── vars ──
     def write_vars(self, vars_map: dict[str, str]) -> None:
         tmp = self.dir / ".vars.tmp"

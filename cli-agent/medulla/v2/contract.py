@@ -19,6 +19,9 @@ from .model import (
 
 DUNDER_RE = re.compile(r"^__.*__$")
 VAR_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+# node names feed env suffixes (MEDULLA_MANIFEST_<NODE>) and step-dir paths —
+# keep them env/filesystem-safe by construction
+NODE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
 
 class _StrictLoader(yaml.SafeLoader):
@@ -304,6 +307,9 @@ def load_pipeline(path: Path) -> Pipeline:
             raise _err(f"node name '{name}' is a YAML 1.1 boolean word — pick another")
         if DUNDER_RE.match(name):
             raise _err(f"node name '{name}' uses the engine namespace (__*__)")
+        if not NODE_NAME_RE.match(name):
+            raise _err(f"node name '{name}' must match [A-Za-z][A-Za-z0-9_-]* "
+                       f"(it becomes env suffixes and paths)")
         nodes[name] = _parse_node(name, raw, f"node '{name}'")
 
     # graph checks
