@@ -44,7 +44,9 @@ def run(
     env = {**os.environ, **(extra_env or {})}
     for key in env_remove or ():
         env.pop(key, None)
-    log_file = open(log_path, "a", encoding="utf-8", buffering=1) if log_path else None
+    # "w": a retried/resumed attempt reusing this path must not stack stale
+    # layers under the fresh output (audit R4)
+    log_file = open(log_path, "w", encoding="utf-8", buffering=1) if log_path else None
     log_lock = threading.Lock()
 
     proc = subprocess.Popen(
@@ -96,11 +98,27 @@ def run(
         except subprocess.TimeoutExpired:
             _kill_group(proc, signal.SIGKILL)
             proc.wait()
+    except BaseException:
+        # KeyboardInterrupt or anything else: the child MUST NOT outlive us —
+        # it sits in its own session (start_new_session) and nobody else will
+        # kill it (audit R1: v1 had this, the rewrite lost it)
+        _kill_group(proc, signal.SIGTERM)
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            _kill_group(proc, signal.SIGKILL)
+            proc.wait()
+        raise
     finally:
-        t_out.join(timeout=5)
-        t_err.join(timeout=5)
+        # generous join: an agent's daemon grandchild can hold the pipe open;
+        # 5s truncated real output (audit G7). The child itself is already dead
+        # here, so this only bounds pipe-drain time.
+        t_out.join(timeout=60)
+        t_err.join(timeout=60)
         if log_file:
             log_file.close()
+        if proc.poll() is None:                    # belt & braces: never leak
+            _kill_group(proc, signal.SIGKILL)
 
     rc = TIMEOUT_RC if timed_out else proc.returncode
     return RunResult(rc=rc, timed_out=timed_out, stdout="".join(out_buf), stderr="".join(err_buf))

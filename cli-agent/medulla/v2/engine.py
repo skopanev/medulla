@@ -41,6 +41,14 @@ def _tail(text: str, n: int = 400) -> str:
     return text[-n:] if len(text) > n else text
 
 
+def _retry_delay() -> None:
+    """Fixed pause between attempts (pilot's battle scar: 2s beats a rate-limit
+    storm). Env-tunable so tests run at 0."""
+    delay = float(os.environ.get("MEDULLA_RETRY_DELAY_S", "2"))
+    if delay > 0:
+        time.sleep(delay)
+
+
 def _timeout_env(seconds: float) -> str:
     """Env representation of a clamped timeout: never "0" for a live budget —
     an agent CLI sizing its own timeout from this must not read "no limit"."""
@@ -358,9 +366,11 @@ class Engine:
 
             if move.move is Move.RETRY_SAME:
                 log(f"attempt {attempt_id} failed (rc={result.rc}), retrying")
+                _retry_delay()      # a zero-delay retry on a 429 is a provider-ban request
                 continue
             if move.move is Move.SWITCH_FALLBACK:
                 log(f"attempt {attempt_id} failed (rc={result.rc}), switching to fallback")
+                _retry_delay()
                 current = fallback
                 phase = "fallback"
                 attempt = 0
@@ -780,7 +790,9 @@ class Engine:
                          "rc": stats.get("rc", "")}
             journal_row = {"step": step, "node": node.name, "kind": journal_kind,
                            "signal": signal_name, "next": target, "duration_s": duration,
-                           "message": _tail(message, 400)}   # resume rebuilds last.message from this
+                           # resume rebuilds last.message from this; 400 bytes broke
+                           # payload-carrying {{last.message}} templates (audit G8)
+                           "message": _tail(message, 8000)}
             if journal_kind == "pool":
                 journal_row.update({k: stats.get(k) for k in
                                     ("inputs_total", "inputs_ok", "min_success")})

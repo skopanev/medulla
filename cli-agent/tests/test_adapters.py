@@ -133,7 +133,7 @@ def test_missing_binary_is_e_harness(monkeypatch):
     monkeypatch.setattr(H.shutil, "which", lambda name: None)
     with pytest.raises(EngineCrash) as exc:
         H.resolve(AgentSpec(harness="codex"))
-    assert exc.value.code == "E_HARNESS" and "not on PATH" in exc.value.message
+    assert exc.value.code == "E_HARNESS" and "on PATH" in exc.value.message
 
 
 def test_unknown_harness_is_e_harness():
@@ -277,8 +277,9 @@ def test_agy_e2e_prompt_via_print(tmp_path, on_path, monkeypatch):
 args=("$@")
 n=${#args[@]}
 [ "${args[$((n-2))]}" = "--print" ] || { echo "flag order broken" >&2; exit 3; }
-echo "answer: <signal:ok>${args[$((n-1))]}</signal:ok>"
-''')
+echo "thinking about the task..."
+echo "<signal:ok>${args[$((n-1))]}</signal:ok>"
+''')                                                    # tag must START a line (heuristic filter)
     text = """
 version: "2"
 start: a

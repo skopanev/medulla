@@ -29,6 +29,21 @@ from .model import AgentSpec
 
 REAL_HARNESSES = ("claude-code", "codex", "opencode", "agy")
 
+import re as _re
+
+_LINE_START_SIGNAL_RE = _re.compile(
+    r"(?ms)^[ \t]*(<signal:([a-zA-Z0-9_-]+)[^>]*>.*?</signal:\2>)")
+
+
+def plain_text_signal_filter(stdout: str) -> str:
+    """Defense for CLIs WITHOUT structured output (opencode, agy): keep only
+    signal tags that START a line. Tool output echoing a tag mid-line
+    ("$ cat notes.md: <signal:done>...") is dropped — an identity filter let
+    any cat'd file route the graph (audit R3). Residual risk: a file whose
+    line IS a bare tag still leaks; the structured filter (part-7 live logs)
+    is the real fix, this is the best available heuristic until then."""
+    return "\n".join(m.group(1) for m in _LINE_START_SIGNAL_RE.finditer(stdout))
+
 # extra slack for a CLI's INNER timeout so the engine's own timeout always
 # fires first and the CLI limit is just a net (v1 convention)
 INNER_SLACK_S = 300
@@ -138,6 +153,13 @@ class CodexAdapter(HarnessAdapter):
     name = "codex"
     binary = "codex"
 
+    def __init__(self):
+        # cx (the token-refreshing wrapper) alone is a valid install (audit G9):
+        # a slim image with only cx must not crash E_HARNESS at boot
+        if not (shutil.which("cx") or shutil.which("codex")):
+            raise EngineCrash(E_HARNESS,
+                              "harness 'codex': neither 'cx' nor 'codex' on PATH")
+
     def build(self, spec, prompt_file, prompt_text, timeout_s):
         bin_ = shutil.which("cx") or "codex"    # cx refreshes the token via the broker
         inner_ms = (int(timeout_s) + INNER_SLACK_S) * 1000
@@ -229,10 +251,11 @@ class OpenCodeAdapter(HarnessAdapter):
         argv.append(prompt_text)                 # positional prompt (argv list, no shell)
         return Invoke(argv=argv)
 
-    # filter_stdout: identity for now. `opencode run --format json` exists
-    # (verified on 1.15.5) but the event schema needs a live run to pin down —
-    # switch to a structured filter from part-7 smoke logs. Until then the only
-    # defense is the contract's prompt discipline (never quote signal syntax).
+    def filter_stdout(self, stdout: str) -> str:
+        # `opencode run --format json` exists (verified 1.15.5) but the event
+        # schema needs a live run to pin down — structured filter comes from
+        # part-7 smoke logs. Until then: the line-start heuristic.
+        return plain_text_signal_filter(stdout)
 
 
 # ── agy (Antigravity) ────────────────────────────────────────────────────────
@@ -297,8 +320,10 @@ class AgyAdapter(HarnessAdapter):
         argv += ["--print", prompt_text]
         return Invoke(argv=argv)
 
-    # filter_stdout: identity — agy has no structured output mode; prompt
-    # discipline is the only defense (same caveat as opencode).
+    def filter_stdout(self, stdout: str) -> str:
+        # agy has no structured output mode at all — the line-start heuristic
+        # is the ceiling of what an adapter can do here.
+        return plain_text_signal_filter(stdout)
 
 
 # ── registry ─────────────────────────────────────────────────────────────────
