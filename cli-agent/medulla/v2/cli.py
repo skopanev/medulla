@@ -28,8 +28,52 @@ def _resolve_pipeline_yaml(w: Path) -> Path:
     return w / "pipeline.yaml" if w.is_dir() else w
 
 
+ENV_HELP = """\
+environment the engine provides to bodies and hooks (agents: read this, it is the API):
+
+  always
+    MEDULLA_RUN_ID          run id (settable from outside for correlation)
+    MEDULLA_RUN_DIR         this run's directory; put deliverables in $MEDULLA_RUN_DIR/artifacts/
+    <all pipeline vars>     exported as-is, including <signal:var>-set ones
+    MEDULLA_TIMEOUT_S       resolved (deadline-clamped) timeout of the current step, seconds
+    MEDULLA_ATTEMPT_ID      unique attempt id: <step>.<p|f><n>  (e.g. 003.i2.p1)
+    MEDULLA_HARNESS         "shell" or the harness name of the current body
+
+  after the first transition
+    MEDULLA_LAST_NODE / _SIGNAL / _MESSAGE / _RC
+                            outcome of the previously completed node (pool: _RC is empty)
+    MEDULLA_LAST_EVENT_JSON same as one JSON object
+
+  after a pool node completes
+    MEDULLA_MANIFEST_<NODE> path to its manifest.jsonl (dashes->underscores, uppercased);
+                            rows: {index,key,input,ok,reason,signal,message,rc,timed_out,
+                                   attempts,fallback,harness,model,vars,updates,duration_s,log}
+
+  inside a pool input
+    MEDULLA_INPUT           the input (objects as compact JSON)
+    MEDULLA_INPUT_INDEX     1-based position     MEDULLA_INPUT_COUNT  total
+    MEDULLA_INPUT_KEY       stable identity <index>:<sha256[:16]> (idempotency key)
+    MEDULLA_INPUT_<KEY>     each flat scalar field of an object input, uppercased
+
+  post hook only
+    MEDULLA_BODY_RC / MEDULLA_BODY_SIGNAL
+                            the body attempt's exit code and its raw signal (if any)
+
+environment the engine reads:
+    MEDULLA_RETRY_DELAY_S   pause between attempts / before fallback (default 2)
+    MEDULLA_RUN_ID          pre-seed the run id
+    MEDULLA_DOCKER=1        set by scripts/docker.py: container is the sandbox
+
+signals (print on stdout, must start the line for plain-text harnesses):
+    <signal:NAME>message</signal:NAME>      route the graph (decision) / record (pool)
+    <signal:var key=K>value</signal:var>    set a pipeline var (fold law applies)
+    <signal:update>progress</signal:update> progress line, never routes
+"""
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = _Parser(prog="medulla")
+    parser = _Parser(prog="medulla", epilog=ENV_HELP,
+                     formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-w", "--pipeline", required=True, type=Path,
                         help="pipeline directory (or pipeline.yaml path)")
     parser.add_argument("--var", action="append", default=[], metavar="KEY=VALUE")
