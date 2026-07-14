@@ -380,9 +380,11 @@ nodes:
     assert run_pipeline(path, workdir=work) == 0
 
 
-def test_unwired_real_harness_is_e_internal(tmp_path):
-    # panel-held razor: E_HARNESS = binary missing/unresolvable ONLY;
-    # "not wired yet" is an engine limitation -> E_INTERNAL
+def test_missing_harness_binary_is_e_harness(tmp_path, monkeypatch):
+    # part 5 wired the real adapters: the razor now fires on a missing binary
+    from medulla.v2 import harness as H
+    H.reset_registry()
+    monkeypatch.setattr(H.shutil, "which", lambda name: None)
     text = """
 version: "2"
 start: a
@@ -395,7 +397,8 @@ nodes:
     path, work = setup_pipeline(tmp_path, text)
     assert run_pipeline(path, workdir=work) == 1
     _, outcome, _ = read_run(path.parent)
-    assert outcome["error"]["code"] == "E_INTERNAL"
+    assert outcome["error"]["code"] == "E_HARNESS"
+    H.reset_registry()
 
 
 def test_run_id_from_env(tmp_path, monkeypatch):

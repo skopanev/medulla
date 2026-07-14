@@ -32,6 +32,8 @@ def run(
     timeout_s: float,
     extra_env: dict[str, str] | None = None,
     log_path: Path | None = None,
+    stdin_data: str | None = None,
+    env_remove: list[str] | None = None,
 ) -> RunResult:
     if isinstance(command, str):
         shell = os.environ.get("SHELL", "bash")
@@ -40,15 +42,27 @@ def run(
         argv = command
 
     env = {**os.environ, **(extra_env or {})}
+    for key in env_remove or ():
+        env.pop(key, None)
     log_file = open(log_path, "a", encoding="utf-8", buffering=1) if log_path else None
     log_lock = threading.Lock()
 
     proc = subprocess.Popen(
-        argv, cwd=str(cwd), stdin=subprocess.DEVNULL,
+        argv, cwd=str(cwd),
+        stdin=subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, bufsize=1, start_new_session=True, env=env,
         errors="replace",
     )
+    if stdin_data is not None:
+        # write+close in a thread: a child that never reads must not deadlock us
+        def _feed():
+            try:
+                proc.stdin.write(stdin_data)
+                proc.stdin.close()
+            except (BrokenPipeError, OSError):
+                pass
+        threading.Thread(target=_feed, daemon=True).start()
 
     out_buf: list[str] = []
     err_buf: list[str] = []

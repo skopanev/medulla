@@ -7,6 +7,7 @@ reuse it with their own render_fn). Pools land in part 3; real adapters in part 
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from dataclasses import dataclass, field
@@ -285,7 +286,7 @@ class Engine:
         # own max_attempts inherits the primary's effective budget
         phase_budget = self.p.action_max_attempts(action)
 
-        body_cmd, prompt_text, agent_spec = self._prepare_body(
+        invoke, prompt_text, agent_spec = self._prepare_body(
             current, node, step_dir, render_fn, phase)
         harness_name = agent_spec.harness if agent_spec else None
 
@@ -308,10 +309,12 @@ class Engine:
             env = {**env_fn(),
                    "MEDULLA_TIMEOUT_S": _timeout_env(eff),
                    "MEDULLA_ATTEMPT_ID": attempt_id,
-                   "MEDULLA_HARNESS": tag}
+                   "MEDULLA_HARNESS": tag,
+                   **invoke.env}
 
-            result = proc_run(body_cmd, self.workdir, eff, extra_env=env,
-                              log_path=step_dir / f"attempt-{total}-{tag}.txt")
+            result = proc_run(invoke.argv, self.workdir, eff, extra_env=env,
+                              log_path=step_dir / f"attempt-{total}-{tag}.txt",
+                              stdin_data=invoke.stdin, env_remove=invoke.env_remove)
 
             raw_text = result.stdout
             if current.kind == "agent":
@@ -364,7 +367,7 @@ class Engine:
                 fallback_used = True
                 if fallback.max_attempts is not None:
                     phase_budget = fallback.max_attempts
-                body_cmd, prompt_text, agent_spec = self._prepare_body(
+                invoke, prompt_text, agent_spec = self._prepare_body(
                     current, node, step_dir, render_fn, phase, inherited_prompt=prompt_text)
                 harness_name = agent_spec.harness if agent_spec else None
                 continue
@@ -407,12 +410,15 @@ class Engine:
 
     def _prepare_body(self, action: Action, node: Node, step_dir: Path,
                       render_fn, phase: str, inherited_prompt: str | None = None):
-        """Returns (command_for_procrun, rendered_prompt_text_or_None, rendered_AgentSpec_or_None).
+        """Returns (Invoke, rendered_prompt_text_or_None, rendered_AgentSpec_or_None).
 
         Every scalar agent field is a template (contract: an ensemble is just a pool
         with per-input harness/model). Optional fields rendering empty count as absent."""
+        from .harness import Invoke
         if action.kind == "shell":
-            return render_fn(action.shell, "shell"), None, None
+            shell = os.environ.get("SHELL", "bash")
+            rendered = render_fn(action.shell, "shell")
+            return Invoke(argv=[shell, "-lc", rendered]), None, None
 
         spec = action.agent
         harness = render_fn(spec.harness, "agent.harness").strip()
@@ -426,6 +432,7 @@ class Engine:
                                   effort=effort or None, args=args)
 
         adapter = resolve_harness(rendered_spec)
+        adapter.prepare(rendered_spec, self.workdir)   # idempotent preflight (agy trust, opencode.json)
         if action.prompt is not None:
             prompt_text = render_fn(action.prompt, "prompt")
         elif inherited_prompt is not None:
@@ -434,7 +441,9 @@ class Engine:
             raise EngineCrash(E_RENDER, "agent action has no prompt", node=node.name)
         prompt_file = step_dir / ("prompt.md" if phase == "primary" else "prompt-fallback.md")
         prompt_file.write_text(prompt_text, encoding="utf-8")
-        return adapter.build_argv(rendered_spec, prompt_file), prompt_text, rendered_spec
+        timeout_s = self._clamp(self.p.action_timeout(action))
+        invoke = adapter.build(rendered_spec, prompt_file, prompt_text, timeout_s)
+        return invoke, prompt_text, rendered_spec
 
     # ── decision node: the seam + decision-node policy (fold law application) ──
     def _run_decision(self, node: Node, step_dir: Path, step_no: int):

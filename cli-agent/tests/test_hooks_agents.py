@@ -274,25 +274,21 @@ nodes:
     assert (step / "prompt.md").read_text() == (step / "prompt-fallback.md").read_text()
 
 
-def test_harness_error_classes(tmp_path):
-    # unknown name = unresolvable -> E_HARNESS; a real-but-unwired harness is an
-    # ENGINE limitation -> E_INTERNAL (the E_HARNESS razor, held by panel verdict)
-    for harness, expected in (("nonsense", "E_HARNESS"), ("codex", "E_INTERNAL")):
-        base = tmp_path / harness
-        base.mkdir()
-        text = f"""
+def test_unknown_harness_is_e_harness(tmp_path):
+    # part 5 wired all real harnesses; only an unknown NAME is unresolvable here
+    text = """
 version: "2"
 start: a
 nodes:
   a:
-    agent: {{harness: {harness}, model: x}}
+    agent: {harness: nonsense, model: x}
     prompt: "p"
-    on_signal: {{ok: __exit_ok__}}
+    on_signal: {ok: __exit_ok__}
 """
-        path, work = setup(base, text)
-        assert run_pipeline(path, workdir=work) == 1
-        _, outcome, _ = read_run(path.parent)
-        assert outcome["error"]["code"] == expected
+    path, work = setup(tmp_path, text)
+    assert run_pipeline(path, workdir=work) == 1
+    _, outcome, _ = read_run(path.parent)
+    assert outcome["error"]["code"] == "E_HARNESS"
 
 
 def test_attempt_ids_are_distinct(tmp_path):
