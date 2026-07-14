@@ -233,7 +233,9 @@ nodes:
     assert "POISON" not in (run / "vars.yaml").read_text()
 
 
-def test_pool_crashes_as_not_implemented_yet(tmp_path):
+def test_single_input_pool_is_still_a_pool(tmp_path):
+    # (part-1 not-implemented stub replaced) blind panel edge: a 1-input pool keeps
+    # pool semantics — body signals go to the manifest, the join routes __done__
     text = """
 version: "2"
 start: a
@@ -244,9 +246,9 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 1       # E_INTERNAL crash path
-    _, outcome, _ = read_run(path.parent)
-    assert outcome["outcome"] == "crashed" and outcome["error"]["code"] == "E_INTERNAL"
+    assert run_pipeline(path, workdir=work) == 0
+    _, outcome, journal = read_run(path.parent)
+    assert journal[0]["kind"] == "pool" and journal[0]["inputs_ok"] == 1
 
 
 def test_rendered_empty_shell_is_e_render(tmp_path):
