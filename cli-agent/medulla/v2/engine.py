@@ -133,6 +133,8 @@ class AttemptsOutcome:
     model: str | None = None
     guarded: bool = False                 # pre emitted a routing signal; body never ran
     failure_class: str | None = None      # for __failed__: "pre" | "rc" | "timeout" | "post"
+    recorded_signal: str | None = None    # pool: first bare signal seen (data, never outcome)
+    recorded_body: str = ""
     pending_vars: dict[str, str] = field(default_factory=dict)  # fold law: caller applies
     updates: list[str] = field(default_factory=list)
 
@@ -186,12 +188,16 @@ class Engine:
         return env
 
     # ── vars (fold law application point) ──
+    @staticmethod
+    def _valid_var_key(key: str) -> bool:
+        return bool(VAR_NAME_RE.match(key)) and key not in ENV_BLACKLIST_EXACT and \
+            not any(key.startswith(p) for p in ENV_BLACKLIST_PREFIX)
+
     def _apply_vars(self, pending: dict[str, str]) -> None:
         if not pending:
             return
         for key, value in pending.items():
-            if not VAR_NAME_RE.match(key) or key in ENV_BLACKLIST_EXACT or \
-                    any(key.startswith(p) for p in ENV_BLACKLIST_PREFIX):
+            if not self._valid_var_key(key):
                 log(f"warn: var '{key}' rejected (reserved/invalid name)")
                 continue
             self.vars[key] = value
@@ -326,11 +332,17 @@ class Engine:
                 post_scan = scan_stdout(post_res.stdout, known)
                 post_rc, post_signal = post_res.rc, post_scan.first_known
 
+            # Pool conjunction law: ok = rc==0 AND no timeout AND no post veto.
+            # Signals are DATA in pools — they are recorded, they never classify
+            # ("echo <signal:x>; exit 7" must not become ok). ignore_exit_code
+            # never reaches pools, not even via defaults (min_success owns that).
             decision = classify_attempt(
                 kind=current.kind, rc=result.rc, timed_out=result.timed_out,
-                body_signal=body_scan.first_known, post_rc=post_rc,
-                post_signal=post_signal,
-                ignore_exit_code=self.p.action_ignore_exit_code(current),
+                body_signal=None if pool_mode else body_scan.first_known,
+                post_rc=post_rc,
+                post_signal=None if pool_mode else post_signal,
+                ignore_exit_code=(False if pool_mode
+                                  else self.p.action_ignore_exit_code(current)),
             )
             move = next_move(
                 decision, kind=current.kind, phase=phase, attempt=attempt,
@@ -388,6 +400,8 @@ class Engine:
                 harness=harness_name,
                 model=agent_spec.model if agent_spec else None,
                 failure_class=last_failure_class if signal == SIG_FAILED else None,
+                recorded_signal=post_scan.first_known or body_scan.first_known,
+                recorded_body=post_scan.first_body or body_scan.first_body,
                 pending_vars=pending, updates=updates,
             )
 
@@ -404,7 +418,9 @@ class Engine:
         harness = render_fn(spec.harness, "agent.harness").strip()
         model = render_fn(spec.model, "agent.model", required=False) if spec.model else None
         effort = render_fn(spec.effort, "agent.effort", required=False) if spec.effort else None
-        args = [render_fn(a, "agent.args", required=False) or a for a in spec.args]
+        # an arg rendering empty is absent (never the literal template text back)
+        args = [r for a in spec.args
+                if (r := render_fn(a, "agent.args", required=False)).strip()]
         from .model import AgentSpec
         rendered_spec = AgentSpec(harness=harness, model=model or None,
                                   effort=effort or None, args=args)
@@ -452,6 +468,11 @@ class Engine:
                            extra_env=self._base_env(),
                            log_path=step_dir / "inputs-source.txt")
             if res.timed_out:
+                rem = self._remaining()
+                if rem is not None and rem <= 0:      # the run budget killed it, not its own limit
+                    raise EngineCrash(E_DEADLINE,
+                                      f"pipeline timeout ({self.p.timeout}s) exhausted "
+                                      f"while sourcing inputs", node=node.name)
                 raise EngineCrash(E_INPUTS, f"inputs source timed out ({spec.shell_timeout}s)",
                                   node=node.name)
             if res.rc != 0:
@@ -465,6 +486,9 @@ class Engine:
             raise EngineCrash(E_INPUTS_LIMIT,
                               f"{len(inputs)} inputs (cap {INPUTS_HARD_CAP}) — "
                               f"this is almost certainly not what you wanted",
+                              node=node.name)
+        if any(isinstance(v, list) for v in inputs):
+            raise EngineCrash(E_INPUTS, "array inputs are forbidden (wrap in an object)",
                               node=node.name)
         kinds = {isinstance(v, dict) for v in inputs}
         if len(kinds) > 1:
@@ -516,7 +540,13 @@ class Engine:
             if sequential:
                 self._apply_vars(pending)             # fold: ordered, not transactional
             else:
-                local_ctx.update(pending)             # this worker's env only + row data
+                # same blacklist as the sequential path — a parallel pre emitting
+                # <signal:var key=PATH> must not poison this worker's subprocess env
+                for k, v in pending.items():
+                    if self._valid_var_key(k):
+                        local_ctx[k] = v
+                    else:
+                        log(f"warn: var '{k}' rejected (reserved/invalid name)")
 
         row = {"index": idx, "key": key, "input": value}
         try:
@@ -539,11 +569,14 @@ class Engine:
             reason = outcome.failure_class or "rc"
         else:
             reason = "ok"
+        # pool signals are data: surface the recorded bare signal in the row
+        row_signal = outcome.signal if outcome.guarded else outcome.recorded_signal
+        row_message = outcome.message if (outcome.guarded or not ok) else outcome.recorded_body
         pool_pre_vars = dict(local_ctx)               # >1: pre vars are row data too
         if sequential and ok:
             self._apply_vars(outcome.pending_vars)    # fold: next input sees them
         row.update(
-            ok=ok, reason=reason, signal=outcome.signal, message=outcome.message,
+            ok=ok, reason=reason, signal=row_signal, message=row_message,
             rc=outcome.rc, timed_out=outcome.timed_out, attempts=outcome.attempts,
             fallback=outcome.fallback_used, harness=outcome.harness, model=outcome.model,
             vars={**pool_pre_vars, **outcome.pending_vars} if ok else pool_pre_vars,
@@ -577,12 +610,18 @@ class Engine:
             if self._remaining() is not None and self._remaining() <= 0:
                 return None                            # never started: no row, resume re-runs it
             try:
-                return self._run_one_input(node, step_dir, step_no, idx, value,
-                                           total, pool_vars, sequential)
+                row = self._run_one_input(node, step_dir, step_no, idx, value,
+                                          total, pool_vars, sequential)
             except EngineCrash as crash:
                 if crash.code == E_DEADLINE:
                     return None                        # died of budget, not of its own timeout
                 raise
+            if row.get("timed_out") and not row["ok"] \
+                    and self._remaining() is not None and self._remaining() <= 0:
+                # killed by the shrinking run budget, not its own timeout: recording
+                # this as reason:timeout would stop resume from ever re-running it
+                return None
+            return row
 
         if sequential:
             for i, value in enumerate(inputs, start=1):
@@ -594,16 +633,26 @@ class Engine:
                 rows.append(row)
         else:
             import concurrent.futures
+            first_crash: EngineCrash | None = None
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool_exec:
                 futures = {pool_exec.submit(guarded_run, i, v): i
                            for i, v in enumerate(inputs, start=1)}
                 for fut in concurrent.futures.as_completed(futures):
-                    row = fut.result()                 # engine crashes propagate here
+                    try:
+                        row = fut.result()
+                    except EngineCrash as crash:
+                        # collect the rest before crashing — concluded inputs must not
+                        # lose their manifest rows to an unrelated worker's crash
+                        if first_crash is None:
+                            first_crash = crash
+                        continue
                     if row is None:
                         deadline_hit = True
                         continue
                     self.store.manifest_append(manifest_path, row)
                     rows.append(row)
+            if first_crash is not None:
+                raise first_crash
 
         if deadline_hit or (self._remaining() is not None and self._remaining() <= 0):
             raise EngineCrash(E_DEADLINE,
