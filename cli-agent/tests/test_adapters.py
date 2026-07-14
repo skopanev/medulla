@@ -178,6 +178,44 @@ def test_codex_filter_agent_message_only():
     assert "evil" not in out       # v1's <500-char command_execution hack is dead
 
 
+def test_claude_effort_flag(tmp_path):
+    a = H.ClaudeAdapter.__new__(H.ClaudeAdapter)
+    inv = a.build(AgentSpec(harness="claude-code", effort="max"),
+                  tmp_path / "p.md", "P", 60)
+    i = inv.argv.index("--effort")
+    assert inv.argv[i + 1] == "max"
+
+
+def test_claude_filter_dict_result_not_lost():
+    a = H.ClaudeAdapter.__new__(H.ClaudeAdapter)
+    stream = json.dumps({"type": "result",
+                         "result": {"output": "final <signal:done>d</signal:done>"}})
+    assert "<signal:done>" in a.filter_stdout(stream)
+
+
+def test_codex_extract_error():
+    a = H.CodexAdapter.__new__(H.CodexAdapter)
+    stream = "\n".join([
+        json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "hm"}}),
+        json.dumps({"type": "turn.failed", "message": "model overloaded"}),
+    ])
+    err = a.extract_error(stream)
+    assert err and "turn.failed" in err and "model overloaded" in err
+    assert a.extract_error("no json here") is None
+
+
+def test_opencode_bootstrap_race_safe(tmp_path):
+    # singleton shared by pool workers: concurrent prepare() must yield exactly
+    # one intact config (no truncation, no exception)
+    import concurrent.futures
+    a = H.OpenCodeAdapter.__new__(H.OpenCodeAdapter)
+    specs = [AgentSpec(harness="opencode", model=f"prov{i}/m{i}") for i in range(8)]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        list(ex.map(lambda s: a.prepare(s, tmp_path), specs))
+    cfg = json.loads((tmp_path / "opencode.json").read_text())
+    assert cfg["permission"] == "allow" and "provider" in cfg
+
+
 # ── end-to-end through the engine with fake binaries on PATH ────────────────
 
 def run_pipe(tmp_path, text, workdir=None):

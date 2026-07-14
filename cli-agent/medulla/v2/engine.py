@@ -387,6 +387,12 @@ class Engine:
                 message = (f"body died: rc={result.rc}, {total} attempt(s)"
                            f"{' (fallback tried)' if fallback_used else ''}; "
                            f"stderr: {_tail(result.stderr)}")
+                if current.kind == "agent":
+                    # harness-mined failure detail (codex error/turn.failed lives in
+                    # stdout JSON the signal filter rightly drops)
+                    detail = resolve_harness(agent_spec).extract_error(result.stdout)
+                    if detail:
+                        message += f"; {detail}"
             elif signal == SIG_DEFAULT:
                 message = f"no known signal emitted; stdout: {_tail(result.stdout)}"
             elif signal is None:

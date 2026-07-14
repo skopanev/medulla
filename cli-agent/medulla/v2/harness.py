@@ -63,6 +63,11 @@ class HarnessAdapter:
         """Reduce raw CLI output to signal-scannable assistant text."""
         return stdout
 
+    def extract_error(self, stdout: str) -> str | None:
+        """Harness-specific failure detail mined from raw stdout (NOT the signal
+        channel — appended to the __failed__ message only). Default: none."""
+        return None
+
 
 # ── fake (tests) ─────────────────────────────────────────────────────────────
 
@@ -88,7 +93,8 @@ class ClaudeAdapter(HarnessAdapter):
                 "--output-format", "stream-json", "--verbose"]
         if spec.model:
             argv += ["--model", spec.model]
-        # effort has no claude CLI mapping — reasoning depth is model-intrinsic
+        if spec.effort:
+            argv += ["--effort", spec.effort]   # low|medium|high|xhigh|max (claude --help)
         argv += ["--append-system-prompt-file", str(prompt_file)]
         argv += spec.args
         argv += ["-p", "Execute."]
@@ -120,6 +126,8 @@ class ClaudeAdapter(HarnessAdapter):
                 raw = event.get("result", "")
                 if isinstance(raw, str):
                     parts.append(raw)
+                elif isinstance(raw, dict):         # dict-shaped final result (pilot scar):
+                    parts.append(raw.get("output", ""))  # dropping it = permanent __default__
             # user messages (tool_result), tool_use blocks, system events: SKIP
         return "\n".join(p for p in parts if p)
 
@@ -142,7 +150,28 @@ class CodexAdapter(HarnessAdapter):
             argv += ["-c", f"model_reasoning_effort={spec.effort}"]
         argv += ["-c", f"stream_idle_timeout_ms={inner_ms}"]
         argv += spec.args                        # last -c wins: authors can override
-        return Invoke(argv=argv, stdin=prompt_text)   # stdin: no ARG_MAX, no @file coupling
+        # stdin carries the COMPLETE prompt (no "Execute." prefix needed — that was
+        # v1's convention for @file references); no ARG_MAX, no @-expansion coupling
+        return Invoke(argv=argv, stdin=prompt_text)
+
+    def extract_error(self, stdout: str) -> str | None:
+        # codex reports real failure causes as stdout JSON events that the signal
+        # filter rightly drops; without this, a turn.failed run yields a useless
+        # __failed__ message (pilot scar: "0 output, exit 1")
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") in ("error", "turn.failed") or event.get("error"):
+                detail = event.get("message") or event.get("error") or event
+                if isinstance(detail, (dict, list)):
+                    detail = json.dumps(detail, ensure_ascii=False)
+                return f"codex {event.get('type', 'error')}: {detail}"
+        return None
 
     def filter_stdout(self, stdout: str) -> str:
         parts: list[str] = []
@@ -169,19 +198,28 @@ class CodexAdapter(HarnessAdapter):
 class OpenCodeAdapter(HarnessAdapter):
     name = "opencode"
     binary = "opencode"
+    _bootstrap_lock = __import__("threading").Lock()
 
     def prepare(self, spec, workdir):
-        cfg = workdir / "opencode.json"
-        if cfg.exists():
-            return                               # never clobber an author's config
-        data: dict = {"$schema": "https://opencode.ai/config.json", "permission": "allow"}
-        if spec.model and "/" in spec.model:
-            provider, model_id = spec.model.split("/", 1)
-            pblock: dict = {"options": {"timeout": 3600000}}   # default 5m kills long runs
-            if spec.effort:
-                pblock["models"] = {model_id: {"options": {"reasoningEffort": spec.effort}}}
-            data["provider"] = {provider: pblock}
-        cfg.write_text(json.dumps(data) + "\n", encoding="utf-8")
+        # The adapter is a cached singleton shared by pool workers: check-then-write
+        # over a shared path must be locked, and the write atomic (tmp + replace) —
+        # a concurrent opener must never see a truncated config. First writer wins;
+        # per-input effort in one workdir shares one config by design (opencode
+        # reads config per cwd — heterogeneous efforts need per-input workdirs).
+        with self._bootstrap_lock:
+            cfg = workdir / "opencode.json"
+            if cfg.exists():
+                return                           # never clobber an author's config
+            data: dict = {"$schema": "https://opencode.ai/config.json", "permission": "allow"}
+            if spec.model and "/" in spec.model:
+                provider, model_id = spec.model.split("/", 1)
+                pblock: dict = {"options": {"timeout": 3600000}}   # default 5m kills long runs
+                if spec.effort:
+                    pblock["models"] = {model_id: {"options": {"reasoningEffort": spec.effort}}}
+                data["provider"] = {provider: pblock}
+            tmp = workdir / ".opencode.json.tmp"
+            tmp.write_text(json.dumps(data) + "\n", encoding="utf-8")
+            os.replace(tmp, cfg)
 
     def build(self, spec, prompt_file, prompt_text, timeout_s):
         argv = ["opencode", "run", "--agent", "build"]
