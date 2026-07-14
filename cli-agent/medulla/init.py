@@ -13,7 +13,7 @@ so it never goes stale: `medulla upgrade` is reflected everywhere with no
 re-init. docker.py resolves the link via os.path.realpath when mounting
 init-docker.sh, so the bind-mount source is the real package file.
 
-Workflows (``.medulla/workflows/``) are NOT provisioned by this command —
+Workflows (``.medulla/pipelines/``) are NOT provisioned by this command —
 they're project content. Use ``install-skill`` for bundled ones.
 """
 
@@ -67,7 +67,7 @@ def run_init() -> int:
 
     print(f"  linked .medulla/medulla → {pkg}")
     print("\ndone.\n")
-    print("  # drop your workflows into .medulla/workflows/<name>/pipeline.yaml")
+    print("  # drop your pipelines into .medulla/pipelines/<name>/pipeline.yaml")
     print("  # then run:")
     print("  medulla --docker -w <workflow>\n")
     return 0

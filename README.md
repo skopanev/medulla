@@ -9,7 +9,7 @@ graph = nodes + on_signal edges + two terminals (__exit_ok__ / __exit_fail__)
 
 **One machine.** Internally every node is a pool: a node without `inputs:` runs over a single phantom input. Policy (timeouts, attempts, fallback) works identically in both modes. The only thing `inputs:` switches is the **signal contract**: without inputs the body talks to the graph (decision node); with inputs the body writes to the manifest and only the join result routes (pool node).
 
-> **Status**: v2 contract (frozen). The v2 engine replaces v1 entirely — v1 pipelines are not supported and the legacy runner is being removed. `version: "2"` is required in every pipeline; the engine rejects anything else with a pointer to the migration table below. Implementation phases: **1** — engine (this document), **2** — harness sessions & run history polish.
+> **Status**: v2 contract (frozen), engine implemented — the v1 engine is **deleted**; v1 pipelines are not supported. `version: "2"` is required in every pipeline; the engine rejects anything else with a pointer to the migration table below. Implementation phases: **1** — engine (this document), **2** — harness sessions & run history polish.
 
 ## Usage
 
@@ -114,7 +114,7 @@ Action (exactly one of `shell` / `agent`):
 | `agent` | `{harness, model, effort, args}` — one entity, one block. Scalar shortcut: `agent: codex` ≡ `agent: {harness: codex}`. `args` is a raw CLI escape hatch — non-portable across harnesses |
 | `prompt` | agent input (not config). Never quote signal syntax literally in prompts — describe it ("emit signal planned"); the engine delivers the syntax to the agent |
 | `timeout` | per **attempt**, seconds |
-| `max_attempts` | attempts per runner, default 1. Primary gets N, then fallback gets N. Retryable outcomes: non-zero exit, timeout (recorded as rc 124), and **silence** — an agent body exiting 0 with no known signal (the most common agent flake: the work happened, the tag didn't). Silence retries on the **primary only** and never triggers fallback (another model drops the tag just as often; blind fallback duplicates side effects); after all attempts it classifies as `__default__`. Shell silence is deterministic and is not retried |
+| `max_attempts` | attempts per runner, default 1. Primary gets N, then fallback gets N. Retryable outcomes: non-zero exit, timeout (recorded as rc 124), and **silence** — an agent body exiting 0 with no known signal (the most common agent flake: the work happened, the tag didn't). Silence retries on the **primary only** and never triggers fallback (another model drops the tag just as often; blind fallback duplicates side effects); after all attempts it classifies as `__default__`. Shell silence is deterministic and is not retried. **Silence handling is decision-node behavior**: in pools the body is not expected to signal — silence at rc 0 is the normal ok outcome (see the pool rows) |
 | `fallback` | alternate agent action after primary attempts are exhausted. Agent-only (a fallback for shell is meaningless); a fallback has no fallback |
 | `ignore_exit_code` | rc != 0 doesn't classify the body as failed; outcome comes from signals. **Forbidden in pool nodes** — `min_success` already owns that role |
 
@@ -199,7 +199,7 @@ Environment (data should flow to shell via env, templates are for slugs/paths �
 | `MEDULLA_INPUT_INDEX` / `MEDULLA_INPUT_COUNT` | position / total |
 | `MEDULLA_INPUT_<KEY>` | each flat scalar field of an object input, uppercased |
 | `MEDULLA_INPUT_KEY` / `MEDULLA_ATTEMPT_ID` | stable input identity `(index, hash)` / unique attempt id — the idempotency keys for bodies that mutate the outside world (branches, PRs, tickets) |
-| `MEDULLA_LAST_NODE` / `_SIGNAL` / `_MESSAGE` / `_RC` | outcome of the previously completed node, published before every transition; `MEDULLA_LAST_EVENT_JSON` carries the same as one JSON object. Timeout is recognizable as rc 124 |
+| `MEDULLA_LAST_NODE` / `_SIGNAL` / `_MESSAGE` / `_RC` | outcome of the previously completed node, published before every transition (after a pool, `_RC` is empty — a join has no single rc; read the manifest); `MEDULLA_LAST_EVENT_JSON` carries the same as one JSON object. Timeout is recognizable as rc 124 |
 | `MEDULLA_MANIFEST_<NODE>` | path to a pool node's manifest (dashes → underscores) |
 | `MEDULLA_RUN_ID` / `MEDULLA_RUN_DIR` | run id (settable from outside for correlation; else generated) / this run's directory. Put artifacts in `$MEDULLA_RUN_DIR/artifacts/` |
 | `MEDULLA_TIMEOUT_S` | resolved step timeout, for CLIs that need to size their own |
@@ -219,7 +219,9 @@ Two failure classes. The test: *can it be fixed by changing data/prompts/retryin
 | 2 | workflow failure | the graph routed to `__exit_fail__` — fix the task/inputs |
 | 130 | interrupt | — |
 
-Crash codes: `E_VALIDATION` (schema/XOR/unknown target/boolean node names/bare keys in pool routing/defaults-inherited self-edges), `E_RENDER` (broken decision-node template: missing file, depth > 10, empty required render), `E_DEADLINE` (pipeline timeout), `E_INPUTS` (source exited non-zero — a broken producer is not an empty queue), `E_INPUTS_LIMIT` (> 10k), `E_HARNESS`, `E_INTERNAL`.
+A fixed delay separates attempts and the fallback switch (`MEDULLA_RETRY_DELAY_S`, default 2s — retry storms hit provider rate limits).
+
+Crash codes: `E_VALIDATION` (schema/XOR/unknown target/boolean node names/bare keys in pool routing/defaults-inherited self-edges), `E_RENDER` (broken decision-node template: missing file, depth > 10, empty required render), `E_DEADLINE` (pipeline timeout), `E_INPUTS` (source exited non-zero, or emitted mixed-kind/array elements — a broken producer is not an empty queue), `E_INPUTS_LIMIT` (> 10k), `E_HARNESS`, `E_INTERNAL`.
 
 `E_HARNESS` is razor-thin by design: **only** "harness binary missing / unresolvable". An agent process dying unexpectedly (OOM, segfault, API hiccup) is always a non-zero exit — class B, retryable. If that boundary drifts, transient flakes start crashing whole runs.
 
@@ -257,7 +259,7 @@ The error **message is the body of the signal** that routed to `__exit_fail__` (
 
 **Finish** — atomic `outcome.json`, exit 0/2; crashes write `outcome.json` with the `E_*` code and exit 1; SIGINT → best-effort outcome, exit 130.
 
-**Resume** — pick the latest run without `outcome.json` or with `outcome: interrupted` (or `--run <dir>`): reload the **snapshot** config (a run's config is immutable), vars, journal position; an interrupted pool continues from the manifest done-mask (input identity = `(index, hash)`; sources are never re-executed on resume); an interrupted decision node re-runs whole (body idempotence is the author's concern). The deadline is fresh per invocation.
+**Resume** — pick the latest run without `outcome.json`, or with `outcome: interrupted` **or `crashed`** (deliberate extension: the #1 resume trigger is the `E_DEADLINE` crash; config-class crashes simply crash again identically) — or `--run <dir>`: reload the **snapshot** config (a run's config is immutable), vars, journal position; an interrupted pool continues from the manifest done-mask (input identity = `(index, hash)`; sources are never re-executed on resume); an interrupted decision node re-runs whole (body idempotence is the author's concern). The deadline is fresh per invocation.
 
 ### Layout
 
@@ -270,16 +272,18 @@ A pipeline is a self-contained directory — contract, code, history:
   harness/                 # phase 2: harness HOME (sessions), shared by all runs
   runs/<ts>-<run_id>/      # one directory per run
     pipeline.yaml          # config snapshot as loaded (immutable for the run)
-    journal.jsonl          # graph chronology, append-only (step, node, rc, signal, duration)
+    journal.jsonl          # graph chronology, append-only (step, node, rc, signal, message, duration)
     vars.yaml              # variables (updated on var signals)
     outcome.json           # written only on completion (atomic); absent = running or hard-killed
     steps/
-      001-triage.txt                     # single-attempt node → one file
+      001-triage/                        # every step gets a directory
       002-plan/prompt.md                 # rendered agent input (what the agent actually saw)
       002-plan/attempt-1-codex.txt       # raw CLI stream per attempt
       004-apply/inputs.json              # inputs snapshot (resume)
       004-apply/input-2-sonnet.txt       # per-input logs
-      004-apply/manifest.jsonl           # {index, input, ok, rc, signal, duration_s, log}
+      004-apply/manifest.jsonl           # {index, key, input, ok, reason, signal, message,
+                                         #  rc, timed_out, attempts, fallback, harness, model,
+                                         #  vars, updates, duration_s, log}
 ```
 
 Retention: on start, keep the newest `keep_runs` finished runs; directories without `outcome.json` younger than the pipeline timeout are never pruned. History browsing needs no CLI: `ls runs/`, `cat outcome.json`.
@@ -334,4 +338,4 @@ The v1 engine is removed; this table is the dictionary for porting old pipelines
 
 ### Reserved (designed, not implemented — in priority order)
 
-`backoff` / `retry_delay` (retry storms hit provider rate limits; first in line) · `stall_timeout` (no-stdout watchdog for hung agents; partially covered today by per-harness flags — codex `stream_idle_timeout_ms`, agy `--print-timeout`) · manifest attempt states (`claimed|started|completed`) + per-node resume policy `rerun|skip|probe` (exactly-once is impossible; make duplicate side effects detectable) · `resume:` (continue a node's session — phase 2) · `cancel_rest` (race joins) · `on_input_fail: abort` (fail-fast pools) · `format:` on sources (override sniffing) · `finally` (best-effort only, if reality ever demands it) · agent-block defaults.
+`stall_timeout` (no-stdout watchdog for hung agents; partially covered today by per-harness flags — codex `stream_idle_timeout_ms`, agy `--print-timeout`) · manifest attempt states (`claimed|started|completed`) + per-node resume policy `rerun|skip|probe` (exactly-once is impossible; make duplicate side effects detectable) · `resume:` (continue a node's session — phase 2) · `cancel_rest` (race joins) · `on_input_fail: abort` (fail-fast pools) · `format:` on sources (override sniffing) · `finally` (best-effort only, if reality ever demands it) · agent-block defaults.

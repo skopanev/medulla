@@ -205,7 +205,8 @@ nodes:
     assert run_pipeline(path, workdir=work) == 0
     run, _, journal = read_run(path.parent)
     prompt = (run / "steps" / "001-a" / "prompt.md").read_text()
-    assert prompt == "Say: hello world"
+    assert prompt.startswith("Say: hello world")
+    assert "Signal protocol" in prompt          # the engine delivers the syntax
     assert journal[0]["harness"] == "fake"
 
 

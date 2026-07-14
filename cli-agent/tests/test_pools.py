@@ -336,7 +336,7 @@ nodes:
     run, _, _ = read_run(path.parent)
     p1 = (run / "steps" / "001-p" / "input-0001" / "prompt.md").read_text()
     p4 = (run / "steps" / "001-p" / "input-0004" / "prompt.md").read_text()
-    assert p1 == "task for aa" and p4 == "task for dd"
+    assert p1.startswith("task for aa") and p4.startswith("task for dd")
 
 
 def test_fold_sequential_accumulator(tmp_path):

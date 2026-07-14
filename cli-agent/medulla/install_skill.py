@@ -5,8 +5,8 @@ Usage:
     medulla install-skill <name> --claude  # skill → Claude Code only
     medulla install-skill <name> --cursor  # skill → Cursor only
 
-Workflow files are bundled inside the medulla package under medulla/workflows/<name>/.
-They are copied to .medulla/workflows/<name>/ in the current project.
+Workflow files are bundled inside the medulla package under medulla/pipelines/<name>/.
+They are copied to .medulla/pipelines/<name>/ in the current project.
 SKILL.md is also installed into Claude Code and/or Cursor.
 """
 
@@ -24,12 +24,12 @@ _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 def _find_local_skill_md(name: str) -> tuple[Path, Path] | None:
     """Return (skill_md, workflow_dir) from local filesystem, or None.
     Resolves symlinks so the source dir stays valid after dest cleanup."""
-    # source-tree location: cli-agent/workflows/ (when running from repo)
+    # source-tree location: cli-agent/pipelines/ (when running from repo)
     pkg_parent = Path(__file__).resolve().parent.parent
     candidates = [
         Path(name) / "SKILL.md",
-        pkg_parent / "workflows" / name / "SKILL.md",
-        Path(".medulla") / "workflows" / name / "SKILL.md",
+        pkg_parent / "pipelines" / name / "SKILL.md",
+        Path(".medulla") / "pipelines" / name / "SKILL.md",
     ]
     for candidate in candidates:
         if candidate.is_file():
@@ -61,7 +61,7 @@ def _install_from_dir(name: str, workflow_dir: Path, skill_md: Path,
                       *, claude: bool, cursor: bool) -> int:
     text = skill_md.read_text(encoding="utf-8")
 
-    dest_wf = Path(".medulla") / "workflows" / name
+    dest_wf = Path(".medulla") / "pipelines" / name
     if dest_wf.is_symlink():
         dest_wf.unlink()
     elif dest_wf.exists():
@@ -91,7 +91,7 @@ def install_skill(name: str, *, claude: bool, cursor: bool) -> int:
     # try bundled package first — do everything inside the as_file context
     # so the temp dir stays alive for the duration of the copy
     try:
-        pkg = resources.files("medulla") / "workflows" / name
+        pkg = resources.files("medulla") / "pipelines" / name
         with resources.as_file(pkg) as wf_path:
             if wf_path.is_dir():
                 skill_md = wf_path / "SKILL.md"
@@ -128,7 +128,7 @@ def run_install_skill(argv: list[str]) -> int:
     if rc == 0:
         # Provision the runtime too, sourced from the (global) install, so a
         # single `install-skill` yields a docker-runnable setup — no separate
-        # `init` step. Idempotent; never touches .medulla/workflows/.
+        # `init` step. Idempotent; never touches .medulla/pipelines/.
         from .init import run_init
         run_init()
     return rc

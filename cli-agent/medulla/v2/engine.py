@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..signals import extract_signals  # v1 utility, pure text extraction — kept
+from .signals import extract_signals  # v1 utility, pure text extraction — kept
 from .classify import Move, Verdict, classify_attempt, next_move
 from .contract import load_pipeline, VAR_NAME_RE
 from .errors import (
@@ -30,6 +30,24 @@ from .render import RenderError, render
 from .rundir import RunStore
 
 EXIT_CODE = {"succeeded": 0, "crashed": 1, "failed": 2, "interrupted": 130}
+
+# The contract promises: "Never quote signal syntax literally in prompts —
+# describe it; the engine delivers the syntax to the agent." This is that
+# delivery, appended to every agent prompt FILE (never to inherited prompt
+# text, so it is stamped exactly once per written file). Found by the first
+# live smoke: without it, agents cannot know the tag format -> __default__.
+SIGNAL_PROTOCOL = """
+
+## Signal protocol (engine-provided)
+
+To emit a signal named NAME, print this on its own line in your final message
+(replace NAME and the body; do not wrap it in backticks or quotes):
+
+<signal:NAME>short message</signal:NAME>
+
+Emit a signal only when the task tells you to. Print it as plain text in your
+answer — never via a shell command or a file.
+"""
 
 
 def log(msg: str) -> None:
@@ -456,7 +474,7 @@ class Engine:
         else:
             raise EngineCrash(E_RENDER, "agent action has no prompt", node=node.name)
         prompt_file = step_dir / ("prompt.md" if phase == "primary" else "prompt-fallback.md")
-        prompt_file.write_text(prompt_text, encoding="utf-8")
+        prompt_file.write_text(prompt_text + SIGNAL_PROTOCOL, encoding="utf-8")
         timeout_s = self._clamp(self.p.action_timeout(action))
         invoke = adapter.build(rendered_spec, prompt_file, prompt_text, timeout_s)
         return invoke, prompt_text, rendered_spec

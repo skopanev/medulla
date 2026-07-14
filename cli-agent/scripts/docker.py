@@ -73,7 +73,7 @@ def build_run_command(image, volumes, args, container_name: str) -> list[str]:
         "VERTEX_LOCATION",
         "INTERCOM_TOKEN",
         "INTERCOM_ADMIN_ID",
-        "MEDULLA_TASK_ID",
+        "MEDULLA_RUN_ID",
         "MEDULLA_BRIDGE",
     ):
         val = os.environ.get(key)
@@ -85,6 +85,9 @@ def build_run_command(image, volumes, args, container_name: str) -> list[str]:
 
     cmd.extend(volumes)
     cmd.extend(["-w", "/workspace"])
+    # inside the container the sandbox IS the isolation: adapters (agy trust
+    # preflight) key off this
+    cmd.extend(["-e", "MEDULLA_DOCKER=1"])
     cmd.extend([image, "medulla"])
     cmd.extend(args)
     return cmd
