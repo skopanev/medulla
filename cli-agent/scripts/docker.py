@@ -54,6 +54,34 @@ def interactive_stdio() -> bool:
 
 
 
+def _parse_env_file(path: Path) -> dict:
+    out = {}
+    if not path.is_file():
+        return out
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        k = k.strip()
+        if k and not k.startswith("MEDULLA_"):
+            out[k] = v.strip().strip('"').strip("'")
+    return out
+
+
+def _collect_dotenv(workflow: str | None) -> dict:
+    merged = _parse_env_file(Path.home() / ".medulla" / ".env")
+    if workflow:
+        wdir = Path(workflow).resolve()
+        for parent in reversed(list(wdir.parents)):
+            merged.update(_parse_env_file(parent / ".medulla" / ".env"))
+        merged.update(_parse_env_file(wdir / ".env"))
+    return merged
+
+
+workflow_dir_for_env = None
+
+
 def build_run_command(image, volumes, args, container_name: str) -> list[str]:
     cmd = ["docker", "run", "--init", "--rm", "--name", container_name]
     if sys.stdin.isatty():
@@ -83,18 +111,12 @@ def build_run_command(image, volumes, args, container_name: str) -> list[str]:
     if not os.environ.get("GEMINI_API_KEY") and os.environ.get("GOOGLE_API_KEY"):
         cmd.extend(["-e", f"GEMINI_API_KEY={os.environ['GOOGLE_API_KEY']}"])
 
-    # ~/.medulla/.env (global secrets) lives on the HOST — forward its keys;
-    # the project/pipeline .env tiers ride /workspace and need no help
-    global_env = Path.home() / ".medulla" / ".env"
-    if global_env.is_file():
-        for line in global_env.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            k = k.strip()
-            if k and not k.startswith("MEDULLA_"):
-                cmd.extend(["-e", f"{k}={v.strip()}"])
+    # Forward the merged .env tiers (global < project < pipeline, nearest wins).
+    # The project/pipeline files DO ride /workspace, but the in-image medulla may
+    # predate the .env feature (images bake medulla at build time) — forwarding
+    # the merge as real env works with any engine inside.
+    for k, v in _collect_dotenv(workflow_dir_for_env).items():
+        cmd.extend(["-e", f"{k}={v}"])
 
     cmd.extend(volumes)
     cmd.extend(["-w", "/workspace"])
@@ -449,6 +471,8 @@ def main():
     claude_config = os.environ.get("CLAUDE_CONFIG_DIR")
     claude_home = Path(claude_config).expanduser().resolve() if claude_config else Path.home() / ".claude"
 
+    global workflow_dir_for_env
+    workflow_dir_for_env = workflow
     volumes = build_volumes(claude_home, mount_agy=pipeline_uses_agy(workflow))
 
     # Mount extra folders into /workspace/<name> (nested mount inside workspace)
