@@ -12,10 +12,10 @@ graph = nodes + on_signal edges + two terminals (__exit_ok__ / __exit_fail__)
 ## Getting started
 
 ```bash
-pipx install git+https://github.com/skopanev/medulla.git   # recommended (isolated)
-# pip install git+https://github.com/skopanev/medulla.git  # same, into the current env
-# pipx upgrade medulla                                     # update later (= medulla upgrade)
-# development: git clone && pip install -e medulla/        # edits apply instantly
+curl -sSL https://raw.githubusercontent.com/skopanev/medulla/main/install.sh | bash
+# (own venv + ~/.local/bin/medulla; re-run to update. Alternatives:
+#  pipx install git+https://github.com/skopanev/medulla.git
+#  dev: MEDULLA_REPO=/path/to/checkout bash install.sh — editable, edits apply instantly)
 
 cd your-project
 medulla init my-pipe              # scaffold: commented pipeline.yaml, README, .gitignore, prompts/
