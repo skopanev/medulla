@@ -49,17 +49,9 @@ class RunStore:
                 pass
             self._lock_fd = None
 
-    GITIGNORE = ".env\nruns/\n"   # secrets and run noise never belong in git
-
     @classmethod
     def create(cls, pipeline_dir: Path, config_text: str, run_id: str | None = None) -> "RunStore":
         run_id = run_id or os.environ.get("MEDULLA_RUN_ID", "").strip() or uuid.uuid4().hex[:8]
-        gi = pipeline_dir / ".gitignore"
-        if not gi.exists():                     # author's own file always wins
-            try:
-                gi.write_text(cls.GITIGNORE, encoding="utf-8")
-            except OSError:
-                pass                            # read-only pipeline dir: not our problem
         ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         run_dir = pipeline_dir / "runs" / f"{ts}-{run_id}"
         run_dir.mkdir(parents=True, exist_ok=False)

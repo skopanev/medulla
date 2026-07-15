@@ -16,11 +16,19 @@ def entry() -> int:
 
     # documented subcommands (before any flag parsing)
     if argv and argv[0] == "init":
-        from .init import run_init, scaffold_pipeline
-        if len(argv) > 1 and not argv[1].startswith("-"):
-            run_init()                      # runtime first (idempotent)
-            return scaffold_pipeline(argv[1])
-        return run_init()
+        from .init import bundled_templates, deploy_template, run_init, scaffold_pipeline
+        if len(argv) < 2 or argv[1].startswith("-"):
+            names = ", ".join(bundled_templates()) or "none bundled"
+            print("usage: medulla init <name>", file=sys.stderr)
+            print(f"  a bundled template name deploys that template ({names});",
+                  file=sys.stderr)
+            print("  any other name scaffolds a new pipeline", file=sys.stderr)
+            return 1
+        run_init()                          # project runtime (.medulla/), idempotent
+        name = argv[1]
+        if name in bundled_templates():
+            return deploy_template(name)
+        return scaffold_pipeline(name)
     if argv and argv[0] == "install-skill":
         from .install_skill import run_install_skill
         return run_install_skill(argv[1:])

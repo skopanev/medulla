@@ -276,15 +276,33 @@ def test_entry_dispatches_documented_subcommands(tmp_path, monkeypatch):
     assert called["argv"] == ["pipx", "upgrade", "medulla"]
 
 
-def test_pipeline_gitignore_seeded_not_clobbered(tmp_path):
+def test_run_does_not_touch_pipeline_dir_files(tmp_path):
+    # owner decision: no gitignore magic at run time — init owns scaffolding
     text = 'version: "2"\nstart: a\nnodes:\n  a:\n    shell: \'echo "<signal:ok>k</signal:ok>"\'\n    on_signal: {ok: __exit_ok__}\n'
     path, work = setup(tmp_path, text)
     assert run_pipeline(path, workdir=work) == 0
-    gi = path.parent / ".gitignore"
-    assert ".env" in gi.read_text() and "runs/" in gi.read_text()
-    gi.write_text("# mine\n", encoding="utf-8")          # author's file
-    assert run_pipeline(path, workdir=work) == 0
-    assert gi.read_text() == "# mine\n"                  # never clobbered
+    assert not (path.parent / ".gitignore").exists()
+
+
+def test_init_without_name_prints_usage(tmp_path, monkeypatch, capsys):
+    import medulla.cli as shim
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["medulla", "init"])
+    assert shim.entry() == 1
+    err = capsys.readouterr().err
+    assert "usage: medulla init <name>" in err and "spar" in err
+
+
+def test_init_deploys_bundled_template(tmp_path, monkeypatch):
+    import medulla.cli as shim
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["medulla", "init", "spar"])
+    assert shim.entry() == 0
+    pdir = tmp_path / ".medulla" / "pipelines" / "spar"
+    assert (pdir / "pipeline.yaml").is_file()
+    assert (pdir / "prompts" / "spar.md").is_file()
+    assert ".env" in (pdir / ".gitignore").read_text()
+    assert not (pdir / "runs").exists()                  # template noise excluded
 
 
 def test_init_scaffolds_a_pipeline(tmp_path, monkeypatch):

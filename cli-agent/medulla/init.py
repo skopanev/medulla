@@ -105,6 +105,41 @@ A medulla pipeline. Edit pipeline.yaml; keep prompts in prompts/.
 GITIGNORE = ".env\nruns/\n"
 
 
+def bundled_templates() -> list[str]:
+    try:
+        from importlib import resources
+        root = resources.files("medulla") / "pipelines"
+        return sorted(d.name for d in root.iterdir()
+                      if d.is_dir() and (d / "pipeline.yaml").is_file())
+    except Exception:
+        src = Path(__file__).resolve().parent.parent / "pipelines"
+        if src.is_dir():
+            return sorted(d.name for d in src.iterdir()
+                          if (d / "pipeline.yaml").is_file())
+        return []
+
+
+def deploy_template(name: str) -> int:
+    """Copy a bundled pipeline (template) into the project."""
+    import shutil
+    dest = Path(".medulla") / "pipelines" / name
+    if (dest / "pipeline.yaml").exists():
+        print(f"error: {dest}/pipeline.yaml already exists")
+        return 1
+    from importlib import resources
+    try:
+        src = resources.files("medulla") / "pipelines" / name
+        src_path = Path(str(src))
+    except Exception:
+        src_path = Path(__file__).resolve().parent.parent / "pipelines" / name
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src_path, dest, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns("runs", "__pycache__", "*.pyc"))
+    print(f"deployed template '{name}' -> {dest}/")
+    print(f"  run:   medulla -w {dest}")
+    return 0
+
+
 def scaffold_pipeline(name: str) -> int:
     import re
     if not re.match(r"^[A-Za-z][A-Za-z0-9_-]*$", name):
