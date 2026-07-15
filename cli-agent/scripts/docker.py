@@ -54,6 +54,25 @@ def interactive_stdio() -> bool:
 
 
 
+# env keys harnesses need — the ONLY keys forwarded from host env and from the
+# outer .env tiers (global/project hold unrelated secrets: slack, telegram...)
+HARNESS_ENV_KEYS = (
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "OPENAI_API_KEY",
+    "ZHIPU_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GOOGLE_CLOUD_PROJECT",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "VERTEX_LOCATION",
+    "INTERCOM_TOKEN",
+    "INTERCOM_ADMIN_ID",
+    "MEDULLA_RUN_ID",
+    "MEDULLA_BRIDGE",
+)
+
+
 def _parse_env_file(path: Path) -> dict:
     out = {}
     if not path.is_file():
@@ -70,16 +89,26 @@ def _parse_env_file(path: Path) -> dict:
 
 
 def _collect_dotenv(workflow: str | None) -> dict:
-    merged = _parse_env_file(Path.home() / ".medulla" / ".env")
+    """Merge order is explicit and fixed: global < project < pipeline —
+    THE NEAREST TIER WINS on key conflict (a pipeline's test token must beat
+    the global one, never the reverse).
+
+    Outer tiers (global/project) are passlisted to harness keys only — they
+    hold unrelated secrets (slack, telegram) that must not leak into every
+    container. The pipeline's own .env forwards whole: it is pipeline-scoped
+    by design."""
+    merged = {k: v for k, v in _parse_env_file(Path.home() / ".medulla" / ".env").items()
+              if k in HARNESS_ENV_KEYS}
     if workflow:
         wdir = Path(workflow).resolve()
         for parent in reversed(list(wdir.parents)):
-            merged.update(_parse_env_file(parent / ".medulla" / ".env"))
-        merged.update(_parse_env_file(wdir / ".env"))
+            tier = _parse_env_file(parent / ".medulla" / ".env")
+            merged.update({k: v for k, v in tier.items() if k in HARNESS_ENV_KEYS})
+        merged.update(_parse_env_file(wdir / ".env"))     # pipeline tier: whole
     return merged
 
 
-workflow_dir_for_env = None
+env_file_for_run = None
 
 
 def build_run_command(image, volumes, args, container_name: str) -> list[str]:
@@ -89,21 +118,7 @@ def build_run_command(image, volumes, args, container_name: str) -> list[str]:
     if interactive_stdio():
         cmd.append("-t")
 
-    for key in (
-        "ANTHROPIC_API_KEY",
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "OPENAI_API_KEY",
-        "ZHIPU_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-        "GOOGLE_CLOUD_PROJECT",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        "VERTEX_LOCATION",
-        "INTERCOM_TOKEN",
-        "INTERCOM_ADMIN_ID",
-        "MEDULLA_RUN_ID",
-        "MEDULLA_BRIDGE",
-    ):
+    for key in HARNESS_ENV_KEYS:
         val = os.environ.get(key)
         if val:
             cmd.extend(["-e", f"{key}={val}"])
@@ -111,12 +126,10 @@ def build_run_command(image, volumes, args, container_name: str) -> list[str]:
     if not os.environ.get("GEMINI_API_KEY") and os.environ.get("GOOGLE_API_KEY"):
         cmd.extend(["-e", f"GEMINI_API_KEY={os.environ['GOOGLE_API_KEY']}"])
 
-    # Forward the merged .env tiers (global < project < pipeline, nearest wins).
-    # The project/pipeline files DO ride /workspace, but the in-image medulla may
-    # predate the .env feature (images bake medulla at build time) — forwarding
-    # the merge as real env works with any engine inside.
-    for k, v in _collect_dotenv(workflow_dir_for_env).items():
-        cmd.extend(["-e", f"{k}={v}"])
+    # Forward the merged .env tiers via --env-file, not -e: values on the
+    # command line leak into `ps` during start and `docker inspect` forever.
+    if env_file_for_run:
+        cmd.extend(["--env-file", env_file_for_run])
 
     cmd.extend(volumes)
     cmd.extend(["-w", "/workspace"])
@@ -365,10 +378,20 @@ def run_docker(image, volumes, args):
     container_name = f"medulla-{uuid.uuid4().hex[:8]}"
     cmd = build_run_command(image, volumes, args, container_name)
 
-    if interactive_stdio():
-        return exec_docker_foreground(cmd, container_name)
-
-    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, start_new_session=True)
+    # single subprocess path (no execvp): the temp env-file must be deleted
+    # after docker has read it; stdio inheritance keeps -it interactive
+    stdin = None if sys.stdin.isatty() else subprocess.DEVNULL
+    proc = subprocess.Popen(cmd, stdin=stdin, start_new_session=True)
+    if env_file_for_run:
+        import threading
+        def _cleanup():
+            import time
+            time.sleep(5)                     # docker reads --env-file at start
+            try:
+                os.unlink(env_file_for_run)
+            except OSError:
+                pass
+        threading.Thread(target=_cleanup, daemon=True).start()
     interrupted = {"count": 0}
 
     def run_sigint(signum, frame):
@@ -471,8 +494,15 @@ def main():
     claude_config = os.environ.get("CLAUDE_CONFIG_DIR")
     claude_home = Path(claude_config).expanduser().resolve() if claude_config else Path.home() / ".claude"
 
-    global workflow_dir_for_env
-    workflow_dir_for_env = workflow
+    global env_file_for_run
+    dotenv = _collect_dotenv(workflow)
+    if dotenv:
+        import tempfile
+        fd, env_file_for_run = tempfile.mkstemp(prefix="medulla-env-")
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as f:
+            for k, v in dotenv.items():
+                f.write(f"{k}={v}\n")
     volumes = build_volumes(claude_home, mount_agy=pipeline_uses_agy(workflow))
 
     # Mount extra folders into /workspace/<name> (nested mount inside workspace)
