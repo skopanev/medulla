@@ -1,5 +1,11 @@
 # AGENTS.md
 
+## Versioning
+
+- **Any behavioral change bumps the version** (4.0.0 -> 4.0.1) in pyproject.toml,
+  in the same commit. pipx/pip silently skip same-version git installs — the
+  container self-heal and user upgrades depend on the bump.
+
 ## Git
 
 - **NEVER add "Co-Authored-By"** to commits
