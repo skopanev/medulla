@@ -169,11 +169,34 @@ class AttemptsOutcome:
     updates: list[str] = field(default_factory=list)
 
 
+def load_dotenv(pipeline_dir: Path) -> dict[str, str]:
+    """<pipeline>/.env -> child env for bodies/hooks (pilot pattern). Secrets
+    channel: NOT vars — never templated, never persisted to vars.yaml, never
+    in the run snapshot. KEY=VALUE lines, # comments, optional quotes."""
+    path = pipeline_dir / ".env"
+    if not path.is_file():
+        return {}
+    out: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key.startswith("MEDULLA_"):
+            log(f"warn: .env key '{key}' ignored (engine namespace)")
+            continue
+        out[key] = value
+    return out
+
+
 class Engine:
     def __init__(self, pipeline: Pipeline, store: RunStore, workdir: Path):
         self.p = pipeline
         self.store = store
         self.workdir = workdir
+        self.dotenv = load_dotenv(pipeline.dir) if pipeline.dir else {}
         self.vars: dict[str, str] = dict(pipeline.vars)
         self.last: dict = {}
         self.deadline: float | None = (
@@ -204,7 +227,7 @@ class Engine:
 
     # ── env ──
     def _base_env(self, vars_map: dict[str, str] | None = None) -> dict[str, str]:
-        env = dict(self.vars if vars_map is None else vars_map)
+        env = {**self.dotenv, **(self.vars if vars_map is None else vars_map)}
         env["MEDULLA_RUN_ID"] = self.store.run_id
         env["MEDULLA_RUN_DIR"] = str(self.store.dir)
         for node_name, path in self.manifests.items():
@@ -250,6 +273,37 @@ class Engine:
                               node=node.name)
         return rendered
 
+    def _make_echo(self, node: Node):
+        """Operator streaming: shell lines as-is (signals hidden), agent lines
+        through the adapter's per-line renderer. Display channel ONLY — the
+        signal scanner still reads the captured stdout post-hoc.
+        MEDULLA_STREAM=0 silences (tests, CI)."""
+        if os.environ.get("MEDULLA_STREAM", "1") == "0":
+            return None
+        action = node.action
+        if action.kind == "shell":
+            def echo(tag, line):
+                from .harness import _ANSI_RE
+                clean = _ANSI_RE.sub("", line.rstrip())
+                if clean and not clean.lstrip().startswith("<signal:"):
+                    print(f"  {clean}", file=sys.stderr)
+            return echo
+        try:
+            adapter = resolve_harness(action.agent) if action.agent and                 "{{" not in action.agent.harness else None
+        except EngineCrash:
+            adapter = None
+        def echo(tag, line):
+            if tag != "out" or adapter is None:
+                return
+            rendered = adapter.stream_line(line)
+            if not rendered:
+                return
+            shown = "\n".join(f"  {l}" for l in rendered.splitlines()
+                              if l.strip() and not l.lstrip().startswith("<signal:"))
+            if shown:
+                print(shown, file=sys.stderr)
+        return echo
+
     # ── the attempts seam ────────────────────────────────────────────────────
     # Owns the FULL hook machinery (panel: pre and post live INSIDE the seam so
     # part-3 pool workers get identical semantics by calling this per input):
@@ -268,6 +322,7 @@ class Engine:
         known: set[str] | None,
         env_fn=None,
         pool_mode: bool = False,
+        echo=None,
     ) -> AttemptsOutcome:
         # env_fn: callable -> dict, the base env for hooks and bodies. Decision nodes
         # default to self._base_env (pre vars land in self.vars and are picked up on
@@ -344,7 +399,7 @@ class Engine:
             result = proc_run(invoke.argv, self.workdir, eff, extra_env=env,
                               log_path=step_dir / f"attempt-{total}-{tag}.txt",
                               stdin_data=invoke.stdin, env_remove=invoke.env_remove,
-                              merge_stderr=invoke.merge_stderr)
+                              merge_stderr=invoke.merge_stderr, echo=echo)
 
             raw_text = result.stdout
             if current.kind == "agent":
@@ -497,7 +552,8 @@ class Engine:
             node, step_dir, render_fn,
             apply_pre_vars=self._apply_vars,    # decision = max_parallel 1: vars apply live
             attempt_ns=f"{step_no:03d}", known=known,
-        )
+            echo=self._make_echo(node),         # live operator stream (decision only:
+        )                                       # pool workers would interleave into soup
         if outcome.timed_out and (rem := self._remaining()) is not None and rem <= 0:
             # killed by the exhausted RUN budget, not its own timeout: a __failed__
             # here would be exit 2 (not resumable) — this is E_DEADLINE, same law

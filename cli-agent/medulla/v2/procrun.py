@@ -50,6 +50,7 @@ def run(
     stdin_data: str | None = None,
     env_remove: list[str] | None = None,
     merge_stderr: bool = False,
+    echo=None,   # callable(tag, line) for live operator streaming
 ) -> RunResult:
     if isinstance(command, str):
         shell = os.environ.get("SHELL", "bash")
@@ -95,6 +96,11 @@ def run(
                 if log_file:
                     with log_lock:
                         log_file.write(f"[{tag}] {line}")
+                if echo is not None:
+                    try:
+                        echo(tag, line)
+                    except Exception:
+                        pass
         finally:
             try:
                 pipe.close()

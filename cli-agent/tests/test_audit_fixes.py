@@ -160,3 +160,41 @@ nodes:
     sleepers = subprocess.run(["pgrep", "-f", "sleep 30"],
                               capture_output=True).stdout.decode().split()
     assert not sleepers                          # no orphaned children
+
+
+def test_dotenv_reaches_bodies_but_not_vars(tmp_path):
+    from medulla.v2.engine import run_pipeline
+    pdir = tmp_path / "pipe"
+    pdir.mkdir()
+    (pdir / ".env").write_text(
+        '# secrets\nAPI_SECRET="s3cr3t"\nMEDULLA_RUN_ID=hijack\n', encoding="utf-8")
+    (pdir / "pipeline.yaml").write_text("""
+version: "2"
+start: a
+nodes:
+  a:
+    shell: |
+      [ "$API_SECRET" = "s3cr3t" ] || exit 9
+      [ "$MEDULLA_RUN_ID" != "hijack" ] || exit 8
+      echo "sub={{var:API_SECRET:-unset}}" > tpl.txt
+      echo "<signal:ok>k</signal:ok>"
+    on_signal: {ok: __exit_ok__}
+""", encoding="utf-8")
+    work = tmp_path / "work"
+    work.mkdir()
+    assert run_pipeline(pdir / "pipeline.yaml", workdir=work) == 0
+    run = next((pdir / "runs").iterdir())
+    assert "API_SECRET" not in (run / "vars.yaml").read_text()   # env, never a var
+    assert (work / "tpl.txt").read_text().strip() == "sub=unset" # not templated
+
+
+def test_stream_line_renderers():
+    a = H.ClaudeAdapter.__new__(H.ClaudeAdapter)
+    ev = json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "text", "text": "thinking about it"}]}})
+    assert a.stream_line(ev) == "thinking about it"
+    assert a.stream_line(json.dumps({"type": "system"})) is None
+    c = H.CodexAdapter.__new__(H.CodexAdapter)
+    started = json.dumps({"type": "item.started",
+                          "item": {"type": "command_execution", "command": "ls"}})
+    assert c.stream_line(started) == "$ ls"

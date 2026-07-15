@@ -87,6 +87,15 @@ class HarnessAdapter:
         channel — appended to the __failed__ message only). Default: none."""
         return None
 
+    def stream_line(self, line: str) -> str | None:
+        """Operator-facing live rendering of ONE raw output line (v1 streamed,
+        v2 was silent for 30-minute runs — spar panel/audit). Returns display
+        text or None to hide. NEVER feeds the signal scanner — display only."""
+        line = _ANSI_RE.sub("", line.rstrip())
+        if not line or line.lstrip().startswith("<signal:"):
+            return None
+        return line
+
 
 # ── fake (tests) ─────────────────────────────────────────────────────────────
 
@@ -149,6 +158,21 @@ class ClaudeAdapter(HarnessAdapter):
                     parts.append(raw.get("output", ""))  # dropping it = permanent __default__
             # user messages (tool_result), tool_use blocks, system events: SKIP
         return "\n".join(p for p in parts if p)
+
+    def stream_line(self, line: str) -> str | None:
+        line = line.strip()
+        if not line.startswith("{"):
+            return None
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if event.get("type") == "assistant":
+            texts = [b.get("text", "") for b in event.get("message", {}).get("content", [])
+                     if isinstance(b, dict) and b.get("type") == "text"]
+            out = " ".join(x for x in texts if x).strip()
+            return out or None
+        return None
 
 
 # ── codex ────────────────────────────────────────────────────────────────────
@@ -217,6 +241,21 @@ class CodexAdapter(HarnessAdapter):
             # command_execution aggregated_output is TOOL OUTPUT — never scanned.
             # (v1's <500-char exception violated the contract; dropped.)
         return "\n".join(p for p in parts if p)
+
+    def stream_line(self, line: str) -> str | None:
+        line = line.strip()
+        if not line.startswith("{"):
+            return None
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        item = event.get("item", {})
+        if event.get("type") == "item.completed" and item.get("type") == "agent_message":
+            return item.get("text") or None
+        if event.get("type") == "item.started" and item.get("type") == "command_execution":
+            return f"$ {item.get('command', '')}"     # progress, pilot-style
+        return None
 
 
 # ── opencode ─────────────────────────────────────────────────────────────────
