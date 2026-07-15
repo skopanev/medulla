@@ -54,8 +54,9 @@ def interactive_stdio() -> bool:
 
 
 
-# env keys harnesses need — the ONLY keys forwarded from host env and from the
-# outer .env tiers (global/project hold unrelated secrets: slack, telegram...)
+# env keys harnesses need — filters the HOST SHELL env only (a shell carries
+# hundreds of unrelated vars; forwarding it whole would leak). The .env tiers
+# are the user's zone and forward WHOLE via --env-file, no filter.
 HARNESS_ENV_KEYS = (
     "ANTHROPIC_API_KEY",
     "CLAUDE_CODE_OAUTH_TOKEN",
