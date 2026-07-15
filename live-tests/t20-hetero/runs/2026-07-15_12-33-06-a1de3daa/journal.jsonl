@@ -1,0 +1,2 @@
+{"ts": "12:33:15", "step": 1, "node": "panel", "kind": "pool", "signal": "__done__", "next": "check", "duration_s": 8.75, "message": "2/2 inputs ok", "inputs_total": 2, "inputs_ok": 2, "min_success": 2}
+{"ts": "12:33:15", "step": 2, "node": "check", "kind": "decision", "signal": "verified", "next": "__exit_ok__", "duration_s": 0.04, "message": "distinct missions delivered", "attempts": 1, "rc": 0, "timed_out": false, "fallback": false, "harness": null, "model": null}

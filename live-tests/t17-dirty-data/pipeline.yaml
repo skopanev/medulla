@@ -1,0 +1,19 @@
+# hostile input data through the env channel: quotes, $(...), emoji, spaces
+version: "2"
+start: sweep
+timeout: 120
+nodes:
+  sweep:
+    inputs: {shell: "printf '{\"id\": 1, \"text\": \"it'\\''s \\\"quoted\\\"\"}\n{\"id\": 2, \"text\": \"has $(rm -rf /tmp/nope) inside\"}\n{\"id\": 3, \"text\": \"emoji 🚀 and spaces\"}\n'", timeout: 10}
+    max_parallel: 3
+    shell: 'printf "%s" "$MEDULLA_INPUT_TEXT" > "dirty-$MEDULLA_INPUT_INDEX.txt"'
+    timeout: 30
+    on_signal: {__done__: check}
+  check:
+    shell: |
+      grep -q 'it'"'"'s "quoted"' dirty-1.txt && \
+      grep -q '$(rm -rf /tmp/nope) inside' dirty-2.txt && \
+      grep -q '🚀' dirty-3.txt && \
+      echo "<signal:verified>bytes survived, nothing executed</signal:verified>"
+    timeout: 15
+    on_signal: {verified: __exit_ok__}

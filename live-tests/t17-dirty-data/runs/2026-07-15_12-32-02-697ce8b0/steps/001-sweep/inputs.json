@@ -1,0 +1,14 @@
+[
+ {
+  "id": 1,
+  "text": "it's \"quoted\""
+ },
+ {
+  "id": 2,
+  "text": "has $(rm -rf /tmp/nope) inside"
+ },
+ {
+  "id": 3,
+  "text": "emoji 🚀 and spaces"
+ }
+]

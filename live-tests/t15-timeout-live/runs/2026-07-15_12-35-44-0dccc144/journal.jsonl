@@ -1,0 +1,2 @@
+{"ts": "12:36:00", "step": 1, "node": "go", "kind": "decision", "signal": "__failed__", "next": "check", "duration_s": 15.67, "message": "body died: rc=124, 1 attempt(s); stderr:", "attempts": 1, "rc": 124, "timed_out": true, "fallback": false, "harness": "claude-code", "model": "haiku"}
+{"ts": "12:36:00", "step": 2, "node": "check", "kind": "decision", "signal": "verified", "next": "__exit_ok__", "duration_s": 0.07, "message": "timeout killed cleanly, rc=124", "attempts": 1, "rc": 0, "timed_out": false, "fallback": false, "harness": null, "model": null}

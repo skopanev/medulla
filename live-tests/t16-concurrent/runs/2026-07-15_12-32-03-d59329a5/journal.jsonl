@@ -1,0 +1,1 @@
+{"ts": "12:32:06", "step": 1, "node": "work", "kind": "decision", "signal": "ok", "next": "__exit_ok__", "duration_s": 3.07, "message": "done", "attempts": 1, "rc": 0, "timed_out": false, "fallback": false, "harness": null, "model": null}

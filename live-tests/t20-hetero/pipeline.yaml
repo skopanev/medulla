@@ -1,0 +1,21 @@
+# canonical heterogeneous pool: each input carries its own mission text
+version: "2"
+start: panel
+timeout: 500
+nodes:
+  panel:
+    inputs:
+      - {slug: planet, ask: "the name of any planet of the solar system"}
+      - {slug: ocean,  ask: "the name of any ocean of planet Earth"}
+    max_parallel: 2
+    agent: {harness: claude-code, model: haiku}
+    prompt: |
+      Write exactly one word — {{input.ask}} — into a file named
+      hetero-{{input.slug}}.txt. Then emit the signal named done.
+    post: 'test -s "hetero-$MEDULLA_INPUT_SLUG.txt"'
+    timeout: 240
+    on_signal: {__done__: check}
+  check:
+    shell: '[ -s hetero-planet.txt ] && [ -s hetero-ocean.txt ] && ! cmp -s hetero-planet.txt hetero-ocean.txt && echo "<signal:verified>distinct missions delivered</signal:verified>"'
+    timeout: 15
+    on_signal: {verified: __exit_ok__}

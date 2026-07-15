@@ -1,0 +1,12 @@
+version: "2"
+start: sweep
+timeout: 60
+nodes:
+  sweep:
+    inputs: {shell: "true", timeout: 10}
+    shell: "touch never.txt"
+    on_signal: {__done__: __exit_fail__, __empty__: check}
+  check:
+    shell: '[ ! -f never.txt ] && [ "$(wc -l < "$MEDULLA_MANIFEST_SWEEP" | tr -d " ")" = 0 ] && echo "<signal:verified>empty routed, manifest exists</signal:verified>"'
+    timeout: 15
+    on_signal: {verified: __exit_ok__}

@@ -1,0 +1,18 @@
+# 20 inputs, 8 workers: manifest lock and join math under real concurrency
+version: "2"
+start: sweep
+timeout: 180
+nodes:
+  sweep:
+    inputs: {shell: "seq 20", timeout: 10}
+    max_parallel: 8
+    shell: 'sleep 0.$((MEDULLA_INPUT_INDEX % 4)); echo done > "s-$MEDULLA_INPUT.txt"'
+    timeout: 60
+    on_signal: {__done__: check}
+  check:
+    shell: |
+      [ "$(ls s-*.txt | wc -l | tr -d ' ')" = 20 ] && \
+      [ "$(jq -s 'map(select(.ok)) | length' "$MEDULLA_MANIFEST_SWEEP")" = 20 ] && \
+      echo "<signal:verified>20/20 under 8-way parallelism</signal:verified>"
+    timeout: 15
+    on_signal: {verified: __exit_ok__}

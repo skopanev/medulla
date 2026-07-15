@@ -1,0 +1,14 @@
+{
+ "outcome": "failed",
+ "exit_code": 2,
+ "error": {
+  "code": "SIGNAL_FAIL",
+  "message": "no known signal emitted; stdout: 9391},\"type\":\"message\"}],\"speed\":\"standard\"},\"modelUsage\":{\"claude-haiku-4-5-20251001\":{\"inputTokens\":10,\"outputTokens\":188,\"cacheReadInputTokens\":17363,\"cacheCreationInputTokens\":9391,\"webSearchRequests\":0,\"costUSD\":0.0214683,\"contextWindow\":200000,\"maxOutputTokens\":32000}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"uuid\":\"3773676d-268e-4e1e-9e5f-7dbafedeef1a\"}",
+  "node": "go",
+  "step": 1,
+  "signal": "__default__"
+ },
+ "steps": 1,
+ "duration_s": 4.62,
+ "run_id": "c4b1505c"
+}

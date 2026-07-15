@@ -1,0 +1,25 @@
+# pre-guard skips a live agent when the artifact already exists (cache pattern)
+version: "2"
+start: make
+timeout: 500
+nodes:
+  make:
+    agent: {harness: claude-code, model: haiku}
+    prompt: |
+      Create a file named guarded.txt containing the word: cached
+      Then emit the signal named done.
+    post: 'grep -q cached guarded.txt'
+    timeout: 200
+    on_signal: {done: again}
+  again:
+    pre: '[ -s guarded.txt ] && echo "<signal:skip>already made</signal:skip>" || true'
+    agent: {harness: claude-code, model: haiku}
+    prompt: |
+      THIS MUST NEVER RUN. If you are reading this, create the file
+      guard-breach.txt. Then emit the signal named done.
+    timeout: 200
+    on_signal: {skip: check, done: check}
+  check:
+    shell: '[ ! -f guard-breach.txt ] && echo "<signal:verified>agent skipped</signal:verified>"'
+    timeout: 15
+    on_signal: {verified: __exit_ok__}

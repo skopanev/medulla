@@ -1,0 +1,26 @@
+# live A -> signal message -> {{last.message}} render -> live B -> artifact
+version: "2"
+start: pick
+timeout: 500
+nodes:
+  pick:
+    agent: {harness: claude-code, model: haiku}
+    prompt: |
+      Invent a codeword of the form animal-number (like falcon-42).
+      Emit the signal named picked with your codeword as the signal's message
+      body. Do not write any files.
+    timeout: 200
+    on_signal: {picked: carry}
+  carry:
+    agent: {harness: claude-code, model: haiku}
+    prompt: |
+      Write exactly this string into a file named chain.txt (nothing else):
+      {{last.message}}
+      Then emit the signal named done.
+    post: 'test -s chain.txt'
+    timeout: 200
+    on_signal: {done: check}
+  check:
+    shell: 'grep -qE "^[a-zA-Z]+-[0-9]+$" chain.txt && echo "<signal:verified>$(cat chain.txt)</signal:verified>"'
+    timeout: 15
+    on_signal: {verified: __exit_ok__}

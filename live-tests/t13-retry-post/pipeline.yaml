@@ -1,0 +1,19 @@
+# post fails the live agent's first attempt; the engine must re-run agent+post
+version: "2"
+start: go
+timeout: 600
+nodes:
+  go:
+    agent: {harness: claude-code, model: haiku}
+    prompt: |
+      Append exactly one line containing the word "run" to a file named
+      tries.log (create it if absent; do not overwrite, append).
+      Then emit the signal named done.
+    post: '[ "$(grep -c run tries.log)" -ge 2 ]'
+    max_attempts: 2
+    timeout: 240
+    on_signal: {done: check}
+  check:
+    shell: '[ "$(grep -c run tries.log)" -ge 2 ] && echo "<signal:verified>retried live</signal:verified>"'
+    timeout: 15
+    on_signal: {verified: __exit_ok__}

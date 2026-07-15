@@ -1,0 +1,14 @@
+{
+ "outcome": "failed",
+ "exit_code": 2,
+ "error": {
+  "code": "SIGNAL_FAIL",
+  "message": "no known signal emitted; stdout: ication\",\"task_id\":\"brff3i69x\",\"tool_use_id\":\"toolu_0193EPCLnFzAgyF44eS1nqWJ\",\"status\":\"stopped\",\"output_file\":\"/private/tmp/claude-501/-private-var-folders-mt-6k6ls7ws4nx8j1-38hwl14wr0000gn-T-tmp-ySH82Lf0se/48661442-b96c-4522-832c-7a0c322c3b20/tasks/brff3i69x.output\",\"summary\":\"Wait for 120 seconds\",\"uuid\":\"772369d8-49e3-4b2e-822a-805d3bee68c3\",\"session_id\":\"48661442-b96c-4522-832c-7a0c322c3b20\"}",
+  "node": "go",
+  "step": 1,
+  "signal": "__default__"
+ },
+ "steps": 1,
+ "duration_s": 13.05,
+ "run_id": "0b2d5111"
+}
