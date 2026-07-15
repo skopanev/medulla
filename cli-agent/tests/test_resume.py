@@ -274,3 +274,14 @@ def test_entry_dispatches_documented_subcommands(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.argv", ["medulla", "upgrade"])
     assert shim.entry() == 0
     assert called["argv"] == ["pipx", "upgrade", "medulla"]
+
+
+def test_pipeline_gitignore_seeded_not_clobbered(tmp_path):
+    text = 'version: "2"\nstart: a\nnodes:\n  a:\n    shell: \'echo "<signal:ok>k</signal:ok>"\'\n    on_signal: {ok: __exit_ok__}\n'
+    path, work = setup(tmp_path, text)
+    assert run_pipeline(path, workdir=work) == 0
+    gi = path.parent / ".gitignore"
+    assert ".env" in gi.read_text() and "runs/" in gi.read_text()
+    gi.write_text("# mine\n", encoding="utf-8")          # author's file
+    assert run_pipeline(path, workdir=work) == 0
+    assert gi.read_text() == "# mine\n"                  # never clobbered
