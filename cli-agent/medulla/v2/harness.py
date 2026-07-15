@@ -96,6 +96,14 @@ class HarnessAdapter:
             return None
         return line
 
+    def fatal_error(self, stdout: str) -> str | None:
+        """A DETERMINISTIC environment failure (not logged in, invalid key):
+        retrying is pointless, the whole run must crash E_HARNESS with a clear
+        message — the same razor call as agy's untrusted-workspace preflight.
+        Found live: an unauthenticated claude burned 2 attempts x 15 inputs.
+        Default: none."""
+        return None
+
 
 # ── fake (tests) ─────────────────────────────────────────────────────────────
 
@@ -158,6 +166,24 @@ class ClaudeAdapter(HarnessAdapter):
                     parts.append(raw.get("output", ""))  # dropping it = permanent __default__
             # user messages (tool_result), tool_use blocks, system events: SKIP
         return "\n".join(p for p in parts if p)
+
+    def fatal_error(self, stdout: str) -> str | None:
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") == "result" and event.get("is_error"):
+                text = str(event.get("result", ""))
+                if "Not logged in" in text or "Invalid API key" in text \
+                        or "/login" in text:
+                    return f"claude-code is not authenticated: {text!r} — " \
+                           f"run `claude /login` (in docker: keychain-bound OAuth " \
+                           f"does not reach the container; use CLAUDE_CODE_OAUTH_TOKEN)"
+        return None
 
     def stream_line(self, line: str) -> str | None:
         line = line.strip()

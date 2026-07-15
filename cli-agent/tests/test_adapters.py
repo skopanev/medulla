@@ -288,3 +288,44 @@ nodes:
 """
     rc, _ = run_pipe(tmp_path, text)
     assert rc == 0
+
+
+def test_unauthenticated_claude_is_fatal_not_retried(tmp_path, on_path):
+    # live scar (copilot journal run): "Not logged in" burned 2 attempts x 15
+    # inputs — a deterministic auth failure must crash E_HARNESS immediately
+    make_bin(on_path, "claude", r'''
+printf '{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login","session_id":"s"}\n'
+exit 1
+''')
+    text = """
+version: "2"
+start: a
+nodes:
+  a:
+    agent: {harness: claude-code}
+    prompt: "p"
+    max_attempts: 2
+    on_signal: {ok: __exit_ok__}
+"""
+    rc, pdir = run_pipe(tmp_path, text)
+    assert rc == 1
+    import json as _json
+    run = next((pdir / "runs").iterdir())
+    outcome = _json.loads((run / "outcome.json").read_text())
+    assert outcome["error"]["code"] == "E_HARNESS"
+    assert "not authenticated" in outcome["error"]["message"]
+    # exactly ONE attempt file: no retry burned
+    step = run / "steps" / "001-a"
+    assert len(list(step.glob("attempt-*"))) == 1
+
+
+def test_claude_fatal_error_signature():
+    a = H.ClaudeAdapter.__new__(H.ClaudeAdapter)
+    bad = json.dumps({"type": "result", "is_error": True,
+                      "result": "Not logged in · Please run /login"})
+    assert "not authenticated" in a.fatal_error(bad)
+    ok = json.dumps({"type": "result", "is_error": False, "result": "fine"})
+    assert a.fatal_error(ok) is None
+    hard_fail = json.dumps({"type": "result", "is_error": True,
+                            "result": "server overloaded"})
+    assert a.fatal_error(hard_fail) is None    # transient errors stay retryable

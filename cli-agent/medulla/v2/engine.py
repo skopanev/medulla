@@ -17,7 +17,8 @@ from .signals import extract_signals
 from .classify import Move, Verdict, classify_attempt, next_move
 from .contract import load_pipeline, VAR_NAME_RE
 from .errors import (
-    EngineCrash, E_DEADLINE, E_INPUTS, E_INPUTS_LIMIT, E_INTERNAL, E_RENDER, E_VALIDATION,
+    EngineCrash, E_DEADLINE, E_HARNESS, E_INPUTS, E_INPUTS_LIMIT, E_INTERNAL,
+    E_RENDER, E_VALIDATION,
 )
 from .harness import resolve as resolve_harness
 from .model import (
@@ -416,7 +417,15 @@ class Engine:
 
             raw_text = result.stdout
             if current.kind == "agent":
-                raw_text = resolve_harness(agent_spec).filter_stdout(raw_text)
+                adapter = resolve_harness(agent_spec)
+                fatal = adapter.fatal_error(result.stdout)
+                if fatal:
+                    # deterministic environment failure (not logged in / bad key):
+                    # retry and fallback are pointless — the razor call, same as
+                    # agy's trust preflight. Found live: an unauthenticated claude
+                    # burned attempts x inputs across a whole pool.
+                    raise EngineCrash(E_HARNESS, fatal, node=node.name)
+                raw_text = adapter.filter_stdout(raw_text)
             body_scan = scan_stdout(raw_text, known)
 
             post_rc = post_signal = None
