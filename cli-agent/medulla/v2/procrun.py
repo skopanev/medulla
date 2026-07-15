@@ -34,6 +34,7 @@ def run(
     log_path: Path | None = None,
     stdin_data: str | None = None,
     env_remove: list[str] | None = None,
+    merge_stderr: bool = False,
 ) -> RunResult:
     if isinstance(command, str):
         shell = os.environ.get("SHELL", "bash")
@@ -52,7 +53,8 @@ def run(
     proc = subprocess.Popen(
         argv, cwd=str(cwd),
         stdin=subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
         text=True, bufsize=1, start_new_session=True, env=env,
         errors="replace",
     )
@@ -83,9 +85,12 @@ def run(
                 pass
 
     t_out = threading.Thread(target=pump, args=(proc.stdout, out_buf, "out"), daemon=True)
-    t_err = threading.Thread(target=pump, args=(proc.stderr, err_buf, "err"), daemon=True)
     t_out.start()
-    t_err.start()
+    if proc.stderr is not None:
+        t_err = threading.Thread(target=pump, args=(proc.stderr, err_buf, "err"), daemon=True)
+        t_err.start()
+    else:
+        t_err = None
 
     timed_out = False
     try:
@@ -114,7 +119,8 @@ def run(
         # 5s truncated real output (audit G7). The child itself is already dead
         # here, so this only bounds pipe-drain time.
         t_out.join(timeout=60)
-        t_err.join(timeout=60)
+        if t_err is not None:
+            t_err.join(timeout=60)
         if log_file:
             log_file.close()
         if proc.poll() is None:                    # belt & braces: never leak

@@ -40,12 +40,14 @@ SIGNAL_PROTOCOL = """
 
 ## Signal protocol (engine-provided)
 
-To emit a signal named some-name, print this on its own line in your final
-message, replacing <name> with the signal name and the body with your message
-(no backticks, no quotes):
+To emit a signal, print this template on its own line in your final message,
+substituting {name} with the signal's name and the body with a short message
+(no backticks, no quotes, keep the angle brackets exactly as shown):
 
-<signal:<name>>short message</signal:</name>>
+<signal:{name}>short message</signal:{name}>
 
+For example, a signal named finished would be printed as one line starting
+with "<signal:" then "finished>", the message, and the matching closing tag.
 Emit a signal only when the task tells you to. Print it as plain text in your
 answer — never via a shell command or a file.
 """
@@ -341,7 +343,8 @@ class Engine:
 
             result = proc_run(invoke.argv, self.workdir, eff, extra_env=env,
                               log_path=step_dir / f"attempt-{total}-{tag}.txt",
-                              stdin_data=invoke.stdin, env_remove=invoke.env_remove)
+                              stdin_data=invoke.stdin, env_remove=invoke.env_remove,
+                              merge_stderr=invoke.merge_stderr)
 
             raw_text = result.stdout
             if current.kind == "agent":
@@ -475,9 +478,14 @@ class Engine:
         else:
             raise EngineCrash(E_RENDER, "agent action has no prompt", node=node.name)
         prompt_file = step_dir / ("prompt.md" if phase == "primary" else "prompt-fallback.md")
-        prompt_file.write_text(prompt_text + SIGNAL_PROTOCOL, encoding="utf-8")
+        # the protocol must ride in whatever text actually reaches the agent —
+        # file (claude), stdin (codex) AND argv (opencode/agy). Battle test t2
+        # found it riding in the file only: stdin/argv harnesses never saw it.
+        # inherited prompt_text stays clean so a fallback doesn't double-stamp.
+        full_prompt = prompt_text + SIGNAL_PROTOCOL
+        prompt_file.write_text(full_prompt, encoding="utf-8")
         timeout_s = self._clamp(self.p.action_timeout(action))
-        invoke = adapter.build(rendered_spec, prompt_file, prompt_text, timeout_s)
+        invoke = adapter.build(rendered_spec, prompt_file, full_prompt, timeout_s)
         return invoke, prompt_text, rendered_spec
 
     # ── decision node: the seam + decision-node policy (fold law application) ──

@@ -1,0 +1,26 @@
+version: "2"
+start: panel
+timeout: 600
+nodes:
+  panel:
+    inputs:
+      - {slug: sonnet, harness: claude-code, model: haiku}
+      - {slug: gpt,    harness: codex,       effort: low}
+    max_parallel: 2
+    min_success: 1
+    agent: {harness: "{{input.harness}}", model: "{{input.model:-}}", effort: "{{input.effort:-}}"}
+    prompt: |
+      Write one short sentence about why state machines are useful into the
+      file panel-{{input.slug}}.md in the current directory. Then emit the
+      signal named done.
+    post: 'test -s "panel-$MEDULLA_INPUT_SLUG.md"'
+    timeout: 360
+    on_signal: {__done__: synth}
+  synth:
+    shell: |
+      ok=$(jq -s 'map(select(.ok)) | length' "$MEDULLA_MANIFEST_PANEL")
+      total=$(jq -s length "$MEDULLA_MANIFEST_PANEL")
+      cat panel-*.md > panel-combined.md 2>/dev/null
+      echo "<signal:ready>$ok/$total delivered</signal:ready>"
+    timeout: 30
+    on_signal: {ready: __exit_ok__}

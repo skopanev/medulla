@@ -1,0 +1,13 @@
+version: "2"
+start: go
+timeout: 400
+nodes:
+  go:
+    agent: {harness: codex, effort: low}
+    prompt: |
+      Create a file named t2.txt in the current directory containing exactly
+      the word: bravo
+      Then emit the signal named done.
+    post: 'grep -q bravo t2.txt'
+    timeout: 360
+    on_signal: {done: __exit_ok__}

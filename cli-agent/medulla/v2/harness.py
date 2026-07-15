@@ -31,6 +31,8 @@ REAL_HARNESSES = ("claude-code", "codex", "opencode", "agy")
 
 import re as _re
 
+_ANSI_RE = _re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
 _LINE_START_SIGNAL_RE = _re.compile(
     r"(?ms)^[ \t]*(<signal:([a-zA-Z0-9_-]+)[^>]*>.*?</signal:\2>)")
 
@@ -55,6 +57,8 @@ class Invoke:
     stdin: str | None = None                      # piped to the child's stdin
     env: dict[str, str] = field(default_factory=dict)   # merged over the engine env
     env_remove: list[str] = field(default_factory=list)  # stripped from the child env
+    merge_stderr: bool = False    # CLIs that talk on stderr (opencode); the filter
+                                  # still gates what can route
 
 
 class HarnessAdapter:
@@ -249,13 +253,17 @@ class OpenCodeAdapter(HarnessAdapter):
             argv += ["-m", spec.model]
         argv += spec.args
         argv.append(prompt_text)                 # positional prompt (argv list, no shell)
-        return Invoke(argv=argv)
+        # opencode's run mode emits EVERYTHING (assistant text included) on
+        # stderr with ANSI decoration; --format json is half-alive on 1.15.5
+        # (single step_start event, rc 0 — probed live). Pilot's scar: merge
+        # the streams, then filter hard.
+        return Invoke(argv=argv, merge_stderr=True)
 
     def filter_stdout(self, stdout: str) -> str:
-        # `opencode run --format json` exists (verified 1.15.5) but the event
-        # schema needs a live run to pin down — structured filter comes from
-        # part-7 smoke logs. Until then: the line-start heuristic.
-        return plain_text_signal_filter(stdout)
+        # merged stream with ANSI decoration: strip escapes, then the
+        # line-start heuristic gates routing (--format json probed half-alive
+        # on 1.15.5 — a single step_start event; revisit on a newer opencode)
+        return plain_text_signal_filter(_ANSI_RE.sub("", stdout))
 
 
 # ── agy (Antigravity) ────────────────────────────────────────────────────────
