@@ -104,6 +104,34 @@ A medulla pipeline. Edit pipeline.yaml; keep prompts in prompts/.
 
 GITIGNORE = ".env\nruns/\n"
 
+SKILL_MD = """\
+---
+name: <NAME>
+description: |
+  One paragraph: when should an agent reach for this pipeline?
+  Trigger phrases, use cases, what it returns.
+---
+
+Run the pipeline and read its result:
+
+    medulla -w .medulla/pipelines/<NAME> --var "KEY=VALUE" >&2
+    # outputs land in the newest runs/<ts>-<id>/ directory
+"""
+
+
+def install_skill_md(name: str, pipeline_dir: Path) -> int:
+    """Register the pipeline's SKILL.md with Claude Code (.claude/skills)."""
+    import shutil
+    src = pipeline_dir / "SKILL.md"
+    if not src.is_file():                      # scaffolds get a starter
+        src.write_text(SKILL_MD.replace("<NAME>", name), encoding="utf-8")
+        print(f"  created starter {src} — edit the description")
+    dest = Path(".claude") / "skills" / name
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest / "SKILL.md")
+    print(f"  skill installed -> {dest}/SKILL.md")
+    return 0
+
 
 def bundled_templates() -> list[str]:
     try:
@@ -127,11 +155,16 @@ def deploy_template(name: str) -> int:
         print(f"error: {dest}/pipeline.yaml already exists")
         return 1
     from importlib import resources
+    src_path = None
     try:
-        src = resources.files("medulla") / "pipelines" / name
-        src_path = Path(str(src))
+        src_path = Path(str(resources.files("medulla") / "pipelines" / name))
     except Exception:
+        pass
+    if src_path is None or not src_path.is_dir():      # source-mode layout
         src_path = Path(__file__).resolve().parent.parent / "pipelines" / name
+    if not src_path.is_dir():
+        print(f"error: bundled template '{name}' not found")
+        return 1
     dest.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src_path, dest, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("runs", "__pycache__", "*.pyc"))

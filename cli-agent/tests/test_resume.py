@@ -264,7 +264,7 @@ def test_entry_dispatches_documented_subcommands(tmp_path, monkeypatch):
     # unreachable — the v2 shim lost the dispatch when v1 was deleted
     import medulla.cli as shim
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("sys.argv", ["medulla", "init"])
+    monkeypatch.setattr("sys.argv", ["medulla", "init", "disp-check"])
     assert shim.entry() == 0
     assert (tmp_path / ".medulla").is_dir()
 
@@ -320,3 +320,17 @@ def test_init_scaffolds_a_pipeline(tmp_path, monkeypatch):
     # re-init refuses to clobber
     monkeypatch.setattr("sys.argv", ["medulla", "init", "my-pipe"])
     assert shim.entry() == 1
+
+
+def test_init_skill_flag(tmp_path, monkeypatch):
+    import medulla.cli as shim
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["medulla", "init", "spar", "--skill"])
+    assert shim.entry() == 0
+    skill = tmp_path / ".claude" / "skills" / "spar" / "SKILL.md"
+    assert skill.is_file() and "spar" in skill.read_text()
+    monkeypatch.setattr("sys.argv", ["medulla", "init", "fresh", "--skill"])
+    assert shim.entry() == 0
+    # scaffold got a starter SKILL.md, and it is registered
+    assert (tmp_path / ".medulla" / "pipelines" / "fresh" / "SKILL.md").is_file()
+    assert (tmp_path / ".claude" / "skills" / "fresh" / "SKILL.md").is_file()

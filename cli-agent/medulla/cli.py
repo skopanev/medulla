@@ -16,22 +16,25 @@ def entry() -> int:
 
     # documented subcommands (before any flag parsing)
     if argv and argv[0] == "init":
-        from .init import bundled_templates, deploy_template, run_init, scaffold_pipeline
-        if len(argv) < 2 or argv[1].startswith("-"):
+        from .init import (bundled_templates, deploy_template, install_skill_md,
+                           run_init, scaffold_pipeline)
+        args = [a for a in argv[1:] if not a.startswith("-")]
+        want_skill = "--skill" in argv
+        if not args:
             names = ", ".join(bundled_templates()) or "none bundled"
-            print("usage: medulla init <name>", file=sys.stderr)
+            print("usage: medulla init <name> [--skill]", file=sys.stderr)
             print(f"  a bundled template name deploys that template ({names});",
                   file=sys.stderr)
-            print("  any other name scaffolds a new pipeline", file=sys.stderr)
+            print("  any other name scaffolds a new pipeline;", file=sys.stderr)
+            print("  --skill also registers SKILL.md with Claude Code", file=sys.stderr)
             return 1
         run_init()                          # project runtime (.medulla/), idempotent
-        name = argv[1]
-        if name in bundled_templates():
-            return deploy_template(name)
-        return scaffold_pipeline(name)
-    if argv and argv[0] == "install-skill":
-        from .install_skill import run_install_skill
-        return run_install_skill(argv[1:])
+        name = args[0]
+        rc = deploy_template(name) if name in bundled_templates()             else scaffold_pipeline(name)
+        if rc == 0 and want_skill:
+            from pathlib import Path as _P
+            rc = install_skill_md(name, _P(".medulla") / "pipelines" / name)
+        return rc
     if argv and argv[0] == "upgrade":
         return subprocess.call(["pipx", "upgrade", "medulla"])
 

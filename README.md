@@ -14,6 +14,7 @@ graph = nodes + on_signal edges + two terminals (__exit_ok__ / __exit_fail__)
 ## Usage
 
 ```bash
+medulla init <name> [--skill]                     # deploy a bundled template or scaffold a new pipeline
 medulla -w .medulla/pipelines/<name>              # run a pipeline
 medulla -w ... --var KEY=VALUE                    # set/override vars
 medulla -w ... --node <name>                      # dev: start from a specific node

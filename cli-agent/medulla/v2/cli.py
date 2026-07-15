@@ -67,7 +67,7 @@ docker (host-side, handled by scripts/docker.py before the engine starts):
                                     vars.IMAGE > build from (--var DOCKERFILE >
                                     vars.DOCKERFILE > packaged default)
 
-subcommands: init (bootstrap .medulla/ here), install-skill <name>, upgrade
+subcommands: init <name> [--skill] (deploy a bundled template or scaffold a new pipeline; --skill registers it with Claude Code), upgrade
 
 environment the engine reads:
     MEDULLA_RETRY_DELAY_S   pause between attempts / before fallback (default 2)
