@@ -5,7 +5,7 @@ set -u
 cd "$(dirname "$0")"
 work=$(mktemp -d)
 pass=0; fail=0
-for t in t1-claude t2-codex t3-opencode t4-agy t5-panel t6-fallback t8-foreach-dynamic t9-fold; do
+for t in t1-claude t2-codex t3-opencode t4-agy t5-panel t6-fallback t8-foreach-dynamic t9-fold t10-array-source; do
   rm -rf "$t/runs"
   if (cd "$work" && medulla -w "$OLDPWD/$t" >/dev/null 2>&1); then
     echo "PASS $t"; pass=$((pass+1))

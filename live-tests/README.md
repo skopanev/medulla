@@ -14,3 +14,4 @@ cheap models. Run from this dir:  medulla -w .medulla/pipelines/<name>
 | t7-resume   | deadline mid-pool -> resume from done-mask (shell)      | 1 then 0 |
 | t8-foreach-dynamic | JSONL source, object inputs, min_success under real failure | exit 0 |
 | t9-fold     | fold law: max_parallel 1 var accumulator across inputs  | exit 0 |
+| t10-array-source | shell source returning a single JSON array           | exit 0 |
