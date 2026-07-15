@@ -152,9 +152,11 @@ def _print_version() -> None:
     except Exception:
         v = "source"
     commit = ""
-    stamp = Path.home() / ".medulla-engine" / "INSTALLED_COMMIT"
-    if stamp.is_file():
-        commit = f"  ({stamp.read_text(encoding='utf-8').strip()})"
+    for stamp in (Path.home() / ".medulla" / "engine" / "INSTALLED_COMMIT",
+                  Path.home() / ".medulla-engine" / "INSTALLED_COMMIT"):  # pre-4.0.4
+        if stamp.is_file():
+            commit = f"  ({stamp.read_text(encoding='utf-8').strip()})"
+            break
     print(f"medulla {v}{commit}")
 
 

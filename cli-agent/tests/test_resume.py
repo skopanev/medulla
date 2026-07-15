@@ -281,9 +281,16 @@ def test_entry_dispatches_documented_subcommands(tmp_path, monkeypatch):
 
     # installer venv present (install.sh path, the README default) →
     # re-run install.sh; pipx upgrade would error or touch a different copy
-    venv_bin = tmp_path / ".medulla-engine" / "venv" / "bin"
+    venv_bin = tmp_path / ".medulla" / "engine" / "venv" / "bin"
     venv_bin.mkdir(parents=True)
     (venv_bin / "medulla").touch()
+    called.clear()
+    assert shim.entry() == 0
+    assert called["argv"][:2] == ["bash", "-c"] and "install.sh" in called["argv"][2]
+
+    # pre-4.0.4 legacy path still detected (installer migrates it on next run)
+    import shutil
+    shutil.move(str(tmp_path / ".medulla" / "engine"), str(tmp_path / ".medulla-engine"))
     called.clear()
     assert shim.entry() == 0
     assert called["argv"][:2] == ["bash", "-c"] and "install.sh" in called["argv"][2]

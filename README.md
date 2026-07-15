@@ -13,7 +13,9 @@ graph = nodes + on_signal edges + two terminals (__exit_ok__ / __exit_fail__)
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/skopanev/medulla/main/install.sh | bash
-# (own venv + ~/.local/bin/medulla; re-run to update. Alternatives:
+# (everything lives in ~/.medulla/: engine/ is the venv — machinery, reinstall
+#  recreates it; .env is your global token tier. rm -rf ~/.medulla removes
+#  medulla entirely. Re-run the command to update. Alternatives:
 #  pipx install git+https://github.com/skopanev/medulla.git
 #  dev: MEDULLA_REPO=/path/to/checkout bash install.sh — editable, edits apply instantly)
 

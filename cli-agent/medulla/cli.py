@@ -36,11 +36,14 @@ def entry() -> int:
             rc = install_skill_md(name, _P(".medulla") / "pipelines" / name)
         return rc
     if argv and argv[0] == "upgrade":
-        # two install methods exist: install.sh (private venv at
-        # ~/.medulla-engine) and pipx. `pipx upgrade` on a venv install either
-        # errors or touches a different copy — match the method.
-        venv_medulla = Path.home() / ".medulla-engine" / "venv" / "bin" / "medulla"
-        if venv_medulla.exists():
+        # two install methods exist: install.sh (venv at ~/.medulla/engine;
+        # pre-4.0.4 installs used ~/.medulla-engine — the installer migrates)
+        # and pipx. `pipx upgrade` on a venv install either errors or touches
+        # a different copy — match the method.
+        home = Path.home()
+        installer_venvs = (home / ".medulla" / "engine" / "venv" / "bin" / "medulla",
+                           home / ".medulla-engine" / "venv" / "bin" / "medulla")
+        if any(p.exists() for p in installer_venvs):
             return subprocess.call(
                 ["bash", "-c",
                  "curl -sSL https://raw.githubusercontent.com/skopanev/medulla/main/install.sh | bash"])

@@ -7,9 +7,13 @@ set -euo pipefail
 #   bash install.sh
 #   MEDULLA_REPO=/path/to/local/checkout bash install.sh   # dev: editable install
 
-INSTALL_DIR="$HOME/.medulla-engine"
+# one home: ~/.medulla/ — engine/ is machinery (venv + commit stamp, safe to
+# delete anytime), .env is the user's global token tier. rm -rf ~/.medulla
+# removes medulla entirely; that's the contract.
+INSTALL_DIR="$HOME/.medulla/engine"
 VENV_DIR="$INSTALL_DIR/venv"
 BIN_DIR="$HOME/.local/bin"
+LEGACY_DIR="$HOME/.medulla-engine"
 REPO_URL="${MEDULLA_REPO_URL:-https://github.com/skopanev/medulla.git}"
 
 info()  { printf '\033[1;34m=>\033[0m %s\n' "$*"; }
@@ -52,6 +56,10 @@ echo "$COMMIT $SUBJECT" > "$INSTALL_DIR/INSTALLED_COMMIT"
 
 ln -sf "$VENV_DIR/bin/medulla" "$BIN_DIR/medulla"
 info "Linked $BIN_DIR/medulla"
+
+# migrate: the engine used to live in ~/.medulla-engine — pure machinery,
+# nothing of the user's; remove after the new install has fully succeeded
+[ -d "$LEGACY_DIR" ] && { rm -rf "$LEGACY_DIR"; info "Removed legacy $LEGACY_DIR (engine now lives in ~/.medulla/engine)"; }
 
 case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
