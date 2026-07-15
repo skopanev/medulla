@@ -17,13 +17,17 @@ pip install git+https://github.com/skopanev/medulla.git   # or: pipx install ...
 cd your-project
 medulla init my-pipe              # scaffold: commented pipeline.yaml, README, .gitignore, prompts/
 medulla init spar                 # ...or deploy a bundled template (spar: a panel of models)
-medulla init spar --skill         # ...and register its SKILL.md with Claude Code
+medulla init spar --skill         # ...and register its SKILL.md with claude-code / codex / opencode
+medulla init                      # lists available bundled templates
 
 medulla -w .medulla/pipelines/my-pipe                  # run
 medulla -w .medulla/pipelines/my-pipe --dry-run        # print the resolved plan, run nothing
 medulla -w .medulla/pipelines/my-pipe --var KEY=VALUE  # override vars (fresh runs only)
 medulla -w .medulla/pipelines/my-pipe --resume         # continue the latest unfinished run
+medulla -w .medulla/pipelines/my-pipe --run <dir>      # continue a specific run directory
+medulla -w .medulla/pipelines/my-pipe --validate       # load + validate only
 medulla --docker -w .medulla/pipelines/my-pipe         # run inside the pipeline's Docker image
+medulla upgrade                                        # pipx upgrade medulla
 medulla --help                                         # the full env/signal reference, always current
 ```
 
@@ -76,7 +80,7 @@ Harnesses: `claude-code`, `codex`, `opencode`, `agy`. `effort` maps to each CLI'
 
 ### Hooks: pre and post
 
-Shell around any body — the only way to put deterministic checks before/after an agent:
+Shell around any body — the only way to put deterministic checks before/after an agent. Hooks get a fixed 60s timeout (deadline-clamped); they are one-line artifact tests, not workloads:
 
 - **`pre`** runs once before the body renders. Emits a routing signal → the body is **skipped** (guard: "already done"); emits `var` → the body's prompt sees it; exits non-zero → `__failed__`.
 - **`post`** runs after **every** attempt. Exits non-zero → that attempt failed (retry, then fallback — "try until the artifact exists"); emits a signal → **overrides** the body's signal; silent → the body's outcome stands.
@@ -109,7 +113,7 @@ Put `KEY=VALUE` lines into `<pipeline>/.env` — bodies and hooks see them as en
 | *all pipeline vars* | always | exported as-is, including `<signal:var>`-set ones |
 | *all `.env` entries* | always | secrets channel (see above) |
 | `MEDULLA_TIMEOUT_S` | always | resolved, deadline-clamped timeout of the current step (CLIs size their own limits from it) |
-| `MEDULLA_ATTEMPT_ID` | body | unique attempt id: `<step>.<p|f><n>`, e.g. `003.i2.p1` |
+| `MEDULLA_ATTEMPT_ID` | body | unique attempt id: `<step>[.i<input>].<p|f><attempt>` — `003.p1` (decision, primary, 1st try), `003.i2.f1` (pool input 2, fallback, 1st try) |
 | `MEDULLA_HARNESS` | body + hooks | `shell` or the harness name |
 | `MEDULLA_LAST_NODE` / `_SIGNAL` / `_MESSAGE` / `_RC` | after the first transition | outcome of the previous node (after a pool `_RC` is empty — a join has no single rc). Timeout is recognizable as rc 124 |
 | `MEDULLA_LAST_EVENT_JSON` | after the first transition | the same as one JSON object |
@@ -388,9 +392,15 @@ A pipeline is a self-contained directory — contract, code, history:
 
 Retention: keep the newest `keep_runs` finished runs; unfinished dirs younger than the timeout are never pruned. History browsing needs no CLI: `ls runs/`, `cat outcome.json`.
 
+### Execution details
+
+Shell bodies and hooks run via `$SHELL -lc` (login shell — your PATH applies). Each child gets its own process group; on timeout the whole group is SIGTERMed, then SIGKILLed. Attempt logs stream to `steps/.../attempt-N-<tag>.txt` as they arrive (`tail -f` works mid-run).
+
 ### Harness notes
 
 Signal filtering: claude-code/codex scan **assistant text** mined from their JSON streams (tool output can never route); opencode/agy have no structured output — signals must start a line, and never quote signal syntax in prompts. opencode's output is merged from stderr (that's where it talks) and ANSI-stripped. `effort` maps to: claude `--effort`, codex `model_reasoning_effort`, opencode `reasoningEffort` (config), agy model-name suffix. agy refuses to run in a workspace it doesn't trust (fail-fast instead of hanging; skipped in Docker).
+
+Adapters also configure the CLIs themselves (not your API — listed for debugging): claude gets `API_TIMEOUT_MS` and a stripped `ANTHROPIC_API_KEY` (the OAuth account must win); codex gets `-c stream_idle_timeout_ms` and prefers the `cx` token-refreshing wrapper; opencode gets its config via `OPENCODE_CONFIG_CONTENT` (permission allow, provider timeout, per-model reasoningEffort — no opencode.json is written); agy gets `--print-timeout`. All inner timeouts are sized from the step timeout + 300s slack so the engine always kills first.
 
 Development: `live-tests/` in the repo holds 20 battle pipelines that run the real CLIs (adapters, pools, fallback, interrupt, resume) — `live-tests/run-all.sh` before release pushes. Unit suite: `cd cli-agent && pytest`.
 
