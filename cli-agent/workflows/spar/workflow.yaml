@@ -1,8 +1,8 @@
 # spar — a panel of independent models answers the same question in parallel.
 #
 # Run:
-#   medulla -w .medulla/pipelines/spar --var "QUESTION=your question"
-#   medulla --docker -w .medulla/pipelines/spar --var "QUESTION=..."
+#   medulla -w .medulla/workflows/spar --var "QUESTION=your question"
+#   medulla --docker -w .medulla/workflows/spar --var "QUESTION=..."
 #
 # Output: synthesized.md inside $MEDULLA_RUN_DIR/artifacts/.
 #

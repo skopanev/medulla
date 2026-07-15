@@ -1,7 +1,7 @@
 # md-tests — live battle tests for medulla v2 (no docker)
 
-Each pipeline exercises ONE engine feature against real CLIs. Cheap tasks,
-cheap models. Run from this dir:  medulla -w .medulla/pipelines/<name>
+Each workflow exercises ONE engine feature against real CLIs. Cheap tasks,
+cheap models. Run from this dir:  medulla -w .medulla/workflows/<name>
 
 | test | feature under fire | expects |
 |---|---|---|
@@ -20,7 +20,7 @@ cheap models. Run from this dir:  medulla -w .medulla/pipelines/<name>
 | t13-retry-post | post vetoes attempt 1 of a live agent -> live re-run  | exit 0 |
 | t14-interrupt | (script) SIGINT mid-agent: 130, no orphans, resumable | PASS |
 | t15-timeout-live | step timeout kills a live agent: rc 124, clean group | exit 0 |
-| t16-concurrent | (script) two simultaneous runs of one pipeline        | PASS |
+| t16-concurrent | (script) two simultaneous runs of one workflow        | PASS |
 | t17-dirty-data | hostile bytes through the env channel                 | exit 0 |
 | t18-empty-live | dynamic source returns nothing -> __empty__ route     | exit 0 |
 | t19-stress-pool | 20 inputs x 8 workers: manifest under concurrency    | exit 0 |

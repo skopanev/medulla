@@ -10,7 +10,7 @@ E_INTERNAL = "E_INTERNAL"
 
 
 class EngineCrash(Exception):
-    """Class A: the pipeline itself is broken. Not routable in-graph; exit 1."""
+    """Class A: the workflow itself is broken. Not routable in-graph; exit 1."""
 
     def __init__(self, code: str, message: str, node: str | None = None):
         self.code = code

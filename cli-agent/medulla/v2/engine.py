@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .signals import extract_signals
 from .classify import Move, Verdict, classify_attempt, next_move
-from .contract import load_pipeline, VAR_NAME_RE
+from .contract import load_workflow, VAR_NAME_RE
 from .errors import (
     EngineCrash, E_DEADLINE, E_HARNESS, E_INPUTS, E_INPUTS_LIMIT, E_INTERNAL,
     E_RENDER, E_VALIDATION,
@@ -23,12 +23,12 @@ from .errors import (
 from .harness import resolve as resolve_harness
 from .model import (
     Action, CHANNEL_SIGNALS, ENGINE_FACTS, ENV_BLACKLIST_EXACT, ENV_BLACKLIST_PREFIX,
-    EXIT_FAIL, EXIT_OK, HOOK_TIMEOUT_S, INPUTS_HARD_CAP, Node, Pipeline,
+    EXIT_FAIL, EXIT_OK, HOOK_TIMEOUT_S, INPUTS_HARD_CAP, Node, Workflow,
     SIG_DEFAULT, SIG_DONE, SIG_EMPTY, SIG_FAILED, TERMINALS,
 )
 from .procrun import run as proc_run
 from .render import RenderError, render
-from .rundir import RunStore
+from .rundir import RunStore, config_yaml
 
 EXIT_CODE = {"succeeded": 0, "crashed": 1, "failed": 2, "interrupted": 130}
 
@@ -188,33 +188,33 @@ def _parse_dotenv(path: Path) -> dict[str, str]:
     return out
 
 
-def load_dotenv(pipeline_dir: Path) -> dict[str, str]:
+def load_dotenv(workflow_dir: Path) -> dict[str, str]:
     """Secrets channel for bodies/hooks: NOT vars — never templated, never
     persisted. Three tiers, nearest wins:
       ~/.medulla/.env            global (machine-wide provider tokens)
-      <project>/.medulla/.env    per-project (walk up from the pipeline dir)
-      <pipeline>/.env            per-pipeline
+      <project>/.medulla/.env    per-project (walk up from the workflow dir)
+      <workflow>/.env            per-workflow
     """
     merged: dict[str, str] = {}
     merged.update(_parse_dotenv(Path.home() / ".medulla" / ".env"))
-    for parent in reversed(pipeline_dir.resolve().parents):
+    for parent in reversed(workflow_dir.resolve().parents):
         candidate = parent / ".medulla" / ".env"
         if candidate.is_file() and candidate != Path.home() / ".medulla" / ".env":
             merged.update(_parse_dotenv(candidate))
-    merged.update(_parse_dotenv(pipeline_dir / ".env"))
+    merged.update(_parse_dotenv(workflow_dir / ".env"))
     return merged
 
 
 class Engine:
-    def __init__(self, pipeline: Pipeline, store: RunStore, workdir: Path):
-        self.p = pipeline
+    def __init__(self, workflow: Workflow, store: RunStore, workdir: Path):
+        self.p = workflow
         self.store = store
         self.workdir = workdir
-        self.dotenv = load_dotenv(pipeline.dir) if pipeline.dir else {}
-        self.vars: dict[str, str] = dict(pipeline.vars)
+        self.dotenv = load_dotenv(workflow.dir) if workflow.dir else {}
+        self.vars: dict[str, str] = dict(workflow.vars)
         self.last: dict = {}
         self.deadline: float | None = (
-            time.monotonic() + pipeline.timeout if pipeline.timeout else None
+            time.monotonic() + workflow.timeout if workflow.timeout else None
         )
         self.steps = 0
         self.manifests: dict[str, Path] = {}   # node -> manifest path (engine map, not vars)
@@ -228,7 +228,7 @@ class Engine:
     def _check_deadline(self) -> None:
         rem = self._remaining()
         if rem is not None and rem <= 0:
-            raise EngineCrash(E_DEADLINE, f"pipeline timeout ({self.p.timeout}s) exhausted")
+            raise EngineCrash(E_DEADLINE, f"workflow timeout ({self.p.timeout}s) exhausted")
 
     def _clamp(self, timeout_s: float) -> float:
         """Clamp a child timeout to the remaining budget (clamp, not crash)."""
@@ -236,7 +236,7 @@ class Engine:
         if rem is None:
             return float(timeout_s)
         if rem <= 0:
-            raise EngineCrash(E_DEADLINE, f"pipeline timeout ({self.p.timeout}s) exhausted")
+            raise EngineCrash(E_DEADLINE, f"workflow timeout ({self.p.timeout}s) exhausted")
         return min(float(timeout_s), rem)
 
     # ── env ──
@@ -275,7 +275,7 @@ class Engine:
         return self.p.known_signals(node) - set(CHANNEL_SIGNALS) - set(ENGINE_FACTS)
 
     def _render_or_crash(self, text: str, node: Node, what: str, required: bool = True) -> str:
-        """Decision-context render: any breakage is a pipeline bug -> E_RENDER.
+        """Decision-context render: any breakage is a workflow bug -> E_RENDER.
         required=False: an optional field rendering empty counts as absent (contract).
         Part-3 pools pass their own render_fn with fail-the-input semantics."""
         try:
@@ -581,7 +581,7 @@ class Engine:
             # here would be exit 2 (not resumable) — this is E_DEADLINE, same law
             # as deadline-killed pool inputs
             raise EngineCrash(E_DEADLINE,
-                              f"pipeline timeout ({self.p.timeout}s) exhausted during "
+                              f"workflow timeout ({self.p.timeout}s) exhausted during "
                               f"node '{node.name}'", node=node.name)
         for u in outcome.updates:
             log(f"update: {u}")
@@ -613,7 +613,7 @@ class Engine:
                 rem = self._remaining()
                 if rem is not None and rem <= 0:      # the run budget killed it, not its own limit
                     raise EngineCrash(E_DEADLINE,
-                                      f"pipeline timeout ({self.p.timeout}s) exhausted "
+                                      f"workflow timeout ({self.p.timeout}s) exhausted "
                                       f"while sourcing inputs", node=node.name)
                 raise EngineCrash(E_INPUTS, f"inputs source timed out ({spec.shell_timeout}s)",
                                   node=node.name)
@@ -809,7 +809,7 @@ class Engine:
 
         if deadline_hit or (self._remaining() is not None and self._remaining() <= 0):
             raise EngineCrash(E_DEADLINE,
-                              f"pipeline timeout ({self.p.timeout}s) exhausted mid-pool "
+                              f"workflow timeout ({self.p.timeout}s) exhausted mid-pool "
                               f"({len(rows)}/{total} inputs concluded; manifest rows survive)",
                               node=node.name)
 
@@ -931,13 +931,13 @@ RESUMABLE_OUTCOMES = {"interrupted", "crashed"}   # + no outcome.json at all.
 # crash again identically (same immutable snapshot) — no harm, no data loss.
 
 
-def find_resumable(pipeline_dir: Path) -> Path | None:
-    runs_dir = pipeline_dir / "runs"
+def find_resumable(workflow_dir: Path) -> Path | None:
+    runs_dir = workflow_dir / "runs"
     if not runs_dir.is_dir():
         return None
     for run in sorted((p for p in runs_dir.iterdir() if p.is_dir()),
                       key=lambda p: p.name, reverse=True):   # ts prefix sorts by time
-        if not (run / "pipeline.yaml").is_file():
+        if not config_yaml(run).is_file():
             continue
         outcome_path = run / "outcome.json"
         if not outcome_path.is_file():
@@ -951,8 +951,8 @@ def find_resumable(pipeline_dir: Path) -> Path | None:
     return None
 
 
-def run_pipeline(
-    pipeline_path: Path,
+def run_workflow(
+    workflow_path: Path,
     cli_vars: dict[str, str] | None = None,
     start_override: str | None = None,
     workdir: Path | None = None,
@@ -992,13 +992,13 @@ def run_pipeline(
                         f"delete outcome.json to force a re-run")
                     return 1
                 outcome_path.unlink()           # resuming: the run is live again
-            # the SNAPSHOT is the run's config — the live pipeline.yaml may have moved on
-            pipeline = load_pipeline(resume_dir / "pipeline.yaml")
-            pipeline.dir = Path(pipeline_path).parent if Path(pipeline_path).is_file() \
-                else Path(pipeline_path)
+            # the SNAPSHOT is the run's config — the live workflow.yaml may have moved on
+            workflow = load_workflow(config_yaml(resume_dir))
+            workflow.dir = Path(workflow_path).parent if Path(workflow_path).is_file() \
+                else Path(workflow_path)
             store = RunStore.open(resume_dir)
             log(f"resume {store.run_id} -> {store.dir}")
-            engine = Engine(pipeline, store, workdir)
+            engine = Engine(workflow, store, workdir)
             current = engine.replay()
             outcome = engine.run(start_override=current)
             outcome["duration_s"] = round(
@@ -1006,16 +1006,16 @@ def run_pipeline(
             store.write_outcome(outcome)
             return outcome["exit_code"]
 
-        pipeline = load_pipeline(Path(pipeline_path))
+        workflow = load_workflow(Path(workflow_path))
         if cli_vars:
             from .contract import _validate_var_name
             for k in cli_vars:
                 _validate_var_name(k, "--var")
-            pipeline.vars.update({k: str(v) for k, v in cli_vars.items()})
-        store = RunStore.create(pipeline.dir, pipeline.path.read_text(encoding="utf-8"))
-        prune_runs(pipeline.dir, pipeline.keep_runs, pipeline.timeout)
+            workflow.vars.update({k: str(v) for k, v in cli_vars.items()})
+        store = RunStore.create(workflow.dir, workflow.path.read_text(encoding="utf-8"))
+        prune_runs(workflow.dir, workflow.keep_runs, workflow.timeout)
         log(f"run {store.run_id} -> {store.dir}")
-        engine = Engine(pipeline, store, workdir)
+        engine = Engine(workflow, store, workdir)
         outcome = engine.run(start_override)
         store.write_outcome(outcome)
         return outcome["exit_code"]

@@ -54,10 +54,10 @@ def test_attempt_log_overwrites_not_appends(tmp_path):
 def test_retry_backoff_applied(tmp_path, monkeypatch):
     # audit R5: a delay separates attempts (tests otherwise run with 0)
     monkeypatch.setenv("MEDULLA_RETRY_DELAY_S", "0.4")
-    from medulla.v2.engine import run_pipeline
+    from medulla.v2.engine import run_workflow
     pdir = tmp_path / "pipe"
     pdir.mkdir()
-    (pdir / "pipeline.yaml").write_text("""
+    (pdir / "workflow.yaml").write_text("""
 version: "2"
 start: a
 nodes:
@@ -69,7 +69,7 @@ nodes:
     work = tmp_path / "work"
     work.mkdir()
     t0 = time.monotonic()
-    assert run_pipeline(pdir / "pipeline.yaml", workdir=work) == 2
+    assert run_workflow(pdir / "workflow.yaml", workdir=work) == 2
     assert time.monotonic() - t0 >= 0.4                # one retry, one delay
 
 
@@ -106,11 +106,11 @@ def test_codex_accepts_cx_only_install(monkeypatch):
 
 def test_journal_message_tail_8k(tmp_path):
     # audit G8: an 8k payload survives the journal round-trip for resume
-    from medulla.v2.engine import run_pipeline
+    from medulla.v2.engine import run_workflow
     pdir = tmp_path / "pipe"
     pdir.mkdir()
     payload = "x" * 5000
-    (pdir / "pipeline.yaml").write_text(f"""
+    (pdir / "workflow.yaml").write_text(f"""
 version: "2"
 start: a
 nodes:
@@ -120,7 +120,7 @@ nodes:
 """, encoding="utf-8")
     work = tmp_path / "work"
     work.mkdir()
-    assert run_pipeline(pdir / "pipeline.yaml", workdir=work) == 0
+    assert run_workflow(pdir / "workflow.yaml", workdir=work) == 0
     run = next((pdir / "runs").iterdir())
     row = json.loads((run / "journal.jsonl").read_text().splitlines()[0])
     assert len(row["message"]) == 5000
@@ -132,7 +132,7 @@ def test_sigterm_is_graceful_interrupt(tmp_path):
     import sys
     pdir = tmp_path / "pipe"
     pdir.mkdir()
-    (pdir / "pipeline.yaml").write_text("""
+    (pdir / "workflow.yaml").write_text("""
 version: "2"
 start: a
 nodes:
@@ -163,12 +163,12 @@ nodes:
 
 
 def test_dotenv_reaches_bodies_but_not_vars(tmp_path):
-    from medulla.v2.engine import run_pipeline
+    from medulla.v2.engine import run_workflow
     pdir = tmp_path / "pipe"
     pdir.mkdir()
     (pdir / ".env").write_text(
         '# secrets\nAPI_SECRET="s3cr3t"\nMEDULLA_RUN_ID=hijack\n', encoding="utf-8")
-    (pdir / "pipeline.yaml").write_text("""
+    (pdir / "workflow.yaml").write_text("""
 version: "2"
 start: a
 nodes:
@@ -182,7 +182,7 @@ nodes:
 """, encoding="utf-8")
     work = tmp_path / "work"
     work.mkdir()
-    assert run_pipeline(pdir / "pipeline.yaml", workdir=work) == 0
+    assert run_workflow(pdir / "workflow.yaml", workdir=work) == 0
     run = next((pdir / "runs").iterdir())
     assert "API_SECRET" not in (run / "vars.yaml").read_text()   # env, never a var
     assert (work / "tpl.txt").read_text().strip() == "sub=unset" # not templated
@@ -208,11 +208,11 @@ def test_dotenv_three_tiers_nearest_wins(tmp_path, monkeypatch):
         "TOKEN=global\nGLOBAL_ONLY=g\n", encoding="utf-8")
     monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
     project = tmp_path / "proj"
-    pdir = project / ".medulla" / "pipelines" / "pipe"
+    pdir = project / ".medulla" / "workflows" / "pipe"
     pdir.mkdir(parents=True)
     (project / ".medulla" / ".env").write_text(
         "TOKEN=project\nPROJECT_ONLY=p\n", encoding="utf-8")
-    (pdir / ".env").write_text("TOKEN=pipeline\n", encoding="utf-8")
+    (pdir / ".env").write_text("TOKEN=workflow\n", encoding="utf-8")
     env = load_dotenv(pdir)
-    assert env["TOKEN"] == "pipeline"          # nearest wins
+    assert env["TOKEN"] == "workflow"          # nearest wins
     assert env["GLOBAL_ONLY"] == "g" and env["PROJECT_ONLY"] == "p"

@@ -22,13 +22,13 @@ def test_tier_merge_nearest_wins_all_tiers_whole(dockerpy, tmp_path, monkeypatch
         "CLAUDE_CODE_OAUTH_TOKEN=global\nSLACK_TOKEN=global-slack\n", encoding="utf-8")
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
     project = tmp_path / "proj"
-    pdir = project / ".medulla" / "pipelines" / "pipe"
+    pdir = project / ".medulla" / "workflows" / "pipe"
     pdir.mkdir(parents=True)
     (project / ".medulla" / ".env").write_text("OPENAI_API_KEY=proj\n", encoding="utf-8")
-    (pdir / ".env").write_text("CLAUDE_CODE_OAUTH_TOKEN=pipeline-wins\n", encoding="utf-8")
+    (pdir / ".env").write_text("CLAUDE_CODE_OAUTH_TOKEN=workflow-wins\n", encoding="utf-8")
 
     env = dockerpy._collect_dotenv(str(pdir))
-    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "pipeline-wins"  # nearest wins
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "workflow-wins"  # nearest wins
     assert env["OPENAI_API_KEY"] == "proj"                    # flows down
     assert env["SLACK_TOKEN"] == "global-slack"               # ALL tiers whole (user's zone)
 

@@ -13,7 +13,7 @@ so it never goes stale: `medulla upgrade` is reflected everywhere with no
 re-init. docker.py resolves the link via os.path.realpath when mounting
 init-docker.sh, so the bind-mount source is the real package file.
 
-Workflows (``.medulla/pipelines/``) are NOT provisioned by this command —
+Workflows (``.medulla/workflows/``) are NOT provisioned by this command —
 they're project content. Use ``install-skill`` for bundled ones.
 """
 
@@ -46,11 +46,11 @@ def _symlink(link: Path, target: Path) -> None:
     link.symlink_to(target, target_is_directory=target.is_dir())
 
 
-PIPELINE_YAML = """\
-# <NAME> — describe what this pipeline does in one line.
+WORKFLOW_YAML = """\
+# <NAME> — describe what this workflow does in one line.
 #
-# Run:      medulla -w .medulla/pipelines/<NAME>
-# Explore:  medulla -w .medulla/pipelines/<NAME> --dry-run
+# Run:      medulla -w .medulla/workflows/<NAME>
+# Explore:  medulla -w .medulla/workflows/<NAME> --dry-run
 # Full API: medulla --help   (env vars, signals, docker)
 version: "2"
 start: hello
@@ -88,14 +88,14 @@ nodes:
   #   on_signal: {__done__: __exit_ok__, __empty__: __exit_ok__}
 """
 
-PIPELINE_README = """\
+WORKFLOW_README = """\
 # <NAME>
 
-A medulla pipeline. Edit pipeline.yaml; keep prompts in prompts/.
+A medulla workflow. Edit workflow.yaml; keep prompts in prompts/.
 
-- run:        medulla -w .medulla/pipelines/<NAME>
-- dry run:    medulla -w .medulla/pipelines/<NAME> --dry-run
-- resume:     medulla -w .medulla/pipelines/<NAME> --resume
+- run:        medulla -w .medulla/workflows/<NAME>
+- dry run:    medulla -w .medulla/workflows/<NAME> --dry-run
+- resume:     medulla -w .medulla/workflows/<NAME> --resume
 - reference:  medulla --help  (all MEDULLA_* env vars and signal syntax)
 - history:    runs/<ts>-<id>/  (journal, per-step logs, outcome.json)
 - secrets:    put KEY=VALUE into .env here — children see them as env,
@@ -108,13 +108,13 @@ SKILL_MD = """\
 ---
 name: <NAME>
 description: |
-  One paragraph: when should an agent reach for this pipeline?
+  One paragraph: when should an agent reach for this workflow?
   Trigger phrases, use cases, what it returns.
 ---
 
-Run the pipeline and read its result:
+Run the workflow and read its result:
 
-    medulla -w .medulla/pipelines/<NAME> --var "KEY=VALUE" >&2
+    medulla -w .medulla/workflows/<NAME> --var "KEY=VALUE" >&2
     # outputs land in the newest runs/<ts>-<id>/ directory
 """
 
@@ -126,10 +126,10 @@ SKILL_DESTS = (          # every agent CLI that reads skills (main@dca7dbf)
 )
 
 
-def install_skill_md(name: str, pipeline_dir: Path) -> int:
-    """Register the pipeline's SKILL.md with every agent CLI's skill dir."""
+def install_skill_md(name: str, workflow_dir: Path) -> int:
+    """Register the workflow's SKILL.md with every agent CLI's skill dir."""
     import shutil
-    src = pipeline_dir / "SKILL.md"
+    src = workflow_dir / "SKILL.md"
     if not src.is_file():                      # scaffolds get a starter
         src.write_text(SKILL_MD.replace("<NAME>", name), encoding="utf-8")
         print(f"  created starter {src} — edit the description")
@@ -144,32 +144,32 @@ def install_skill_md(name: str, pipeline_dir: Path) -> int:
 def bundled_templates() -> list[str]:
     try:
         from importlib import resources
-        root = resources.files("medulla") / "pipelines"
+        root = resources.files("medulla") / "workflows"
         return sorted(d.name for d in root.iterdir()
-                      if d.is_dir() and (d / "pipeline.yaml").is_file())
+                      if d.is_dir() and (d / "workflow.yaml").is_file())
     except Exception:
-        src = Path(__file__).resolve().parent.parent / "pipelines"
+        src = Path(__file__).resolve().parent.parent / "workflows"
         if src.is_dir():
             return sorted(d.name for d in src.iterdir()
-                          if (d / "pipeline.yaml").is_file())
+                          if (d / "workflow.yaml").is_file())
         return []
 
 
 def deploy_template(name: str) -> int:
-    """Copy a bundled pipeline (template) into the project."""
+    """Copy a bundled workflow (template) into the project."""
     import shutil
-    dest = Path(".medulla") / "pipelines" / name
-    if (dest / "pipeline.yaml").exists():
-        print(f"error: {dest}/pipeline.yaml already exists")
+    dest = Path(".medulla") / "workflows" / name
+    if (dest / "workflow.yaml").exists():
+        print(f"error: {dest}/workflow.yaml already exists")
         return 1
     from importlib import resources
     src_path = None
     try:
-        src_path = Path(str(resources.files("medulla") / "pipelines" / name))
+        src_path = Path(str(resources.files("medulla") / "workflows" / name))
     except Exception:
         pass
     if src_path is None or not src_path.is_dir():      # source-mode layout
-        src_path = Path(__file__).resolve().parent.parent / "pipelines" / name
+        src_path = Path(__file__).resolve().parent.parent / "workflows" / name
     if not src_path.is_dir():
         print(f"error: bundled template '{name}' not found")
         return 1
@@ -181,23 +181,23 @@ def deploy_template(name: str) -> int:
     return 0
 
 
-def scaffold_pipeline(name: str) -> int:
+def scaffold_workflow(name: str) -> int:
     import re
     if not re.match(r"^[A-Za-z][A-Za-z0-9_-]*$", name):
-        print(f"error: pipeline name '{name}' must match [A-Za-z][A-Za-z0-9_-]*")
+        print(f"error: workflow name '{name}' must match [A-Za-z][A-Za-z0-9_-]*")
         return 1
-    dest = Path(".medulla") / "pipelines" / name
-    if (dest / "pipeline.yaml").exists():
-        print(f"error: {dest}/pipeline.yaml already exists")
+    dest = Path(".medulla") / "workflows" / name
+    if (dest / "workflow.yaml").exists():
+        print(f"error: {dest}/workflow.yaml already exists")
         return 1
     (dest / "prompts").mkdir(parents=True, exist_ok=True)
-    (dest / "pipeline.yaml").write_text(
-        PIPELINE_YAML.replace("<NAME>", name), encoding="utf-8")
+    (dest / "workflow.yaml").write_text(
+        WORKFLOW_YAML.replace("<NAME>", name), encoding="utf-8")
     (dest / "README.md").write_text(
-        PIPELINE_README.replace("<NAME>", name), encoding="utf-8")
+        WORKFLOW_README.replace("<NAME>", name), encoding="utf-8")
     (dest / ".gitignore").write_text(GITIGNORE, encoding="utf-8")
-    print(f"created {dest}/ (pipeline.yaml, README.md, .gitignore, prompts/)")
-    print(f"  edit:  {dest}/pipeline.yaml")
+    print(f"created {dest}/ (workflow.yaml, README.md, .gitignore, prompts/)")
+    print(f"  edit:  {dest}/workflow.yaml")
     print(f"  run:   medulla -w {dest}")
     return 0
 
@@ -223,7 +223,7 @@ def run_init() -> int:
 
     print(f"  linked .medulla/medulla → {pkg}")
     print("\ndone.\n")
-    print("  # drop your pipelines into .medulla/pipelines/<name>/pipeline.yaml")
+    print("  # drop your workflows into .medulla/workflows/<name>/workflow.yaml")
     print("  # then run:")
     print("  medulla --docker -w <workflow>\n")
     return 0

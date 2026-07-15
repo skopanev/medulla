@@ -3,16 +3,16 @@ import json
 
 import pytest
 
-from medulla.v2.engine import run_pipeline
+from medulla.v2.engine import run_workflow
 
 
-def setup_pipeline(tmp_path, text):
+def setup_workflow(tmp_path, text):
     pdir = tmp_path / "pipe"
     pdir.mkdir()
-    (pdir / "pipeline.yaml").write_text(text, encoding="utf-8")
+    (pdir / "workflow.yaml").write_text(text, encoding="utf-8")
     work = tmp_path / "work"
     work.mkdir()
-    return pdir / "pipeline.yaml", work
+    return pdir / "workflow.yaml", work
 
 
 def read_run(pdir):
@@ -45,8 +45,8 @@ nodes:
       [ "$TARGET" = "world" ] && echo "<signal:ok>done</signal:ok>"
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
     run, outcome, journal = read_run(path.parent)
     assert outcome["outcome"] == "succeeded" and outcome["steps"] == 2
     assert [r["node"] for r in journal] == ["a", "b"]
@@ -54,7 +54,7 @@ nodes:
     vars_yaml = (run / "vars.yaml").read_text()
     assert "TARGET: world" in vars_yaml
     # config snapshot is immutable input for resume
-    assert (run / "pipeline.yaml").read_text() == text
+    assert (run / "workflow.yaml").read_text() == text
 
 
 def test_known_signal_beats_nonzero_exit(tmp_path):
@@ -68,8 +68,8 @@ nodes:
       exit 3
     on_signal: {go: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
     _, outcome, journal = read_run(path.parent)
     assert journal[0]["rc"] == 3 and journal[0]["signal"] == "go"
 
@@ -84,8 +84,8 @@ nodes:
       echo "<signal:go>from stderr</signal:go>" >&2
     on_signal: {go: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2       # silence -> __default__ -> __exit_fail__
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 2       # silence -> __default__ -> __exit_fail__
     _, outcome, _ = read_run(path.parent)
     assert outcome["error"]["signal"] == "__default__"
 
@@ -99,8 +99,8 @@ nodes:
     shell: "exit 5"
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 2
     _, outcome, _ = read_run(path.parent)
     assert outcome["error"]["signal"] == "__failed__"
     assert "rc=5" in outcome["error"]["message"]
@@ -118,8 +118,8 @@ nodes:
     shell: 'echo "<signal:ok>saved: $MEDULLA_LAST_MESSAGE</signal:ok>"'
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
 
 
 def test_mechanical_retry_within_attempts(tmp_path):
@@ -133,8 +133,8 @@ nodes:
     max_attempts: 2
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
     _, _, journal = read_run(path.parent)
     assert journal[0]["attempts"] == 2
 
@@ -149,8 +149,8 @@ nodes:
     max_attempts: 3
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 2
     _, outcome, journal = read_run(path.parent)
     assert journal[0]["attempts"] == 1                 # deterministic silence: no retry
     assert outcome["error"]["signal"] == "__default__"
@@ -166,8 +166,8 @@ nodes:
     timeout: 1
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 2
     _, outcome, journal = read_run(path.parent)
     assert journal[0]["rc"] == 124 and journal[0]["timed_out"] is True
     assert outcome["error"]["signal"] == "__failed__"
@@ -187,8 +187,8 @@ nodes:
       echo "<signal:ok>k</signal:ok>"
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
     received = (work / "received.txt").read_text()
     assert "env=payload-42" in received and "tmpl=payload-42" in received
 
@@ -205,8 +205,8 @@ nodes:
     shell: 'echo "<signal:ok>skipped a</signal:ok>"'
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work, start_override="b") == 0
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work, start_override="b") == 0
 
 
 def test_var_from_failed_attempt_not_applied(tmp_path):
@@ -227,8 +227,8 @@ nodes:
     max_attempts: 2
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
     run, _, _ = read_run(path.parent)
     assert "POISON" not in (run / "vars.yaml").read_text()
 
@@ -245,8 +245,8 @@ nodes:
     shell: "true"
     on_signal: {__done__: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
     _, outcome, journal = read_run(path.parent)
     assert journal[0]["kind"] == "pool" and journal[0]["inputs_ok"] == 1
 
@@ -260,8 +260,8 @@ nodes:
     shell: "{{var:MISSING:-}}"
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 1
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 1
     _, outcome, _ = read_run(path.parent)
     assert outcome["error"]["code"] == "E_RENDER"
 
@@ -279,8 +279,8 @@ nodes:
     shell: 'echo "<signal:ok>reached</signal:ok>"'
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2       # silence -> __default__, not recover
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 2       # silence -> __default__, not recover
     _, outcome, _ = read_run(path.parent)
     assert outcome["error"]["signal"] == "__default__"
 
@@ -298,8 +298,8 @@ nodes:
     shell: 'echo "<signal:ok>k</signal:ok>"'
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 1       # b never runs: budget is gone
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 1       # b never runs: budget is gone
     _, outcome, _ = read_run(path.parent)
     assert outcome["error"]["code"] == "E_DEADLINE"
 
@@ -320,8 +320,8 @@ nodes:
     shell: 'echo "<signal:ok>k</signal:ok>"'
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
 
 
 def test_env_exposes_timeout_and_last_event_json(tmp_path):
@@ -339,8 +339,8 @@ nodes:
     timeout: 42
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
     env_txt = (work / "env.txt").read_text()
     assert "t=42" in env_txt and '"node"' in env_txt and "payload" in env_txt
 
@@ -355,8 +355,8 @@ nodes:
     max_attempts: 2
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 2
     _, outcome, journal = read_run(path.parent)
     assert journal[0]["attempts"] == 2
     assert outcome["error"]["signal"] == "__failed__"
@@ -376,8 +376,8 @@ nodes:
     shell: 'echo "<signal:ok>k</signal:ok>"'
     on_signal: {ok: __exit_ok__, go: __exit_fail__}   # override: defaults self-edge is illegal
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
 
 
 def test_missing_harness_binary_is_e_harness(tmp_path, monkeypatch):
@@ -394,8 +394,8 @@ nodes:
     prompt: "p"
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 1
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 1
     _, outcome, _ = read_run(path.parent)
     assert outcome["error"]["code"] == "E_HARNESS"
     H.reset_registry()
@@ -411,14 +411,14 @@ nodes:
     shell: 'echo "<signal:ok>k</signal:ok>"'
     on_signal: {ok: __exit_ok__}
 """
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
     runs = list((path.parent / "runs").iterdir())
     assert runs[0].name.endswith("-corr1234")
 
 
 def test_validation_error_before_run_dir(tmp_path):
     text = 'version: "2"\nstart: nope\nnodes:\n  a:\n    shell: "true"\n    on_signal: {ok: __exit_ok__}\n'
-    path, work = setup_pipeline(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 1
+    path, work = setup_workflow(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 1
     assert not (path.parent / "runs").exists()         # crash before any run dir

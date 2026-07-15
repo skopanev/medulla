@@ -1,6 +1,6 @@
 # medulla
 
-**medulla is a state machine for AI agents.** You describe work as a YAML pipeline — a graph of **nodes** — and medulla runs each node's action on a shell command or an agent harness (`claude-code`, `codex`, `opencode`, `agy`). Bodies emit **signals**; signals route the graph. Built in: retries, fallback to another model, parallel pools with a success threshold, live operator streaming, and crash-safe resume.
+**medulla is a state machine for AI agents.** You describe work as a YAML workflow — a graph of **nodes** — and medulla runs each node's action on a shell command or an agent harness (`claude-code`, `codex`, `opencode`, `agy`). Bodies emit **signals**; signals route the graph. Built in: retries, fallback to another model, parallel pools with a success threshold, live operator streaming, and crash-safe resume.
 
 ```
 node  = action (shell | agent) [× inputs] → signals → next node
@@ -20,25 +20,25 @@ curl -sSL https://raw.githubusercontent.com/skopanev/medulla/main/install.sh | b
 #  dev: MEDULLA_REPO=/path/to/checkout bash install.sh — editable, edits apply instantly)
 
 cd your-project
-medulla init my-pipe              # scaffold: commented pipeline.yaml, README, .gitignore, prompts/
+medulla init my-pipe              # scaffold: commented workflow.yaml, README, .gitignore, prompts/
 medulla init spar                 # ...or deploy a bundled template (spar: a panel of models)
 medulla init spar --skill         # ...and register its SKILL.md with claude-code / codex / opencode
 medulla init                      # lists available bundled templates
 
-medulla -w .medulla/pipelines/my-pipe                  # run
-medulla -w .medulla/pipelines/my-pipe --dry-run        # print the resolved plan, run nothing
-medulla -w .medulla/pipelines/my-pipe --var KEY=VALUE  # override vars (fresh runs only)
-medulla -w .medulla/pipelines/my-pipe --resume         # continue the latest unfinished run
-medulla -w .medulla/pipelines/my-pipe --run <dir>      # continue a specific run directory
-medulla -w .medulla/pipelines/my-pipe --validate       # load + validate only
-medulla --docker -w .medulla/pipelines/my-pipe         # run inside the pipeline's Docker image
+medulla -w .medulla/workflows/my-pipe                  # run
+medulla -w .medulla/workflows/my-pipe --dry-run        # print the resolved plan, run nothing
+medulla -w .medulla/workflows/my-pipe --var KEY=VALUE  # override vars (fresh runs only)
+medulla -w .medulla/workflows/my-pipe --resume         # continue the latest unfinished run
+medulla -w .medulla/workflows/my-pipe --run <dir>      # continue a specific run directory
+medulla -w .medulla/workflows/my-pipe --validate       # load + validate only
+medulla --docker -w .medulla/workflows/my-pipe         # run inside the workflow's Docker image
 medulla upgrade                                        # re-runs the installer (pipx installs: pipx upgrade)
 medulla --help                                         # the full env/signal reference, always current
 ```
 
-The scaffold runs out of the box — edit `pipeline.yaml` from there. Exit codes: `0` succeeded, `2` the workflow routed to `__exit_fail__`, `1` the pipeline itself is broken, `130` interrupted (Ctrl-C and `docker stop` both stop the run gracefully: children are killed, the run stays resumable).
+The scaffold runs out of the box — edit `workflow.yaml` from there. Exit codes: `0` succeeded, `2` the workflow **failed** (routed to `__exit_fail__`), `1` the engine **crashed** (the workflow definition or environment is broken), `130` interrupted (Ctrl-C and `docker stop` both stop the run gracefully: children are killed, the run stays resumable).
 
-## Writing pipelines
+## Writing workflows
 
 ### A node is an action plus routing
 
@@ -61,7 +61,7 @@ A node runs exactly one of `shell:` (a command) or `agent:` (an AI harness). The
 
 ```
 <signal:NAME>short message</signal:NAME>       route the graph (the message travels with it)
-<signal:var key=K>value</signal:var>           set a pipeline var (never routes)
+<signal:var key=K>value</signal:var>           set a workflow var (never routes)
 <signal:update>progress line</signal:update>   progress only (never routes)
 ```
 
@@ -111,14 +111,14 @@ Adding `inputs:` turns the action into a pool: the body runs once per input, `ma
 | File | Scope |
 |---|---|
 | `~/.medulla/.env` | global — machine-wide provider tokens (claude, openai, …) |
-| `<project>/.medulla/.env` | every pipeline in the project |
-| `<pipeline>/.env` | one pipeline |
+| `<project>/.medulla/.env` | every workflow in the project |
+| `<workflow>/.env` | one workflow |
 
-Nearest wins per key: a pipeline declaring `CLAUDE_CODE_OAUTH_TOKEN` overrides the global one **for that pipeline only**; keys not overridden still flow down from the wider tiers.
+Nearest wins per key: a workflow declaring `CLAUDE_CODE_OAUTH_TOKEN` overrides the global one **for that workflow only**; keys not overridden still flow down from the wider tiers.
 
 Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-file` (never `-e`: values would leak into `ps`/`docker inspect`). All tiers forward whole — what lives in your .env files is your call.
 
-`init` seeds a `.gitignore` (`.env`, `runs/`) into every pipeline it creates.
+`init` seeds a `.gitignore` (`.env`, `runs/`) into every workflow it creates.
 
 ## All variables
 
@@ -127,8 +127,8 @@ Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-fil
 | Variable | When | Meaning |
 |---|---|---|
 | `MEDULLA_RUN_ID` / `MEDULLA_RUN_DIR` | always | run id / run directory. Put deliverables in `$MEDULLA_RUN_DIR/artifacts/` |
-| *all pipeline vars* | always | exported as-is, including `<signal:var>`-set ones |
-| *all `.env` entries* | always | secrets merge: `~/.medulla/.env` < `<project>/.medulla/.env` < `<pipeline>/.env` |
+| *all workflow vars* | always | exported as-is, including `<signal:var>`-set ones |
+| *all `.env` entries* | always | secrets merge: `~/.medulla/.env` < `<project>/.medulla/.env` < `<workflow>/.env` |
 | `MEDULLA_TIMEOUT_S` | always | resolved, deadline-clamped timeout of the current step (CLIs size their own limits from it) |
 | `MEDULLA_ATTEMPT_ID` | body | unique attempt id: `<step>[.i<input>].<p|f><attempt>` — `003.p1` (decision, primary, 1st try), `003.i2.f1` (pool input 2, fallback, 1st try) |
 | `MEDULLA_HARNESS` | body + hooks | `shell` or the harness name |
@@ -155,7 +155,7 @@ Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-fil
 
 | Template | Meaning |
 |---|---|
-| `{{var:KEY}}`, `{{var:KEY:-default}}` | pipeline variable, with optional default |
+| `{{var:KEY}}`, `{{var:KEY:-default}}` | workflow variable, with optional default |
 | `{{file:path}}` | file inclusion, recursive (depth ≤ 10); relative paths resolve against the **including file** |
 | `{{input}}` | the pool input; objects render as compact JSON |
 | `{{input.a.b:-default}}` | dot-walk into object inputs; missing field without default = render error |
@@ -172,7 +172,7 @@ Rule of thumb: **data flows to shell via env** (quoting-safe — `"$MEDULLA_INPU
 
 ## Examples
 
-### Full pipeline
+### Full workflow
 
 ```yaml
 version: "2"
@@ -281,15 +281,15 @@ nodes:
 
 ## Docker
 
-`medulla --docker -w <dir>` re-runs the pipeline inside its image; `scripts/docker.py` owns mounts and credential forwarding, `--build` forces a rebuild, `--mount <dir>` / `--mount-rw <dir>` add extra mounts under `/workspace/<name>`.
+`medulla --docker -w <dir>` re-runs the workflow inside its image; `scripts/docker.py` owns mounts and credential forwarding, `--build` forces a rebuild, `--mount <dir>` / `--mount-rw <dir>` add extra mounts under `/workspace/<name>`.
 
-Image resolution: `MEDULLA_IMAGE` env → `--var IMAGE` → `vars.IMAGE` (a ready tag: pulled, never built) → otherwise **build** from `--var DOCKERFILE` → `vars.DOCKERFILE` → the packaged default (all four harnesses). Built tags are per-pipeline and content-addressed (`medulla-<name>:<sha of Dockerfile>`) — pipelines never share a tag by accident, and editing a Dockerfile rebuilds automatically.
+Image resolution: `MEDULLA_IMAGE` env → `--var IMAGE` → `vars.IMAGE` (a ready tag: pulled, never built) → otherwise **build** from `--var DOCKERFILE` → `vars.DOCKERFILE` → the packaged default (all four harnesses). Built tags are per-workflow and content-addressed (`medulla-<name>:<sha of Dockerfile>`) — workflows never share a tag by accident, and editing a Dockerfile rebuilds automatically.
 
 ---
 
 ## Technical reference
 
-### Pipeline fields
+### Workflow fields
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -349,16 +349,16 @@ Phase 1 — file inclusion; phase 2 — one simultaneous, **inert** pass of var/
 
 ### Errors & exit codes
 
-Two failure classes. The test: *fixable by changing data/prompts/retrying?* → workflow failure, the graph decides. *Requires editing the pipeline/environment?* → engine crash.
+Two failure classes. The test: *fixable by changing data/prompts/retrying?* → workflow failure, the graph decides. *Requires editing the workflow/environment?* → engine crash.
 
 | Exit | Class | Meaning |
 |---|---|---|
 | 0 | — | `__exit_ok__` |
-| 1 | engine crash | fix the pipeline; retrying is pointless |
+| 1 | engine crash | fix the workflow; retrying is pointless |
 | 2 | workflow failure | the graph routed to `__exit_fail__` |
 | 130 | interrupt | SIGINT/SIGTERM: children killed first, outcome `interrupted`, resumable |
 
-Crash codes: `E_VALIDATION` (schema/XOR/unknown target/name traps/bare keys in pool routing/defaults-inherited self-edges), `E_RENDER`, `E_DEADLINE` (pipeline timeout), `E_INPUTS` (source exited non-zero or emitted mixed-kind/array elements — a broken producer is not an empty queue), `E_INPUTS_LIMIT`, `E_HARNESS` (**only** "binary missing/unresolvable" — an agent process dying is class B, retryable), `E_INTERNAL`. Class A is never routable in-graph: the graph itself is what's broken.
+Crash codes: `E_VALIDATION` (schema/XOR/unknown target/name traps/bare keys in pool routing/defaults-inherited self-edges), `E_RENDER`, `E_DEADLINE` (workflow timeout), `E_INPUTS` (source exited non-zero or emitted mixed-kind/array elements — a broken producer is not an empty queue), `E_INPUTS_LIMIT`, `E_HARNESS` (**only** "binary missing/unresolvable" — an agent process dying is class B, retryable), `E_INTERNAL`. Class A is never routable in-graph: the graph itself is what's broken.
 
 Error handling in the graph: node-level edge → `defaults.on_signal` catch-all → built-ins (a three-tier supervision chain; see the catch-all example above). The validator rejects a defaults-inherited edge pointing at its own node; explicit self-loops stay legal. A pool's `__failed__` message is pre-aggregated (`"2/5 inputs ok (min_success=3); rc!=0 x2, timeout x1"`). Every run ends with an atomic `outcome.json`:
 
@@ -383,16 +383,16 @@ A fixed delay separates attempts and the fallback switch (`MEDULLA_RETRY_DELAY_S
 
 ### Layout
 
-A pipeline is a self-contained directory — contract, code, history:
+A workflow is a self-contained directory — contract, code, history:
 
 ```
-.medulla/pipelines/<name>/
-  pipeline.yaml            # the contract
+.medulla/workflows/<name>/
+  workflow.yaml            # the contract (the pre-4.1 name pipeline.yaml is still read)
   prompts/  scripts/       # its code
   .env  .gitignore         # secrets (env-only) / seeded by init (.env, runs/)
   harness/                 # phase 2: harness HOME (sessions), shared by all runs
   runs/<ts>-<run_id>/      # one directory per run
-    pipeline.yaml          # config snapshot as loaded (immutable for the run)
+    workflow.yaml          # config snapshot as loaded (immutable for the run)
     journal.jsonl          # graph chronology, append-only (step, node, rc, signal, message, duration)
     vars.yaml              # variables (updated on var signals)
     outcome.json           # written only on completion (atomic); absent = running or hard-killed
@@ -419,7 +419,7 @@ Signal filtering: claude-code/codex scan **assistant text** mined from their JSO
 
 Adapters also configure the CLIs themselves (not your API — listed for debugging): claude gets `API_TIMEOUT_MS` and a stripped `ANTHROPIC_API_KEY` (the OAuth account must win); codex gets `-c stream_idle_timeout_ms` and prefers the `cx` token-refreshing wrapper; opencode gets its config via `OPENCODE_CONFIG_CONTENT` (permission allow, provider timeout, per-model reasoningEffort — no opencode.json is written); agy gets `--print-timeout`. All inner timeouts are sized from the step timeout + 300s slack so the engine always kills first.
 
-Development: `live-tests/` in the repo holds 20 battle pipelines that run the real CLIs (adapters, pools, fallback, interrupt, resume) — `live-tests/run-all.sh` before release pushes. Unit suite: `cd cli-agent && pytest`.
+Development: `live-tests/` in the repo holds 20 battle workflows that run the real CLIs (adapters, pools, fallback, interrupt, resume) — `live-tests/run-all.sh` before release pushes. Unit suite: `cd cli-agent && pytest`.
 
 ### Migrating from v1
 
@@ -430,13 +430,13 @@ Development: `live-tests/` in the repo holds 20 battle pipelines that run the re
 | `loop:` + `list:` + `fetch:` + `parallel: true` | `inputs:` on the node + `max_parallel` |
 | `done: __next_item__` + `loop_done` | pool joins route `__done__`/`__failed__`/`__empty__` via `min_success` |
 | `max_iterations` / `reset_iterations` / `on_max` | removed — budget gate pattern (vars) |
-| hardcoded `max_rounds=500` | pipeline `timeout` (wall-clock deadline) |
+| hardcoded `max_rounds=500` | workflow `timeout` (wall-clock deadline) |
 | `round_timeout` / `fallback_runner` | `defaults: {timeout, fallback}` |
 | `__exit__` | `__exit_ok__` / `__exit_fail__` |
 | `ignore_rc` | `ignore_exit_code` (decision nodes only) |
 | `{{__item__}}` / `{{__list_item__}}` | `{{input}}` family + `MEDULLA_INPUT_*` env |
 | `MEDULLA_TASK_ID` | `MEDULLA_RUN_ID` |
-| `.medulla/vars.<task>.yaml` | `.medulla/pipelines/<name>/runs/<id>/` |
+| `.medulla/vars.<task>.yaml` | `.medulla/workflows/<name>/runs/<id>/` |
 | `--stage` | `--node` |
 | `install-skill` | `init <name> --skill` |
 | gemini executor | removed (use `agy`) |

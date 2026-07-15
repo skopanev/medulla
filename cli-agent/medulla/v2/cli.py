@@ -1,8 +1,8 @@
 """v2 CLI — flag-based per the contract's Usage section:
 
-  medulla -w <pipeline-dir> [--var K=V ...] [--node NAME]
-  medulla -w <pipeline-dir> --resume | --run <dir>
-  medulla -w <pipeline-dir> --validate | --dry-run
+  medulla -w <workflow-dir> [--var K=V ...] [--node NAME]
+  medulla -w <workflow-dir> --resume | --run <dir>
+  medulla -w <workflow-dir> --validate | --dry-run
 """
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from .contract import load_pipeline
-from .engine import find_resumable, run_pipeline
+from .contract import load_workflow
+from .engine import find_resumable, run_workflow
 from .errors import EngineCrash
 
 
@@ -24,8 +24,9 @@ class _Parser(argparse.ArgumentParser):
         raise SystemExit(1)
 
 
-def _resolve_pipeline_yaml(w: Path) -> Path:
-    return w / "pipeline.yaml" if w.is_dir() else w
+def _resolve_workflow_yaml(w: Path) -> Path:
+    from .rundir import config_yaml
+    return config_yaml(w) if w.is_dir() else w
 
 
 ENV_HELP = """\
@@ -34,7 +35,7 @@ environment the engine provides to bodies and hooks (agents: read this, it is th
   always
     MEDULLA_RUN_ID          run id (settable from outside for correlation)
     MEDULLA_RUN_DIR         this run's directory; put deliverables in $MEDULLA_RUN_DIR/artifacts/
-    <all pipeline vars>     exported as-is, including <signal:var>-set ones
+    <all workflow vars>     exported as-is, including <signal:var>-set ones
     MEDULLA_TIMEOUT_S       resolved (deadline-clamped) timeout of the current step, seconds
     MEDULLA_ATTEMPT_ID      unique attempt id: <step>.<p|f><n>  (e.g. 003.i2.p1)
     MEDULLA_HARNESS         "shell" or the harness name of the current body
@@ -60,14 +61,14 @@ environment the engine provides to bodies and hooks (agents: read this, it is th
                             the body attempt's exit code and its raw signal (if any)
 
 docker (host-side, handled by scripts/docker.py before the engine starts):
-    medulla --docker -w <dir> ...   run inside the pipeline's image
+    medulla --docker -w <dir> ...   run inside the workflow's image
     --build                         force a no-cache image rebuild
     --mount <dir> / --mount-rw <dir>  extra mounts under /workspace/<name>
     image resolution precedence:    MEDULLA_IMAGE env > --var IMAGE >
                                     vars.IMAGE > build from (--var DOCKERFILE >
                                     vars.DOCKERFILE > packaged default)
 
-subcommands: init <name> [--skill] (deploy a bundled template or scaffold a new pipeline; --skill registers it with Claude Code), upgrade
+subcommands: init <name> [--skill] (deploy a bundled template or scaffold a new workflow; --skill registers it with Claude Code), upgrade
 
 environment the engine reads:
     MEDULLA_RETRY_DELAY_S   pause between attempts / before fallback (default 2)
@@ -76,7 +77,7 @@ environment the engine reads:
 
 signals (print on stdout, must start the line for plain-text harnesses):
     <signal:NAME>message</signal:NAME>      route the graph (decision) / record (pool)
-    <signal:var key=K>value</signal:var>    set a pipeline var (fold law applies)
+    <signal:var key=K>value</signal:var>    set a workflow var (fold law applies)
     <signal:update>progress</signal:update> progress line, never routes
 """
 
@@ -84,8 +85,8 @@ signals (print on stdout, must start the line for plain-text harnesses):
 def main(argv: list[str] | None = None) -> int:
     parser = _Parser(prog="medulla", epilog=ENV_HELP,
                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-w", "--pipeline", required=True, type=Path,
-                        help="pipeline directory (or pipeline.yaml path)")
+    parser.add_argument("-w", "--workflow", required=True, type=Path,
+                        help="workflow directory (or workflow.yaml path)")
     parser.add_argument("--var", action="append", default=[], metavar="KEY=VALUE")
     parser.add_argument("--node", default=None, help="start from a specific node (dev, fresh runs)")
     parser.add_argument("--resume", action="store_true", help="continue the latest resumable run")
@@ -99,16 +100,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     ns = parser.parse_args(argv)
 
-    yaml_path = _resolve_pipeline_yaml(ns.pipeline)
+    yaml_path = _resolve_workflow_yaml(ns.workflow)
 
     if ns.validate or ns.dry_run:
         try:
-            pipeline = load_pipeline(yaml_path)
+            workflow = load_workflow(yaml_path)
         except EngineCrash as crash:
             print(f"{crash.code}: {crash.message}", file=sys.stderr)
             return 1
         if ns.dry_run:
-            _print_plan(pipeline)
+            _print_plan(workflow)
         else:
             print("ok")
         return 0
@@ -131,7 +132,8 @@ def main(argv: list[str] | None = None) -> int:
     resume_dir = None
     if ns.run is not None:
         resume_dir = ns.run
-        if not (resume_dir / "pipeline.yaml").is_file():
+        from .rundir import config_yaml
+        if not config_yaml(resume_dir).is_file():
             print(f"error: not a run directory: {resume_dir}", file=sys.stderr)
             return 1
     elif ns.resume:
@@ -141,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: no resumable run in {pdir / 'runs'}", file=sys.stderr)
             return 1
 
-    return run_pipeline(yaml_path, cli_vars=cli_vars, start_override=ns.node,
+    return run_workflow(yaml_path, cli_vars=cli_vars, start_override=ns.node,
                         resume_dir=resume_dir)
 
 
@@ -160,9 +162,9 @@ def _print_version() -> None:
     print(f"medulla {v}{commit}")
 
 
-def _print_plan(pipeline) -> None:
-    p = pipeline
-    print(f"pipeline: {p.path}")
+def _print_plan(workflow) -> None:
+    p = workflow
+    print(f"workflow: {p.path}")
     print(f"start: {p.start}  timeout: {p.timeout or 'unlimited'}  keep_runs: {p.keep_runs}")
     if p.vars:
         print(f"vars: {', '.join(f'{k}={v}' for k, v in p.vars.items())}")

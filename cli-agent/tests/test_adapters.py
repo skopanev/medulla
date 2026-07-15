@@ -216,13 +216,13 @@ def test_opencode_env_config_is_per_invocation(tmp_path):
 # ── end-to-end through the engine with fake binaries on PATH ────────────────
 
 def run_pipe(tmp_path, text, workdir=None):
-    from medulla.v2.engine import run_pipeline
+    from medulla.v2.engine import run_workflow
     pdir = tmp_path / "pipe"
     pdir.mkdir()
-    (pdir / "pipeline.yaml").write_text(text, encoding="utf-8")
+    (pdir / "workflow.yaml").write_text(text, encoding="utf-8")
     work = workdir or (tmp_path / "work")
     work.mkdir(exist_ok=True)
-    return run_pipeline(pdir / "pipeline.yaml", workdir=work), pdir
+    return run_workflow(pdir / "workflow.yaml", workdir=work), pdir
 
 
 def test_codex_e2e_stdin_delivery(tmp_path, on_path):

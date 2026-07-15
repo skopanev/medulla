@@ -92,7 +92,7 @@ def _parse_env_file(path: Path) -> dict:
 def _collect_dotenv(workflow: str | None) -> dict:
     """All three .env tiers forward WHOLE (owner decision: the user's zone,
     the engine is not a nanny). Merge order explicit and fixed:
-    global < project < pipeline — THE NEAREST TIER WINS on key conflict."""
+    global < project < workflow — THE NEAREST TIER WINS on key conflict."""
     merged = _parse_env_file(Path.home() / ".medulla" / ".env")
     if workflow:
         wdir = Path(workflow).resolve()
@@ -149,26 +149,35 @@ def build_run_command(image, volumes, args, container_name: str) -> list[str]:
     return cmd
 
 
-def read_pipeline_vars(workflow: str | None) -> dict:
+def _config_yaml(d: Path) -> Path:
+    """workflow.yaml, else the pre-4.1 name pipeline.yaml (read-side only)."""
+    w = d / "workflow.yaml"
+    if w.is_file():
+        return w
+    legacy = d / "pipeline.yaml"
+    return legacy if legacy.is_file() else w
+
+
+def read_workflow_vars(workflow: str | None) -> dict:
     if not workflow:
         return {}
-    pipeline_yaml = Path(workflow) / "pipeline.yaml"
-    if not pipeline_yaml.is_file():
+    workflow_yaml = _config_yaml(Path(workflow))
+    if not workflow_yaml.is_file():
         return {}
     try:
         import yaml
     except ImportError:
         raise SystemExit("error: pyyaml required (pip3 install pyyaml)")
-    data = yaml.safe_load(pipeline_yaml.read_text(encoding="utf-8")) or {}
+    data = yaml.safe_load(workflow_yaml.read_text(encoding="utf-8")) or {}
     return data.get("vars") or {}
 
 
 def resolve_dockerfile(workflow: str | None, cli_vars: dict) -> Path:
-    """Read vars.DOCKERFILE from <workflow>/pipeline.yaml, resolve relative
-    to the pipeline's dir. CLI --var DOCKERFILE=... overrides. Absent ->
-    the packaged default (one shared image for pipelines that don't care)."""
+    """Read vars.DOCKERFILE from <workflow>/workflow.yaml, resolve relative
+    to the workflow's dir. CLI --var DOCKERFILE=... overrides. Absent ->
+    the packaged default (one shared image for workflows that don't care)."""
     if not workflow:
-        raise SystemExit("error: -w/--workflow required to resolve Dockerfile via pipeline vars")
+        raise SystemExit("error: -w/--workflow required to resolve Dockerfile via workflow vars")
     workflow_dir = Path(workflow)
 
     cli_df = cli_vars.get("DOCKERFILE")
@@ -176,28 +185,28 @@ def resolve_dockerfile(workflow: str | None, cli_vars: dict) -> Path:
         p = Path(cli_df)
         return p if p.is_absolute() else (workflow_dir / p)
 
-    pipeline_yaml = workflow_dir / "pipeline.yaml"
-    if not pipeline_yaml.is_file():
-        raise SystemExit(f"error: pipeline.yaml not found: {pipeline_yaml}")
+    workflow_yaml = _config_yaml(workflow_dir)
+    if not workflow_yaml.is_file():
+        raise SystemExit(f"error: workflow.yaml not found: {workflow_yaml}")
     try:
         import yaml
     except ImportError:
         raise SystemExit("error: pyyaml required (pip3 install pyyaml)")
-    data = yaml.safe_load(pipeline_yaml.read_text(encoding="utf-8")) or {}
+    data = yaml.safe_load(workflow_yaml.read_text(encoding="utf-8")) or {}
     vars_map = data.get("vars") or {}
     df = vars_map.get("DOCKERFILE")
     if not df:
         # no vars.DOCKERFILE = the packaged default image (all four harnesses):
-        # pipelines that don't care share one build; declare the var to diverge
+        # workflows that don't care share one build; declare the var to diverge
         return SCRIPT_DIR / "Dockerfile.default"
     p = Path(df)
     return p if p.is_absolute() else (workflow_dir / p)
 
 
 def image_tag_for(workflow: str, dockerfile: Path) -> str:
-    """Per-pipeline, content-addressed image tag: medulla-<name>:<sha of Dockerfile>.
+    """Per-workflow, content-addressed image tag: medulla-<name>:<sha of Dockerfile>.
 
-    Pipelines with different Dockerfiles must never share a tag (the first
+    Workflows with different Dockerfiles must never share a tag (the first
     builder would silently win), and editing a Dockerfile must trigger a
     rebuild without a manual --build (a new hash is an absent image)."""
     import hashlib
@@ -265,13 +274,13 @@ def ensure_image(image, build, workflow, cli_vars, dockerfile=None, ready_image=
     return proc.returncode
 
 
-def pipeline_uses_agy(workflow: str | None) -> bool:
-    """Only pipelines that actually mention the agy harness get the
+def workflow_uses_agy(workflow: str | None) -> bool:
+    """Only workflows that actually mention the agy harness get the
     Keychain-extracted agy keys — a Keychain prompt on every --docker run
-    for pipelines that never touch agy is noise (and scary noise)."""
+    for workflows that never touch agy is noise (and scary noise)."""
     if not workflow:
         return True                    # no yaml to inspect: keep old behavior
-    yaml_path = Path(workflow) / "pipeline.yaml"
+    yaml_path = _config_yaml(Path(workflow))
     try:
         return "agy" in yaml_path.read_text(encoding="utf-8")
     except OSError:
@@ -329,7 +338,7 @@ def build_volumes(claude_home, mount_agy=True):
     _mount_init_docker(vols)
 
     # agy (Antigravity CLI) keys — extract from macOS Keychain and mount as temp
-    # files, but ONLY for pipelines that use agy (Keychain prompts are not free)
+    # files, but ONLY for workflows that use agy (Keychain prompts are not free)
     if mount_agy:
         _mount_agy_keys(vols)
 
@@ -457,7 +466,7 @@ def main():
     # Extract workflow for Dockerfile resolution
     workflow = None
     for j, a in enumerate(args):
-        if a in ("-w", "--workflow", "--pipeline") and j + 1 < len(args):
+        if a in ("-w", "--workflow", "--workflow") and j + 1 < len(args):
             workflow = args[j + 1]
             break
 
@@ -467,10 +476,10 @@ def main():
     # Precedence: MEDULLA_IMAGE env > --var IMAGE > vars.IMAGE >
     #             (--var DOCKERFILE > vars.DOCKERFILE > packaged default) build
     dockerfile = None
-    pipeline_vars = read_pipeline_vars(workflow)
+    workflow_vars = read_workflow_vars(workflow)
     image = (os.environ.get("MEDULLA_IMAGE")
              or cli_vars.get("IMAGE")
-             or pipeline_vars.get("IMAGE"))
+             or workflow_vars.get("IMAGE"))
     if image is None:
         if workflow:
             dockerfile = resolve_dockerfile(workflow, cli_vars)
@@ -499,7 +508,7 @@ def main():
                 f.write(f"{k}={v}\n")
         # belt for exits that never reach run_docker (bad mount → return 1)
         atexit.register(_unlink_env_file)
-    volumes = build_volumes(claude_home, mount_agy=pipeline_uses_agy(workflow))
+    volumes = build_volumes(claude_home, mount_agy=workflow_uses_agy(workflow))
 
     # Mount extra folders into /workspace/<name> (nested mount inside workspace)
     for mount_path, ro in extra_mounts:

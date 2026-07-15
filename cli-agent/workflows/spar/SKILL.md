@@ -74,8 +74,8 @@ quotes in the prompt inert):
     <your prompt>
     EOF
     )"
-    medulla --docker -w .medulla/pipelines/spar --var "QUESTION=$QUESTION" >&2
-    cat "$(ls -td .medulla/pipelines/spar/runs/* | head -1)/artifacts/synthesized.md"
+    medulla --docker -w .medulla/workflows/spar --var "QUESTION=$QUESTION" >&2
+    cat "$(ls -td .medulla/workflows/spar/runs/* | head -1)/artifacts/synthesized.md"
 
 The cat'd output is the panel's combined takes, separated by headers.
 A `WARNING: only N/4 panelists delivered` line means partial delivery —

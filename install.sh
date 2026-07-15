@@ -69,5 +69,5 @@ esac
 info "Done: medulla @ $COMMIT ($SUBJECT)"
 info "Next:"
 echo "     cd your-project"
-echo "     medulla init <name>        # scaffold a pipeline (or: medulla init spar)"
-echo "     medulla -w .medulla/pipelines/<name>"
+echo "     medulla init <name>        # scaffold a workflow (or: medulla init spar)"
+echo "     medulla -w .medulla/workflows/<name>"

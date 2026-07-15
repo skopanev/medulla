@@ -1,4 +1,4 @@
-"""Load + validate + normalize pipeline.yaml into the v2 model.
+"""Load + validate + normalize workflow.yaml into the v2 model.
 
 Every rejection here is E_VALIDATION — load-time, before any run dir exists.
 """
@@ -11,10 +11,10 @@ import yaml
 
 from .errors import EngineCrash, E_VALIDATION
 from .model import (
-    Action, AgentSpec, Defaults, InputsSpec, Node, Pipeline, Pool,
+    Action, AgentSpec, Defaults, InputsSpec, Node, Workflow, Pool,
     BOOLEAN_TRAP_NAMES, CHANNEL_SIGNALS, DEFAULTS_ALLOWED_KEYS, ENGINE_FACTS,
     ENV_BLACKLIST_EXACT, ENV_BLACKLIST_PREFIX, SIG_DONE, TERMINALS,
-    DEFAULT_PIPELINE_TIMEOUT, DEFAULT_SOURCE_TIMEOUT,
+    DEFAULT_WORKFLOW_TIMEOUT, DEFAULT_SOURCE_TIMEOUT,
 )
 
 DUNDER_RE = re.compile(r"^__.*__$")
@@ -232,10 +232,10 @@ def _validate_var_name(key: str, where: str) -> None:
         raise _err(f"{where}: var name {key!r} is reserved (vars are exported to child env)")
 
 
-def load_pipeline(path: Path) -> Pipeline:
+def load_workflow(path: Path) -> Workflow:
     path = Path(path)
     if not path.is_file():
-        raise _err(f"pipeline not found: {path}")
+        raise _err(f"workflow not found: {path}")
     try:
         data = yaml.load(path.read_text(encoding="utf-8"), Loader=_StrictLoader)
     except EngineCrash:
@@ -243,13 +243,13 @@ def load_pipeline(path: Path) -> Pipeline:
     except yaml.YAMLError as exc:
         raise _err(f"YAML parse error: {exc}")
     if not isinstance(data, dict):
-        raise _err("pipeline must be a YAML mapping")
+        raise _err("workflow must be a YAML mapping")
 
     version = data.get("version")
     if version != "2":
         raise _err(
             f"version: \"2\" is required (got {version!r}). "
-            f"This looks like a v1 pipeline — see 'Migrating from v1' in README.md"
+            f"This looks like a v1 workflow — see 'Migrating from v1' in README.md"
         )
 
     top_keys = {"version", "start", "vars", "timeout", "keep_runs", "defaults", "nodes"}
@@ -341,8 +341,8 @@ def load_pipeline(path: Path) -> Pipeline:
         _validate_var_name(key, "vars")
     vars_map = {k: str(v) for k, v in vars_raw.items()}
 
-    # pipeline timeout: 0 = unlimited
-    t_raw = data.get("timeout", DEFAULT_PIPELINE_TIMEOUT)
+    # workflow timeout: 0 = unlimited
+    t_raw = data.get("timeout", DEFAULT_WORKFLOW_TIMEOUT)
     if isinstance(t_raw, bool) or not isinstance(t_raw, int) or t_raw < 0:
         raise _err("timeout must be a non-negative integer (0 = unlimited)")
     timeout = None if t_raw == 0 else t_raw
@@ -351,7 +351,7 @@ def load_pipeline(path: Path) -> Pipeline:
     if isinstance(keep_runs, bool) or not isinstance(keep_runs, int) or keep_runs < 1:
         raise _err("keep_runs must be a positive integer")
 
-    return Pipeline(
+    return Workflow(
         version="2", start=start, nodes=nodes, vars=vars_map,
         timeout=timeout, keep_runs=keep_runs, defaults=defaults,
         path=path, dir=path.parent,

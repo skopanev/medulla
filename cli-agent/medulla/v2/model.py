@@ -1,4 +1,4 @@
-"""Normalized v2 pipeline model. The contract lives in README.md; this mirrors it 1:1."""
+"""Normalized v2 workflow model. The contract lives in README.md; this mirrors it 1:1."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -19,7 +19,7 @@ CHANNEL_SIGNALS = ("var", "update")  # reserved bare words; never routable
 BOOLEAN_TRAP_NAMES = {"on", "off", "yes", "no", "true", "false"}
 
 DEFAULT_ACTION_TIMEOUT = 1800
-DEFAULT_PIPELINE_TIMEOUT = 86400
+DEFAULT_WORKFLOW_TIMEOUT = 86400
 DEFAULT_SOURCE_TIMEOUT = 60
 HOOK_TIMEOUT_S = 60                 # pre/post are one-line artifact tests, not workloads
 DEFAULT_KEEP_RUNS = 20
@@ -96,16 +96,16 @@ class Defaults:
 
 
 @dataclass
-class Pipeline:
+class Workflow:
     version: str
     start: str
     nodes: dict[str, Node]
     vars: dict[str, str] = field(default_factory=dict)
-    timeout: int | None = DEFAULT_PIPELINE_TIMEOUT  # whole-run deadline; None = unlimited (yaml: 0)
+    timeout: int | None = DEFAULT_WORKFLOW_TIMEOUT  # whole-run deadline; None = unlimited (yaml: 0)
     keep_runs: int = DEFAULT_KEEP_RUNS
     defaults: Defaults = field(default_factory=Defaults)
     path: Path | None = None            # source file
-    dir: Path | None = None             # pipeline dir (parent of pipeline.yaml)
+    dir: Path | None = None             # workflow dir (parent of workflow.yaml)
 
     def action_timeout(self, action: Action) -> int:
         if action.timeout is not None:

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# two simultaneous runs of ONE pipeline: separate run dirs, both green
+# two simultaneous runs of ONE workflow: separate run dirs, both green
 set -u
 cd "$(dirname "$0")"
 rm -rf runs

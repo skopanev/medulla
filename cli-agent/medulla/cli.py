@@ -1,6 +1,6 @@
 """`medulla` console entrypoint — the v2 engine plus the --docker exec boundary.
 
---docker re-invokes medulla inside the pipeline's image (scripts/docker.py owns
+--docker re-invokes medulla inside the workflow's image (scripts/docker.py owns
 mounts/credentials); every other flag passes through to the v2 CLI untouched.
 v1 is gone: this file is a thin shim, the engine lives in medulla.v2.
 """
@@ -17,7 +17,7 @@ def entry() -> int:
     # documented subcommands (before any flag parsing)
     if argv and argv[0] == "init":
         from .init import (bundled_templates, deploy_template, install_skill_md,
-                           run_init, scaffold_pipeline)
+                           run_init, scaffold_workflow)
         args = [a for a in argv[1:] if not a.startswith("-")]
         want_skill = "--skill" in argv
         if not args:
@@ -25,15 +25,15 @@ def entry() -> int:
             print("usage: medulla init <name> [--skill]", file=sys.stderr)
             print(f"  a bundled template name deploys that template ({names});",
                   file=sys.stderr)
-            print("  any other name scaffolds a new pipeline;", file=sys.stderr)
+            print("  any other name scaffolds a new workflow;", file=sys.stderr)
             print("  --skill also registers SKILL.md with Claude Code", file=sys.stderr)
             return 1
         run_init()                          # project runtime (.medulla/), idempotent
         name = args[0]
-        rc = deploy_template(name) if name in bundled_templates()             else scaffold_pipeline(name)
+        rc = deploy_template(name) if name in bundled_templates()             else scaffold_workflow(name)
         if rc == 0 and want_skill:
             from pathlib import Path as _P
-            rc = install_skill_md(name, _P(".medulla") / "pipelines" / name)
+            rc = install_skill_md(name, _P(".medulla") / "workflows" / name)
         return rc
     if argv and argv[0] == "upgrade":
         # two install methods exist: install.sh (venv at ~/.medulla/engine;

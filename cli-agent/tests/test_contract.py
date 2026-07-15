@@ -1,7 +1,7 @@
 """Validator matrix — every rejection is E_VALIDATION at load time."""
 import pytest
 
-from medulla.v2.contract import load_pipeline
+from medulla.v2.contract import load_workflow
 from medulla.v2.errors import EngineCrash
 
 MINIMAL = """
@@ -15,20 +15,20 @@ nodes:
 
 
 def write(tmp_path, text):
-    p = tmp_path / "pipeline.yaml"
+    p = tmp_path / "workflow.yaml"
     p.write_text(text, encoding="utf-8")
     return p
 
 
 def load_err(tmp_path, text) -> str:
     with pytest.raises(EngineCrash) as exc:
-        load_pipeline(write(tmp_path, text))
+        load_workflow(write(tmp_path, text))
     assert exc.value.code == "E_VALIDATION"
     return exc.value.message
 
 
 def test_minimal_loads(tmp_path):
-    p = load_pipeline(write(tmp_path, MINIMAL))
+    p = load_workflow(write(tmp_path, MINIMAL))
     assert p.start == "a" and p.nodes["a"].action.kind == "shell"
 
 
@@ -244,7 +244,7 @@ nodes:
     shell: "true"
     on_signal: {ok: __exit_fail__, __failed__: __exit_fail__}
 """
-    p = load_pipeline(write(tmp_path, text))
+    p = load_workflow(write(tmp_path, text))
     assert p.defaults.on_signal["__failed__"] == "notify"
 
 
@@ -287,7 +287,7 @@ nodes:
     shell: "true"
     on_signal: {__done__: __exit_ok__}
 """
-    p = load_pipeline(write(tmp_path, text))
+    p = load_workflow(write(tmp_path, text))
     assert p.timeout is None                       # 0 = unlimited
     assert p.nodes["a"].action.agent.harness == "codex"   # scalar shortcut
     pool = p.nodes["b"].pool

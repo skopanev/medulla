@@ -22,6 +22,17 @@ class RunLocked(Exception):
     """Another process holds this run's lock."""
 
 
+def config_yaml(d: Path) -> Path:
+    """Read-side config lookup: workflow.yaml, else the pre-4.1 name
+    pipeline.yaml — old projects and old run dirs keep working untouched.
+    Writes always use the new name."""
+    w = d / "workflow.yaml"
+    if w.is_file():
+        return w
+    legacy = d / "pipeline.yaml"
+    return legacy if legacy.is_file() else w
+
+
 class RunStore:
     def __init__(self, run_dir: Path, run_id: str):
         self.dir = run_dir
@@ -50,13 +61,13 @@ class RunStore:
             self._lock_fd = None
 
     @classmethod
-    def create(cls, pipeline_dir: Path, config_text: str, run_id: str | None = None) -> "RunStore":
+    def create(cls, workflow_dir: Path, config_text: str, run_id: str | None = None) -> "RunStore":
         run_id = run_id or os.environ.get("MEDULLA_RUN_ID", "").strip() or uuid.uuid4().hex[:8]
         ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        run_dir = pipeline_dir / "runs" / f"{ts}-{run_id}"
+        run_dir = workflow_dir / "runs" / f"{ts}-{run_id}"
         run_dir.mkdir(parents=True, exist_ok=False)
         (run_dir / "steps").mkdir()
-        (run_dir / "pipeline.yaml").write_text(config_text, encoding="utf-8")  # immutable snapshot
+        (run_dir / "workflow.yaml").write_text(config_text, encoding="utf-8")  # immutable snapshot
         store = cls(run_dir, run_id)
         store._acquire_flock()
         return store
@@ -65,7 +76,7 @@ class RunStore:
     def open(cls, run_dir: Path) -> "RunStore":
         """Reopen an existing run for resume. run_id comes from the dir name."""
         run_dir = Path(run_dir)
-        if not (run_dir / "pipeline.yaml").is_file():
+        if not config_yaml(run_dir).is_file():
             raise FileNotFoundError(f"not a run directory: {run_dir}")
         run_id = run_dir.name.rsplit("-", 1)[-1]
         store = cls(run_dir, run_id)
@@ -159,11 +170,11 @@ def _read_jsonl_tolerant(path: Path, what: str) -> list[dict]:
     return rows
 
 
-def prune_runs(pipeline_dir: Path, keep_runs: int, pipeline_timeout: int | None) -> None:
+def prune_runs(workflow_dir: Path, keep_runs: int, workflow_timeout: int | None) -> None:
     """On boot, after the new run dir exists. Finished (has outcome.json): keep the
-    newest keep_runs. Unfinished: never touch while younger than the pipeline
+    newest keep_runs. Unfinished: never touch while younger than the workflow
     timeout (the active-run shield); timeout 0/None = never auto-prune unfinished."""
-    runs_dir = pipeline_dir / "runs"
+    runs_dir = workflow_dir / "runs"
     if not runs_dir.is_dir():
         return
     finished: list[Path] = []
@@ -174,12 +185,12 @@ def prune_runs(pipeline_dir: Path, keep_runs: int, pipeline_timeout: int | None)
         if (run / "outcome.json").is_file():
             finished.append(run)
             continue
-        if pipeline_timeout:
+        if workflow_timeout:
             try:
                 ts = datetime.datetime.strptime(run.name.rsplit("-", 1)[0], "%Y-%m-%d_%H-%M-%S")
             except ValueError:
                 continue                       # unrecognized name: leave it alone
-            if (now - ts).total_seconds() > pipeline_timeout * 2:
+            if (now - ts).total_seconds() > workflow_timeout * 2:
                 shutil.rmtree(run, ignore_errors=True)   # certainly dead: deadline long past
     for run in sorted(finished, key=lambda p: p.name, reverse=True)[keep_runs:]:
         shutil.rmtree(run, ignore_errors=True)

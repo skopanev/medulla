@@ -5,16 +5,16 @@ import json
 import os
 
 from medulla.v2.cli import main as cli_main
-from medulla.v2.engine import find_resumable, run_pipeline
+from medulla.v2.engine import find_resumable, run_workflow
 
 
 def setup(tmp_path, text):
     pdir = tmp_path / "pipe"
     pdir.mkdir(exist_ok=True)
-    (pdir / "pipeline.yaml").write_text(text, encoding="utf-8")
+    (pdir / "workflow.yaml").write_text(text, encoding="utf-8")
     work = tmp_path / "work"
     work.mkdir(exist_ok=True)
-    return pdir / "pipeline.yaml", work
+    return pdir / "workflow.yaml", work
 
 
 def runs_of(pdir):
@@ -44,7 +44,7 @@ def test_pool_resume_no_resource_no_rerun(tmp_path):
     # THE dangerous scenario: pool dies on deadline mid-flight; resume must
     # (1) not re-run the source, (2) not re-run done inputs, (3) join over old+new
     path, work = setup(tmp_path, POOL_RESUME.format(timeout=3, work=work_dir(tmp_path)))
-    assert run_pipeline(path, workdir=work) == 1                # E_DEADLINE
+    assert run_workflow(path, workdir=work) == 1                # E_DEADLINE
     run = runs_of(path.parent)[0]
     assert read_outcome(run)["error"]["code"] == "E_DEADLINE"
     assert (work / "source-calls").read_text().count("source") == 1
@@ -52,7 +52,7 @@ def test_pool_resume_no_resource_no_rerun(tmp_path):
     assert {"body-a", "body-b", "body-c"} <= done_before
 
     (work / "second-pass").touch()                              # input d becomes fast
-    assert run_pipeline(path, workdir=work, resume_dir=run) == 0
+    assert run_workflow(path, workdir=work, resume_dir=run) == 0
     # source NOT re-executed; a/b/c NOT re-run; d ran exactly once more
     assert (work / "source-calls").read_text().count("source") == 1
     for name in ("a", "b", "c"):
@@ -88,16 +88,44 @@ nodes:
 
 def test_decision_resume_continues_at_interrupted_node(tmp_path):
     path, work = setup(tmp_path, DECISION_RESUME.format(work=work_dir(tmp_path)))
-    assert run_pipeline(path, workdir=work) == 1                # E_DEADLINE at b
+    assert run_workflow(path, workdir=work) == 1                # E_DEADLINE at b
     run = runs_of(path.parent)[0]
 
     (work / "fast").touch()
-    assert run_pipeline(path, workdir=work, resume_dir=run) == 0
+    assert run_workflow(path, workdir=work, resume_dir=run) == 0
     assert (work / "a-runs").read_text().count("a") == 1        # a NOT re-run
     assert (work / "b-runs").read_text().count("b") == 2        # b re-ran whole (contract)
     journal = [json.loads(l) for l in (run / "journal.jsonl").read_text().splitlines()]
     assert [r["step"] for r in journal] == [1, 2]               # numbering continued, no dupes
     assert journal[0]["message"] == "from-a"                    # last.message survived resume
+
+
+def test_legacy_pipeline_yaml_still_reads(tmp_path):
+    # 4.1 renamed the config to workflow.yaml; untouched pre-4.1 projects
+    # (pipeline.yaml) keep working — read side falls back, writes use the
+    # new name (the run snapshot is workflow.yaml)
+    from medulla.v2.rundir import config_yaml
+    text = """
+version: "2"
+start: a
+nodes:
+  a:
+    shell: 'echo "<signal:ok>k</signal:ok>"'
+    on_signal: {ok: __exit_ok__}
+"""
+    pdir = tmp_path / "legacy"
+    pdir.mkdir()
+    (pdir / "pipeline.yaml").write_text(text, encoding="utf-8")
+    work = tmp_path / "work"
+    work.mkdir()
+    assert run_workflow(config_yaml(pdir), workdir=work) == 0
+    run = runs_of(pdir)[0]
+    assert (run / "workflow.yaml").is_file()          # snapshot: new name
+    # a pre-4.1 run dir (pipeline.yaml snapshot) is still seen by find_resumable
+    old_run = pdir / "runs" / "2026-01-01_00-00-00-old1"
+    old_run.mkdir(parents=True)
+    (old_run / "pipeline.yaml").write_text("x", encoding="utf-8")
+    assert find_resumable(pdir) == old_run            # no outcome.json = resumable
 
 
 def test_resume_refuses_finished_run(tmp_path):
@@ -110,9 +138,9 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     run = runs_of(path.parent)[0]
-    assert run_pipeline(path, workdir=work, resume_dir=run) == 1   # refuse, exit 1
+    assert run_workflow(path, workdir=work, resume_dir=run) == 1   # refuse, exit 1
     assert read_outcome(run)["outcome"] == "succeeded"             # outcome untouched
 
 
@@ -127,13 +155,13 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text.replace('"sleep 30"', '"exit 1"'))
-    assert run_pipeline(path, workdir=work) == 2                # failed -> NOT resumable
+    assert run_workflow(path, workdir=work) == 2                # failed -> NOT resumable
     assert find_resumable(path.parent) is None
 
     # a crashed (E_DEADLINE-class) run IS resumable (documented deviation)
     (path.parent / "runs" / "2026-01-01_00-00-00-aaaa").mkdir(parents=True)
     crashed = path.parent / "runs" / "2026-01-01_00-00-00-aaaa"
-    (crashed / "pipeline.yaml").write_text("x", encoding="utf-8")
+    (crashed / "workflow.yaml").write_text("x", encoding="utf-8")
     (crashed / "outcome.json").write_text(
         json.dumps({"outcome": "crashed", "error": {"code": "E_DEADLINE"}}), encoding="utf-8")
     assert find_resumable(path.parent) == crashed
@@ -149,27 +177,27 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     run = runs_of(path.parent)[0]
     (run / "outcome.json").unlink()                             # make it resumable
     # simulate a live holder
     fd = os.open(run / ".lock", os.O_CREAT | os.O_RDWR)
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
-        assert run_pipeline(path, workdir=work, resume_dir=run) == 1
+        assert run_workflow(path, workdir=work, resume_dir=run) == 1
     finally:
         os.close(fd)
 
 
 def test_truncated_manifest_tail_tolerated(tmp_path):
     path, work = setup(tmp_path, POOL_RESUME.format(timeout=3, work=work_dir(tmp_path)))
-    assert run_pipeline(path, workdir=work) == 1
+    assert run_workflow(path, workdir=work) == 1
     run = runs_of(path.parent)[0]
     manifest = run / "steps" / "001-p" / "manifest.jsonl"
     with open(manifest, "a", encoding="utf-8") as f:
         f.write('{"index": 99, "key": "99:torn')                # crash-torn tail
     (work / "second-pass").touch()
-    assert run_pipeline(path, workdir=work, resume_dir=run) == 0   # tail dropped, not fatal
+    assert run_workflow(path, workdir=work, resume_dir=run) == 0   # tail dropped, not fatal
 
 
 def test_prune_keeps_newest_and_active(tmp_path):
@@ -188,15 +216,15 @@ nodes:
     for i in range(6):                                          # old finished runs
         d = runs / f"2026-01-0{i + 1}_00-00-00-old{i}"
         d.mkdir(parents=True)
-        (d / "pipeline.yaml").write_text("x", encoding="utf-8")
+        (d / "workflow.yaml").write_text("x", encoding="utf-8")
         (d / "outcome.json").write_text('{"outcome": "succeeded"}', encoding="utf-8")
     import datetime
     ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     young = runs / f"{ts}-live"                                 # unfinished + young: shielded
     young.mkdir()
-    (young / "pipeline.yaml").write_text("x", encoding="utf-8")
+    (young / "workflow.yaml").write_text("x", encoding="utf-8")
 
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     names = {p.name for p in runs.iterdir()}
     assert young.name in names                                  # active shield held
     # prune runs at BOOT (the new run isn't finished yet): 6 finished -> keep 3 newest
@@ -296,11 +324,11 @@ def test_entry_dispatches_documented_subcommands(tmp_path, monkeypatch):
     assert called["argv"][:2] == ["bash", "-c"] and "install.sh" in called["argv"][2]
 
 
-def test_run_does_not_touch_pipeline_dir_files(tmp_path):
+def test_run_does_not_touch_workflow_dir_files(tmp_path):
     # owner decision: no gitignore magic at run time — init owns scaffolding
     text = 'version: "2"\nstart: a\nnodes:\n  a:\n    shell: \'echo "<signal:ok>k</signal:ok>"\'\n    on_signal: {ok: __exit_ok__}\n'
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     assert not (path.parent / ".gitignore").exists()
 
 
@@ -318,25 +346,25 @@ def test_init_deploys_bundled_template(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("sys.argv", ["medulla", "init", "spar"])
     assert shim.entry() == 0
-    pdir = tmp_path / ".medulla" / "pipelines" / "spar"
-    assert (pdir / "pipeline.yaml").is_file()
+    pdir = tmp_path / ".medulla" / "workflows" / "spar"
+    assert (pdir / "workflow.yaml").is_file()
     assert (pdir / "prompts" / "spar.md").is_file()
     assert ".env" in (pdir / ".gitignore").read_text()
     assert not (pdir / "runs").exists()                  # template noise excluded
 
 
-def test_init_scaffolds_a_pipeline(tmp_path, monkeypatch):
+def test_init_scaffolds_a_workflow(tmp_path, monkeypatch):
     import medulla.cli as shim
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("sys.argv", ["medulla", "init", "my-pipe"])
     assert shim.entry() == 0
-    pdir = tmp_path / ".medulla" / "pipelines" / "my-pipe"
-    assert (pdir / "pipeline.yaml").is_file()
+    pdir = tmp_path / ".medulla" / "workflows" / "my-pipe"
+    assert (pdir / "workflow.yaml").is_file()
     assert (pdir / "README.md").is_file()
     assert ".env" in (pdir / ".gitignore").read_text()
     assert (pdir / "prompts").is_dir()
-    # the scaffold must be a VALID, runnable pipeline out of the box
-    assert run_pipeline(pdir / "pipeline.yaml", workdir=tmp_path) == 0
+    # the scaffold must be a VALID, runnable workflow out of the box
+    assert run_workflow(pdir / "workflow.yaml", workdir=tmp_path) == 0
     # re-init refuses to clobber
     monkeypatch.setattr("sys.argv", ["medulla", "init", "my-pipe"])
     assert shim.entry() == 1
@@ -353,5 +381,5 @@ def test_init_skill_flag(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.argv", ["medulla", "init", "fresh", "--skill"])
     assert shim.entry() == 0
     # scaffold got a starter SKILL.md, and it is registered
-    assert (tmp_path / ".medulla" / "pipelines" / "fresh" / "SKILL.md").is_file()
+    assert (tmp_path / ".medulla" / "workflows" / "fresh" / "SKILL.md").is_file()
     assert (tmp_path / ".claude" / "skills" / "fresh" / "SKILL.md").is_file()

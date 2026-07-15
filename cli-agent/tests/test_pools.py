@@ -1,16 +1,16 @@
 """Part 3: pool nodes — materialization, parallel execution, manifest, join, fold."""
 import json
 
-from medulla.v2.engine import run_pipeline
+from medulla.v2.engine import run_workflow
 
 
 def setup(tmp_path, text):
     pdir = tmp_path / "pipe"
     pdir.mkdir()
-    (pdir / "pipeline.yaml").write_text(text, encoding="utf-8")
+    (pdir / "workflow.yaml").write_text(text, encoding="utf-8")
     work = tmp_path / "work"
     work.mkdir()
-    return pdir / "pipeline.yaml", work
+    return pdir / "workflow.yaml", work
 
 
 def read_run(pdir):
@@ -47,7 +47,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     run, _, journal = read_run(path.parent)
     rows = read_manifest(run, "001-p")
     assert len(rows) == 3 and all(r["ok"] and r["reason"] == "ok" for r in rows)
@@ -71,7 +71,7 @@ nodes:
     on_signal: {{__done__: __exit_ok__}}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     assert (work / "invocations-1").read_text().count("run") == 1   # no silence retries
     run, _, _ = read_run(path.parent)
     assert read_manifest(run, "001-p")[0]["attempts"] == 1
@@ -94,7 +94,7 @@ nodes:
     on_signal: {{__done__: __exit_ok__}}
 """
         path, work = setup(base, text)
-        assert run_pipeline(path, workdir=work) == expected_exit
+        assert run_workflow(path, workdir=work) == expected_exit
         _, outcome, journal = read_run(path.parent)
         assert journal[0]["signal"] == expected_signal
         if expected_exit == 2:
@@ -115,7 +115,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     assert len((work / "ran.txt").read_text().splitlines()) == 4
 
 
@@ -131,7 +131,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2
+    assert run_workflow(path, workdir=work) == 2
 
 
 # ── inputs: source, sniffing, empty, errors ─────────────────────────────────
@@ -148,7 +148,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     out = sorted((work / "out.txt").read_text().splitlines())
     assert out == ["T-1: fix a", "T-2: fix b"]
     run, _, _ = read_run(path.parent)
@@ -167,7 +167,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     assert (work / "got.txt").read_text().splitlines() == ["one", "two"]
 
 
@@ -187,7 +187,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     assert not (work / "never.txt").exists()            # bodies never ran
     assert (work / "count.txt").read_text().strip() == "0"   # empty manifest EXISTS
 
@@ -203,7 +203,7 @@ nodes:
     on_signal: {__done__: __exit_fail__, __empty__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
 
 
 def test_broken_source_is_e_inputs(tmp_path):
@@ -217,7 +217,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 1
+    assert run_workflow(path, workdir=work) == 1
     _, outcome, _ = read_run(path.parent)
     assert outcome["error"]["code"] == "E_INPUTS"
 
@@ -237,7 +237,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     run, _, _ = read_run(path.parent)
     rows = {r["input"]["slug"]: r for r in read_manifest(run, "001-p")}
     assert rows["good"]["ok"] is True
@@ -264,7 +264,7 @@ nodes:
     # NB: yaml literal — escape braces via block scalar instead
     text = text.replace("{{ touch", "{ touch").replace("exit 1; }}", "exit 1; }")
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2
+    assert run_workflow(path, workdir=work) == 2
     run, outcome, _ = read_run(path.parent)
     rows = {r["input"]: r for r in read_manifest(run, "001-p")}
     assert rows["flaky"]["ok"] is True and rows["flaky"]["attempts"] == 2
@@ -287,7 +287,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     run, _, _ = read_run(path.parent)
     rows = {r["input"]: r for r in read_manifest(run, "001-p")}
     assert rows["writer"]["ok"] is True
@@ -306,7 +306,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     assert (work / "worked.txt").read_text().splitlines() == ["fresh"]
     run, _, _ = read_run(path.parent)
     rows = {r["input"]: r for r in read_manifest(run, "001-p")}
@@ -332,7 +332,7 @@ nodes:
     on_signal: {{__done__: __exit_ok__}}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     run, _, _ = read_run(path.parent)
     p1 = (run / "steps" / "001-p" / "input-0001" / "prompt.md").read_text()
     p4 = (run / "steps" / "001-p" / "input-0004" / "prompt.md").read_text()
@@ -353,7 +353,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
 
 
 def test_parallel_vars_go_to_manifest_not_state(tmp_path):
@@ -371,7 +371,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     run, _, _ = read_run(path.parent)
     assert "RACE" not in (run / "vars.yaml").read_text()
     rows = {r["input"]: r for r in read_manifest(run, "001-p")}
@@ -394,7 +394,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     key = (work / "key.txt").read_text().strip()
     assert key.startswith("1:") and len(key.split(":")[1]) == 16   # (index, sha256[:16])
 
@@ -412,7 +412,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2
+    assert run_workflow(path, workdir=work) == 2
     run, _, _ = read_run(path.parent)
     row = read_manifest(run, "001-p")[0]
     assert row["ok"] is False and row["reason"] == "rc" and row["rc"] == 7
@@ -429,7 +429,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     run, _, _ = read_run(path.parent)
     row = read_manifest(run, "001-p")[0]
     assert row["ok"] is True and row["signal"] == "insight"
@@ -448,7 +448,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2       # min_success owns this role
+    assert run_workflow(path, workdir=work) == 2       # min_success owns this role
     run, _, _ = read_run(path.parent)
     assert read_manifest(run, "001-p")[0]["ok"] is False
 
@@ -467,7 +467,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     assert (work / "done-1").exists() and (work / "done-2").exists()
 
 
@@ -482,7 +482,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 1
+    assert run_workflow(path, workdir=work) == 1
     _, outcome, _ = read_run(path.parent)
     assert outcome["error"]["code"] == "E_INPUTS"
 
@@ -498,7 +498,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     assert sorted((work / "ids.txt").read_text().split()) == ["1", "2"]
 
 
@@ -517,7 +517,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 1
+    assert run_workflow(path, workdir=work) == 1
     run, outcome, _ = read_run(path.parent)
     assert outcome["error"]["code"] == "E_DEADLINE"
     assert read_manifest(run, "001-p") == []
@@ -537,7 +537,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 1
+    assert run_workflow(path, workdir=work) == 1
     run, outcome, _ = read_run(path.parent)
     assert outcome["error"]["code"] == "E_DEADLINE"
     rows = read_manifest(run, "001-p")
@@ -558,7 +558,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
 
 
 def test_deadline_mid_pool_preserves_manifest_rows(tmp_path):
@@ -573,7 +573,7 @@ nodes:
     on_signal: {__done__: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 1
+    assert run_workflow(path, workdir=work) == 1
     run, outcome, _ = read_run(path.parent)
     assert outcome["error"]["code"] == "E_DEADLINE"
     rows = read_manifest(run, "001-p")

@@ -1,16 +1,16 @@
 """Part 2: pre/post hooks, attempts+fallback, fake-harness agent bodies."""
 import json
 
-from medulla.v2.engine import run_pipeline
+from medulla.v2.engine import run_workflow
 
 
 def setup(tmp_path, text):
     pdir = tmp_path / "pipe"
     pdir.mkdir()
-    (pdir / "pipeline.yaml").write_text(text, encoding="utf-8")
+    (pdir / "workflow.yaml").write_text(text, encoding="utf-8")
     work = tmp_path / "work"
     work.mkdir()
-    return pdir / "pipeline.yaml", work
+    return pdir / "workflow.yaml", work
 
 
 def read_run(pdir):
@@ -42,7 +42,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
 
 
 def test_pre_guard_skips_body(tmp_path):
@@ -56,7 +56,7 @@ nodes:
     on_signal: {done_already: __exit_ok__, ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     assert not (work / "should-not-exist").exists()
     _, _, journal = read_run(path.parent)
     assert journal[0]["attempts"] == 0 and journal[0]["signal"] == "done_already"
@@ -73,7 +73,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2
+    assert run_workflow(path, workdir=work) == 2
     assert not (work / "should-not-exist").exists()
     _, outcome, _ = read_run(path.parent)
     assert outcome["error"]["signal"] == "__failed__"
@@ -93,7 +93,7 @@ nodes:
     on_signal: {skip: __exit_ok__, ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     run, _, _ = read_run(path.parent)
     assert "CACHE: hit" in (run / "vars.yaml").read_text()
 
@@ -112,7 +112,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2
+    assert run_workflow(path, workdir=work) == 2
     _, outcome, journal = read_run(path.parent)
     assert journal[0]["attempts"] == 2
     assert outcome["error"]["signal"] == "__failed__"
@@ -133,7 +133,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     _, _, journal = read_run(path.parent)
     assert journal[0]["attempts"] == 2
 
@@ -149,7 +149,7 @@ nodes:
     on_signal: {planned: __exit_ok__, needs_rework: __exit_fail__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2
+    assert run_workflow(path, workdir=work) == 2
     _, outcome, _ = read_run(path.parent)
     assert outcome["error"]["signal"] == "needs_rework"
     assert outcome["error"]["message"] == "plan is garbage"
@@ -166,7 +166,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
 
 
 def test_post_sees_body_rc_and_signal(tmp_path):
@@ -180,7 +180,7 @@ nodes:
     on_signal: {go: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     assert (work / "post-env.txt").read_text().strip() == "0 go"
 
 
@@ -202,7 +202,7 @@ nodes:
     on_signal: {{ok: __exit_ok__}}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     run, _, journal = read_run(path.parent)
     prompt = (run / "steps" / "001-a" / "prompt.md").read_text()
     assert prompt.startswith("Say: hello world")
@@ -225,7 +225,7 @@ nodes:
     on_signal: {{ok: __exit_ok__}}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2          # silence -> __default__
+    assert run_workflow(path, workdir=work) == 2          # silence -> __default__
     assert (work / "silent-invocations").read_text().count("run") == 2
     assert not (work / "fallback-ran").exists()           # silence NEVER falls back
     _, outcome, journal = read_run(path.parent)
@@ -248,7 +248,7 @@ nodes:
     on_signal: {{ok: __exit_ok__}}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     _, _, journal = read_run(path.parent)
     assert journal[0]["attempts"] == 3                    # 2 primary + 1 fallback
     assert journal[0]["fallback"] is True
@@ -269,7 +269,7 @@ nodes:
     on_signal: {{ok: __exit_ok__}}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     run, _, _ = read_run(path.parent)
     step = run / "steps" / "001-a"
     assert (step / "prompt.md").read_text() == (step / "prompt-fallback.md").read_text()
@@ -287,7 +287,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 1
+    assert run_workflow(path, workdir=work) == 1
     _, outcome, _ = read_run(path.parent)
     assert outcome["error"]["code"] == "E_HARNESS"
 
@@ -305,7 +305,7 @@ nodes:
     on_signal: {{__failed__: __exit_fail__}}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 2
+    assert run_workflow(path, workdir=work) == 2
     ids = (work / "ids.txt").read_text().split()
     assert ids == ["001.p1", "001.p2"]
 
@@ -329,7 +329,7 @@ nodes:
     on_signal: {{ok: __exit_ok__}}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     _, _, journal = read_run(path.parent)
     assert journal[0]["fallback"] is True
 
@@ -354,7 +354,7 @@ nodes:
     on_signal: {{ok: __exit_ok__}}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
 
 
 def test_post_receives_current_harness(tmp_path):
@@ -370,7 +370,7 @@ nodes:
     on_signal: {{ok: __exit_ok__}}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     assert (work / "harness.txt").read_text().strip() == "fake"
 
 
@@ -389,7 +389,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     run, _, _ = read_run(path.parent)
     assert "LEAKED" not in (run / "vars.yaml").read_text()
 
@@ -407,7 +407,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     assert (work / "post-timeout.txt").read_text().strip() == "60"
 
 
@@ -423,7 +423,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0     # smoke: update path must not crash
+    assert run_workflow(path, workdir=work) == 0     # smoke: update path must not crash
 
 
 def test_pre_signal_beats_nonzero_rc(tmp_path):
@@ -438,7 +438,7 @@ nodes:
     on_signal: {skip: __exit_ok__, ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     assert not (work / "should-not-exist").exists()
 
 
@@ -460,7 +460,7 @@ nodes:
     on_signal: {{ok: __exit_ok__}}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0     # 2 primary + 2 fallback (inherited budget)
+    assert run_workflow(path, workdir=work) == 0     # 2 primary + 2 fallback (inherited budget)
     _, _, journal = read_run(path.parent)
     assert journal[0]["attempts"] == 4
 
@@ -479,7 +479,7 @@ nodes:
     on_signal: {{ok: __exit_ok__}}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     assert (work / "args.txt").read_text().strip() == "arg2=fast"
 
 
@@ -493,7 +493,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 1
+    assert run_workflow(path, workdir=work) == 1
     assert not (path.parent / "runs").exists()       # E_VALIDATION: before any run dir
 
 
@@ -510,7 +510,7 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0
     run, _, _ = read_run(path.parent)
     assert "V: post" in (run / "vars.yaml").read_text()
 
@@ -527,4 +527,4 @@ nodes:
     on_signal: {ok: __exit_ok__}
 """
     path, work = setup(tmp_path, text)
-    assert run_pipeline(path, workdir=work) == 0
+    assert run_workflow(path, workdir=work) == 0

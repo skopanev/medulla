@@ -18,7 +18,7 @@ if [ -f "$HOME/.claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
     done < <(jq -r '.env // {} | to_entries[] | "\(.key)=\(.value)"' "$HOME/.claude/settings.json" 2>/dev/null)
 fi
 
-# Codex credentials (skip personal config — pipeline controls model/prompt via CLI)
+# Codex credentials (skip personal config — workflow controls model/prompt via CLI)
 if [ -d /mnt/codex ]; then
     mkdir -p "$HOME/.codex"
     [ -f /mnt/codex/auth.json ] && cp -L /mnt/codex/auth.json "$HOME/.codex/auth.json" 2>/dev/null || true
@@ -65,7 +65,7 @@ else
     echo "– host-builder not mounted (cargo runs locally)"
 fi
 
-# Pipeline git identity (env vars override mounted read-only .gitconfig)
+# Workflow git identity (env vars override mounted read-only .gitconfig)
 export GIT_AUTHOR_NAME="MEDULLA Loop"
 export GIT_AUTHOR_EMAIL="loop@medulla-agent.one"
 export GIT_COMMITTER_NAME="MEDULLA Loop"
