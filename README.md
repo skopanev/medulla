@@ -114,7 +114,7 @@ Adding `inputs:` turns the action into a pool: the body runs once per input, `ma
 
 Nearest wins per key: a pipeline declaring `CLAUDE_CODE_OAUTH_TOKEN` overrides the global one **for that pipeline only**; keys not overridden still flow down from the wider tiers.
 
-Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-file` (never `-e`: values would leak into `ps`/`docker inspect`). Outer tiers (global/project) forward **harness keys only** — unrelated secrets (slack, telegram) stay on the host; the pipeline's own `.env` forwards whole.
+Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-file` (never `-e`: values would leak into `ps`/`docker inspect`). All tiers forward whole — what lives in your .env files is your call.
 
 `init` seeds a `.gitignore` (`.env`, `runs/`) into every pipeline it creates.
 

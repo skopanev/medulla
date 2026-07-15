@@ -89,22 +89,15 @@ def _parse_env_file(path: Path) -> dict:
 
 
 def _collect_dotenv(workflow: str | None) -> dict:
-    """Merge order is explicit and fixed: global < project < pipeline —
-    THE NEAREST TIER WINS on key conflict (a pipeline's test token must beat
-    the global one, never the reverse).
-
-    Outer tiers (global/project) are passlisted to harness keys only — they
-    hold unrelated secrets (slack, telegram) that must not leak into every
-    container. The pipeline's own .env forwards whole: it is pipeline-scoped
-    by design."""
-    merged = {k: v for k, v in _parse_env_file(Path.home() / ".medulla" / ".env").items()
-              if k in HARNESS_ENV_KEYS}
+    """All three .env tiers forward WHOLE (owner decision: the user's zone,
+    the engine is not a nanny). Merge order explicit and fixed:
+    global < project < pipeline — THE NEAREST TIER WINS on key conflict."""
+    merged = _parse_env_file(Path.home() / ".medulla" / ".env")
     if workflow:
         wdir = Path(workflow).resolve()
         for parent in reversed(list(wdir.parents)):
-            tier = _parse_env_file(parent / ".medulla" / ".env")
-            merged.update({k: v for k, v in tier.items() if k in HARNESS_ENV_KEYS})
-        merged.update(_parse_env_file(wdir / ".env"))     # pipeline tier: whole
+            merged.update(_parse_env_file(parent / ".medulla" / ".env"))
+        merged.update(_parse_env_file(wdir / ".env"))
     return merged
 
 
