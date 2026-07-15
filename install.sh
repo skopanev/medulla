@@ -33,10 +33,22 @@ mkdir -p "$INSTALL_DIR" "$BIN_DIR"
 if [ -n "${MEDULLA_REPO:-}" ]; then
     info "Installing EDITABLE from $MEDULLA_REPO (dev mode: edits apply instantly)"
     "$VENV_DIR/bin/pip" install -q --upgrade -e "$MEDULLA_REPO"
+    COMMIT=$(git -C "$MEDULLA_REPO" rev-parse --short HEAD 2>/dev/null || echo "local")
+    SUBJECT=$(git -C "$MEDULLA_REPO" log -1 --format=%s 2>/dev/null || echo "")
 else
-    info "Installing from $REPO_URL"
-    "$VENV_DIR/bin/pip" install -q --upgrade "git+$REPO_URL"
+    # clone + force-reinstall: pip silently skips git+URL when the package
+    # version hasn't bumped ("already satisfied") — commits never arrived
+    SRC=$(mktemp -d)
+    info "Fetching $REPO_URL"
+    git clone -q --depth 1 "$REPO_URL" "$SRC/medulla"
+    COMMIT=$(git -C "$SRC/medulla" rev-parse --short HEAD)
+    SUBJECT=$(git -C "$SRC/medulla" log -1 --format=%s)
+    info "Installing commit $COMMIT: $SUBJECT"
+    "$VENV_DIR/bin/pip" install -q --force-reinstall --no-deps "$SRC/medulla"
+    "$VENV_DIR/bin/pip" install -q pyyaml           # deps once (skipped by --no-deps)
+    rm -rf "$SRC"
 fi
+echo "$COMMIT $SUBJECT" > "$INSTALL_DIR/INSTALLED_COMMIT"
 
 ln -sf "$VENV_DIR/bin/medulla" "$BIN_DIR/medulla"
 info "Linked $BIN_DIR/medulla"
@@ -46,7 +58,8 @@ case ":$PATH:" in
     *) printf '\033[1;33m!!\033[0m %s\n' "$BIN_DIR is not in PATH — add: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
 esac
 
-info "Done. Next:"
+info "Done: medulla @ $COMMIT ($SUBJECT)"
+info "Next:"
 echo "     cd your-project"
 echo "     medulla init <name>        # scaffold a pipeline (or: medulla init spar)"
 echo "     medulla -w .medulla/pipelines/<name>"

@@ -93,6 +93,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="continue a specific run directory")
     parser.add_argument("--validate", action="store_true", help="load + validate, no run")
     parser.add_argument("--dry-run", action="store_true", help="validate + print the plan, no run")
+    parser.add_argument("--version", action="store_true", help="print version + installed commit")
+    if argv and "--version" in argv:
+        _print_version()
+        return 0
     ns = parser.parse_args(argv)
 
     yaml_path = _resolve_pipeline_yaml(ns.pipeline)
@@ -139,6 +143,19 @@ def main(argv: list[str] | None = None) -> int:
 
     return run_pipeline(yaml_path, cli_vars=cli_vars, start_override=ns.node,
                         resume_dir=resume_dir)
+
+
+def _print_version() -> None:
+    try:
+        from importlib.metadata import version
+        v = version("medulla")
+    except Exception:
+        v = "source"
+    commit = ""
+    stamp = Path.home() / ".medulla-engine" / "INSTALLED_COMMIT"
+    if stamp.is_file():
+        commit = f"  ({stamp.read_text(encoding='utf-8').strip()})"
+    print(f"medulla {v}{commit}")
 
 
 def _print_plan(pipeline) -> None:
