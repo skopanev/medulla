@@ -1,0 +1,2 @@
+{"ts": "12:24:13", "step": 1, "node": "fold", "kind": "pool", "signal": "__done__", "next": "check", "duration_s": 0.12, "message": "3/3 inputs ok", "inputs_total": 3, "inputs_ok": 3, "min_success": 3}
+{"ts": "12:24:13", "step": 2, "node": "check", "kind": "decision", "signal": "verified", "next": "__exit_ok__", "duration_s": 0.04, "message": "SUM=60", "attempts": 1, "rc": 0, "timed_out": false, "fallback": false, "harness": null, "model": null}
