@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
 
@@ -123,3 +124,39 @@ nodes:
     run = next((pdir / "runs").iterdir())
     row = json.loads((run / "journal.jsonl").read_text().splitlines()[0])
     assert len(row["message"]) == 5000
+
+
+def test_sigterm_is_graceful_interrupt(tmp_path):
+    # docker stop sends SIGTERM: the run must kill its children, write
+    # outcome interrupted, exit 130 (spar-panel finding; v1 had the handler)
+    import sys
+    pdir = tmp_path / "pipe"
+    pdir.mkdir()
+    (pdir / "pipeline.yaml").write_text("""
+version: "2"
+start: a
+nodes:
+  a:
+    shell: "sleep 30"
+    timeout: 300
+    on_signal: {ok: __exit_ok__}
+""", encoding="utf-8")
+    work = tmp_path / "work"
+    work.mkdir()
+    cli_dir = str((tmp_path / "..").resolve())
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "medulla.v2.cli", "-w", str(pdir)],
+        cwd=work, env={**os.environ,
+                       "PYTHONPATH": str(Path(__file__).resolve().parent.parent)},
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(2.5)                              # engine boots, sleep-child starts
+    proc.terminate()                             # SIGTERM
+    rc = proc.wait(timeout=15)
+    assert rc == 130
+    run = next((pdir / "runs").iterdir())
+    outcome = json.loads((run / "outcome.json").read_text())
+    assert outcome["outcome"] == "interrupted"
+    time.sleep(1)
+    sleepers = subprocess.run(["pgrep", "-f", "sleep 30"],
+                              capture_output=True).stdout.decode().split()
+    assert not sleepers                          # no orphaned children

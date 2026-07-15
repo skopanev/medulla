@@ -881,9 +881,24 @@ def run_pipeline(
     resume_dir: Path | None = None,
 ) -> int:
     """Load, run, write outcome.json, return the process exit code (0/1/2/130)."""
+    import signal as _signal
+    import threading as _threading
+    from .procrun import kill_live_processes
     from .rundir import RunLocked, prune_runs
     workdir = workdir or Path.cwd()
     store = None
+
+    # SIGTERM (docker stop, systemd) joins the SIGINT path: kill every live
+    # child FIRST (pool workers unblock from proc.wait), then raise into the
+    # ordinary interrupt flow -> outcome interrupted, exit 130, resumable.
+    # v1 had this handler; the rewrite lost it (spar panel, sonnet).
+    prev_handlers = {}
+    if _threading.current_thread() is _threading.main_thread():
+        def _graceful(signum, frame):
+            kill_live_processes()
+            raise KeyboardInterrupt
+        for sig in (_signal.SIGTERM, _signal.SIGINT):
+            prev_handlers[sig] = _signal.signal(sig, _graceful)
     try:
         if resume_dir is not None:
             resume_dir = Path(resume_dir)
@@ -943,5 +958,10 @@ def run_pipeline(
             store.write_outcome({"outcome": "interrupted", "exit_code": 130})
         return 130
     finally:
+        for sig, prev in prev_handlers.items():
+            try:
+                __import__("signal").signal(sig, prev)
+            except (ValueError, OSError):
+                pass
         if store is not None:
             store.close()                      # release the flock (same-process reruns/tests)

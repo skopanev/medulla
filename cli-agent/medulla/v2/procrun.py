@@ -17,6 +17,21 @@ from pathlib import Path
 
 from .model import TIMEOUT_RC
 
+# every live child, registered for signal-time group-kill: an interrupt must
+# reach POOL WORKERS' children too (the exception only lands in the main
+# thread; workers sit in proc.wait until their agents die)
+_LIVE: set = set()
+_LIVE_LOCK = threading.Lock()
+
+
+def kill_live_processes() -> None:
+    """Signal-handler duty: SIGTERM every registered child's process group so
+    worker threads unblock immediately and the engine can conclude."""
+    with _LIVE_LOCK:
+        procs = list(_LIVE)
+    for proc in procs:
+        _kill_group(proc, signal.SIGTERM)
+
 
 @dataclass
 class RunResult:
@@ -58,6 +73,8 @@ def run(
         text=True, bufsize=1, start_new_session=True, env=env,
         errors="replace",
     )
+    with _LIVE_LOCK:
+        _LIVE.add(proc)
     if stdin_data is not None:
         # write+close in a thread: a child that never reads must not deadlock us
         def _feed():
@@ -125,6 +142,8 @@ def run(
             log_file.close()
         if proc.poll() is None:                    # belt & braces: never leak
             _kill_group(proc, signal.SIGKILL)
+        with _LIVE_LOCK:
+            _LIVE.discard(proc)
 
     rc = TIMEOUT_RC if timed_out else proc.returncode
     return RunResult(rc=rc, timed_out=timed_out, stdout="".join(out_buf), stderr="".join(err_buf))

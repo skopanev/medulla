@@ -1,0 +1,1 @@
+[out] SUMMARY: I have investigated the Medulla v2 rewrite by checking the source code, legacy v1 components, and battle tests, and documented my findings on the strongest and most regretted architectural bets in the requested artifact file.
