@@ -214,7 +214,20 @@ def ensure_image(image, build, workflow, cli_vars, dockerfile=None, ready_image=
     return proc.returncode
 
 
-def build_volumes(claude_home):
+def pipeline_uses_agy(workflow: str | None) -> bool:
+    """Only pipelines that actually mention the agy harness get the
+    Keychain-extracted agy keys — a Keychain prompt on every --docker run
+    for pipelines that never touch agy is noise (and scary noise)."""
+    if not workflow:
+        return True                    # no yaml to inspect: keep old behavior
+    yaml_path = Path(workflow) / "pipeline.yaml"
+    try:
+        return "agy" in yaml_path.read_text(encoding="utf-8")
+    except OSError:
+        return True
+
+
+def build_volumes(claude_home, mount_agy=True):
     home = Path.home()
     pwd_env = os.environ.get("PWD")
     cwd = Path(pwd_env) if pwd_env else Path(os.getcwd())
@@ -264,8 +277,10 @@ def build_volumes(claude_home):
     # init-docker.sh from package → /mnt/init-docker.sh (outside /workspace, virtiofs-safe)
     _mount_init_docker(vols)
 
-    # agy (Antigravity CLI) keys — extract from macOS Keychain and mount as temp files
-    _mount_agy_keys(vols)
+    # agy (Antigravity CLI) keys — extract from macOS Keychain and mount as temp
+    # files, but ONLY for pipelines that use agy (Keychain prompts are not free)
+    if mount_agy:
+        _mount_agy_keys(vols)
 
     # host-builder bridge for macOS native builds. Per-run bridge dir so
     # parallel runs don't share/clobber one bridge.
@@ -421,7 +436,7 @@ def main():
     claude_config = os.environ.get("CLAUDE_CONFIG_DIR")
     claude_home = Path(claude_config).expanduser().resolve() if claude_config else Path.home() / ".claude"
 
-    volumes = build_volumes(claude_home)
+    volumes = build_volumes(claude_home, mount_agy=pipeline_uses_agy(workflow))
 
     # Mount extra folders into /workspace/<name> (nested mount inside workspace)
     for mount_path, ro in extra_mounts:
