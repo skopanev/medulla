@@ -112,6 +112,8 @@ Adding `inputs:` turns the action into a pool: the body runs once per input, `ma
 | `<project>/.medulla/.env` | every pipeline in the project |
 | `<pipeline>/.env` | one pipeline |
 
+Nearest wins per key: a pipeline declaring `ANTHROPIC_API_KEY` overrides the global one **for that pipeline only**; keys not overridden still flow down from the wider tiers.
+
 `init` seeds a `.gitignore` (`.env`, `runs/`) into every pipeline it creates.
 
 ## All variables
