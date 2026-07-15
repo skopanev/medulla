@@ -63,7 +63,7 @@ A node runs exactly one of `shell:` (a command) or `agent:` (an AI harness). The
 <signal:update>progress line</signal:update>   progress only (never routes)
 ```
 
-Never paste signal syntax into an agent prompt — write "emit the signal named done"; the engine appends the exact protocol to every agent prompt automatically. Signals are read from **stdout only** and, for plain-text harnesses, only when the tag **starts a line** — tool output echoing a tag mid-line can never route.
+In agent prompts, naming the signal is enough — "emit the signal named done" — because the engine appends the exact protocol to every agent prompt automatically. Custom signal names are unrestricted. Quoting literal syntax in a prompt also works (scanning is post-hoc, the body always runs to completion); the one residual risk is a model echoing the quoted tag without doing the work — `post:` is the antidote. Signals are read from **stdout only** and, for plain-text harnesses, only when the tag **starts a line** — tool output echoing a tag mid-line can never route.
 
 ### Agents
 
@@ -294,7 +294,7 @@ Action (exactly one of `shell` / `agent`):
 |---|---|
 | `shell` | shell command; its config *is* the command. `prompt` here is a validation error |
 | `agent` | `{harness, model, effort, args}` — one entity, one block. Scalar shortcut: `agent: codex`. `args` is a raw CLI escape hatch — non-portable across harnesses |
-| `prompt` | agent input (not config); every scalar action field is a template |
+| `prompt` | agent input (not config); every scalar action field is a template. The engine appends the signal protocol automatically — name signals in words; literal tags are allowed (see Signals) |
 | `timeout` | per **attempt**, seconds |
 | `max_attempts` | attempts per runner, default 1. Primary gets N, then fallback gets N |
 | `fallback` | alternate agent action after primary attempts are exhausted. Agent-only; a fallback has no fallback |
