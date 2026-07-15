@@ -1,0 +1,6 @@
+[out] [0m
+[out] > build · glm-5.1
+[out] [0m
+[out] [0m← [0mWrite t3.txt
+[out] Wrote file successfully.
+[out] [0m

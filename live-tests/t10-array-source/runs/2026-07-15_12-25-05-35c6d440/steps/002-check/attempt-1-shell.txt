@@ -1,0 +1,1 @@
+[out] <signal:verified>array sniffed, 3 inputs fanned out</signal:verified>

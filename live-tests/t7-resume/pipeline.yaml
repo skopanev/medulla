@@ -1,0 +1,11 @@
+version: "2"
+start: p
+timeout: 4
+nodes:
+  p:
+    inputs: [one, two, three, slowpoke]
+    shell: |
+      echo run >> "count-$MEDULLA_INPUT"
+      if [ "$MEDULLA_INPUT" = slowpoke ] && [ ! -f unstick ]; then sleep 60; fi
+    timeout: 300
+    on_signal: {__done__: __exit_ok__}

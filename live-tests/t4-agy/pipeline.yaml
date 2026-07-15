@@ -1,0 +1,13 @@
+version: "2"
+start: go
+timeout: 400
+nodes:
+  go:
+    agent: {harness: agy, model: "Gemini 3.5 Flash (Medium)"}
+    prompt: |
+      Create a file named t4.txt in the current directory containing exactly
+      the word: delta
+      Then emit the signal named done.
+    post: 'grep -q delta t4.txt'
+    timeout: 360
+    on_signal: {done: __exit_ok__}

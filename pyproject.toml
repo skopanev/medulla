@@ -4,31 +4,31 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "medulla"
-version = "3.1.0"
-description = "medulla — CLI orchestrator for AI-driven workflows (stages, signals, agent panels)"
+version = "4.0.0"
+description = "medulla — a state machine for AI agents (nodes, signals, pools)"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["pyyaml", "graphviz"]
+dependencies = ["pyyaml"]
 
 [project.scripts]
 medulla = "medulla.cli:entry"
-medulla-graph = "medulla.graph_cli:main"
 
 [tool.setuptools]
 packages = [
   "medulla",
   "medulla.scripts",
-  "medulla.workflows",
-  "medulla.workflows.spar",
-  "medulla.workflows.spar.prompts",
-  "medulla.workflows.spar.scripts",
+  "medulla.v2",
+  "medulla.pipelines",
+  "medulla.pipelines.spar",
+  "medulla.pipelines.spar.prompts",
+  "medulla.pipelines.spar.scripts",
 ]
 
 [tool.setuptools.package-dir]
 "medulla" = "cli-agent/medulla"
 "medulla.scripts" = "cli-agent/scripts"
-"medulla.workflows" = "cli-agent/workflows"
+"medulla.pipelines" = "cli-agent/pipelines"
 
 [tool.setuptools.package-data]
-"medulla.scripts" = ["*.py", "*.sh"]
-"medulla.workflows" = ["**/*"]
+"medulla.scripts" = ["*.py", "*.sh", "Dockerfile.default"]
+"medulla.pipelines" = ["**/*"]

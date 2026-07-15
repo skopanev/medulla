@@ -1,0 +1,18 @@
+# the third sniff format: a shell source returning one JSON ARRAY
+version: "2"
+start: sweep
+timeout: 120
+nodes:
+  sweep:
+    inputs: {shell: "echo '[\"red\", \"green\", \"blue\"]'", timeout: 10}
+    max_parallel: 3
+    shell: 'echo "{{input}}" >> colors.log'
+    timeout: 30
+    on_signal: {__done__: check}
+  check:
+    shell: |
+      [ "$(sort colors.log | tr '\n' ' ')" = "blue green red " ] && \
+        [ "$(jq -s length "$MEDULLA_MANIFEST_SWEEP")" = 3 ] && \
+        echo "<signal:verified>array sniffed, 3 inputs fanned out</signal:verified>"
+    timeout: 15
+    on_signal: {verified: __exit_ok__}

@@ -1,0 +1,10 @@
+[
+ {
+  "slug": "planet",
+  "ask": "the name of any planet of the solar system"
+ },
+ {
+  "slug": "ocean",
+  "ask": "the name of any ocean of planet Earth"
+ }
+]

@@ -1,0 +1,3 @@
+{"ts": "12:32:27", "step": 1, "node": "pick", "kind": "decision", "signal": "picked", "next": "carry", "duration_s": 6.55, "message": "otter-73", "attempts": 1, "rc": 0, "timed_out": false, "fallback": false, "harness": "claude-code", "model": "haiku"}
+{"ts": "12:32:34", "step": 2, "node": "carry", "kind": "decision", "signal": "done", "next": "check", "duration_s": 6.84, "message": "Task complete", "attempts": 1, "rc": 0, "timed_out": false, "fallback": false, "harness": "claude-code", "model": "haiku"}
+{"ts": "12:32:34", "step": 3, "node": "check", "kind": "decision", "signal": "verified", "next": "__exit_ok__", "duration_s": 0.07, "message": "otter-73", "attempts": 1, "rc": 0, "timed_out": false, "fallback": false, "harness": null, "model": null}

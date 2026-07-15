@@ -1,0 +1,14 @@
+# fold law live: max_parallel 1, vars accumulate across inputs in order
+version: "2"
+start: fold
+timeout: 120
+nodes:
+  fold:
+    inputs: [10, 20, 30]
+    shell: 'echo "<signal:var key=SUM>$(( ${SUM:-0} + $MEDULLA_INPUT ))</signal:var>"'
+    timeout: 15
+    on_signal: {__done__: check}
+  check:
+    shell: '[ "$SUM" = "60" ] && echo "<signal:verified>SUM=$SUM</signal:verified>"'
+    timeout: 15
+    on_signal: {verified: __exit_ok__}

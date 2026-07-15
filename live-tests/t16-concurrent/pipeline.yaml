@@ -1,0 +1,8 @@
+version: "2"
+start: work
+timeout: 60
+nodes:
+  work:
+    shell: 'sleep 3; echo "<signal:ok>done</signal:ok>"'
+    timeout: 30
+    on_signal: {ok: __exit_ok__}

@@ -1,0 +1,21 @@
+# dynamic source + object inputs + dot-walk + min_success under real failure
+version: "2"
+start: sweep
+timeout: 120
+nodes:
+  sweep:
+    inputs: {shell: "printf '{\"id\": 1, \"kind\": \"good\"}\n{\"id\": 2, \"kind\": \"good\"}\n{\"id\": 3, \"kind\": \"bad\"}\n'", timeout: 10}
+    max_parallel: 3
+    min_success: 2
+    shell: |
+      echo "processing {{input.id}} ($MEDULLA_INPUT_KIND)" >> sweep.log
+      [ "$MEDULLA_INPUT_KIND" = good ]
+    timeout: 30
+    on_signal: {__done__: check}
+  check:
+    shell: |
+      ok=$(jq -s 'map(select(.ok)) | length' "$MEDULLA_MANIFEST_SWEEP")
+      bad=$(jq -s 'map(select(.ok | not)) | length' "$MEDULLA_MANIFEST_SWEEP")
+      [ "$ok" = 2 ] && [ "$bad" = 1 ] && echo "<signal:verified>2 ok, 1 failed, join passed</signal:verified>"
+    timeout: 15
+    on_signal: {verified: __exit_ok__}

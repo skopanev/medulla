@@ -1,0 +1,1 @@
+[out] <signal:verified>2 ok, 1 failed, join passed</signal:verified>

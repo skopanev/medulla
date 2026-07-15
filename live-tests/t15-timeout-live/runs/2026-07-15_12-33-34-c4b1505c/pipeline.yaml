@@ -1,0 +1,16 @@
+# a live agent killed by its own step timeout: rc 124, __failed__ routes on
+version: "2"
+start: go
+timeout: 300
+nodes:
+  go:
+    agent: {harness: claude-code, model: haiku}
+    prompt: |
+      Count prime numbers one by one, slowly and in great detail, up to the
+      1000th prime. Explain each step. Do not stop early.
+    timeout: 15
+    on_signal: {__failed__: check}
+  check:
+    shell: '[ "$MEDULLA_LAST_RC" = "124" ] && echo "<signal:verified>timeout killed cleanly, rc=124</signal:verified>"'
+    timeout: 15
+    on_signal: {verified: __exit_ok__}

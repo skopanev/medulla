@@ -1,0 +1,13 @@
+version: "2"
+start: go
+timeout: 600
+nodes:
+  go:
+    agent: {harness: claude-code, model: haiku}
+    prompt: |
+      Using your bash tool, run the command `sleep 5` forty times IN A ROW —
+      one separate tool call each, waiting for every call to finish before the
+      next (never in the background). After all forty, emit the signal named
+      done.
+    timeout: 500
+    on_signal: {done: __exit_ok__}

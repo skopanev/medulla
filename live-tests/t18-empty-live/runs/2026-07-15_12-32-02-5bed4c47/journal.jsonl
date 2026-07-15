@@ -1,0 +1,2 @@
+{"ts": "12:32:02", "step": 1, "node": "sweep", "kind": "pool", "signal": "__empty__", "next": "check", "duration_s": 0.04, "message": "source returned 0 inputs", "inputs_total": 0, "inputs_ok": 0, "min_success": 0}
+{"ts": "12:32:02", "step": 2, "node": "check", "kind": "decision", "signal": "verified", "next": "__exit_ok__", "duration_s": 0.04, "message": "empty routed, manifest exists", "attempts": 1, "rc": 0, "timed_out": false, "fallback": false, "harness": null, "model": null}

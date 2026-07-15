@@ -1,0 +1,13 @@
+version: "2"
+start: go
+timeout: 300
+nodes:
+  go:
+    agent: {harness: claude-code, model: haiku}
+    prompt: |
+      Create a file named t1.txt in the current directory containing exactly
+      the word: alpha
+      Then emit the signal named done.
+    post: 'grep -q alpha t1.txt'
+    timeout: 240
+    on_signal: {done: __exit_ok__}

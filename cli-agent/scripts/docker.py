@@ -73,7 +73,7 @@ def build_run_command(image, volumes, args, container_name: str) -> list[str]:
         "VERTEX_LOCATION",
         "INTERCOM_TOKEN",
         "INTERCOM_ADMIN_ID",
-        "MEDULLA_TASK_ID",
+        "MEDULLA_RUN_ID",
         "MEDULLA_BRIDGE",
     ):
         val = os.environ.get(key)
@@ -85,6 +85,9 @@ def build_run_command(image, volumes, args, container_name: str) -> list[str]:
 
     cmd.extend(volumes)
     cmd.extend(["-w", "/workspace"])
+    # inside the container the sandbox IS the isolation: adapters (agy trust
+    # preflight) key off this
+    cmd.extend(["-e", "MEDULLA_DOCKER=1"])
     cmd.extend([image, "medulla"])
     cmd.extend(args)
     return cmd
@@ -95,10 +98,24 @@ def exec_docker_foreground(cmd: list[str], container_name: str) -> int:
     return 1
 
 
+def read_pipeline_vars(workflow: str | None) -> dict:
+    if not workflow:
+        return {}
+    pipeline_yaml = Path(workflow) / "pipeline.yaml"
+    if not pipeline_yaml.is_file():
+        return {}
+    try:
+        import yaml
+    except ImportError:
+        raise SystemExit("error: pyyaml required (pip3 install pyyaml)")
+    data = yaml.safe_load(pipeline_yaml.read_text(encoding="utf-8")) or {}
+    return data.get("vars") or {}
+
+
 def resolve_dockerfile(workflow: str | None, cli_vars: dict) -> Path:
     """Read vars.DOCKERFILE from <workflow>/pipeline.yaml, resolve relative
-    to the pipeline's dir. CLI --var DOCKERFILE=... overrides.
-    No default — must be declared."""
+    to the pipeline's dir. CLI --var DOCKERFILE=... overrides. Absent ->
+    the packaged default (one shared image for pipelines that don't care)."""
     if not workflow:
         raise SystemExit("error: -w/--workflow required to resolve Dockerfile via pipeline vars")
     workflow_dir = Path(workflow)
@@ -119,15 +136,26 @@ def resolve_dockerfile(workflow: str | None, cli_vars: dict) -> Path:
     vars_map = data.get("vars") or {}
     df = vars_map.get("DOCKERFILE")
     if not df:
-        raise SystemExit(
-            f"error: vars.DOCKERFILE not set in {pipeline_yaml} "
-            f"(and no --var DOCKERFILE=... passed)"
-        )
+        # no vars.DOCKERFILE = the packaged default image (all four harnesses):
+        # pipelines that don't care share one build; declare the var to diverge
+        return SCRIPT_DIR / "Dockerfile.default"
     p = Path(df)
     return p if p.is_absolute() else (workflow_dir / p)
 
 
-def ensure_image(image, build, workflow, cli_vars):
+def image_tag_for(workflow: str, dockerfile: Path) -> str:
+    """Per-pipeline, content-addressed image tag: medulla-<name>:<sha of Dockerfile>.
+
+    Pipelines with different Dockerfiles must never share a tag (the first
+    builder would silently win), and editing a Dockerfile must trigger a
+    rebuild without a manual --build (a new hash is an absent image)."""
+    import hashlib
+    digest = hashlib.sha256(dockerfile.read_bytes()).hexdigest()[:12]
+    name = "default" if dockerfile == SCRIPT_DIR / "Dockerfile.default" else Path(workflow).name
+    return f"medulla-{name}:{digest}"
+
+
+def ensure_image(image, build, workflow, cli_vars, dockerfile=None, ready_image=False):
     if not build:
         result = subprocess.run(
             ["docker", "image", "inspect", image],
@@ -135,9 +163,13 @@ def ensure_image(image, build, workflow, cli_vars):
         )
         if result.returncode == 0:
             return 0
+        if ready_image:
+            # IMAGE is a ready tag: never build it from an unrelated Dockerfile
+            print(f"image '{image}' not found locally, pulling...", file=sys.stderr)
+            return subprocess.run(["docker", "pull", image], check=False).returncode
         print(f"image '{image}' not found, building...", file=sys.stderr)
 
-    dockerfile = resolve_dockerfile(workflow, cli_vars)
+    dockerfile = dockerfile or resolve_dockerfile(workflow, cli_vars)
     if not dockerfile.is_file():
         raise SystemExit(f"error: Dockerfile not found: {dockerfile}")
     context = Path.cwd()
@@ -324,7 +356,6 @@ def run_docker(image, volumes, args):
 
 
 def main():
-    image = os.environ.get("MEDULLA_IMAGE", DEFAULT_IMAGE)
     args = sys.argv[1:]
 
     build = "--build" in args
@@ -359,11 +390,31 @@ def main():
     # Extract workflow for Dockerfile resolution
     workflow = None
     for j, a in enumerate(args):
-        if a in ("-w", "--workflow") and j + 1 < len(args):
+        if a in ("-w", "--workflow", "--pipeline") and j + 1 < len(args):
             workflow = args[j + 1]
             break
 
-    rc = ensure_image(image, build, workflow, cli_vars)
+    # Image resolution, two distinct concepts with symmetric surfaces:
+    #   IMAGE      = a ready tag, run as-is (never built here)
+    #   DOCKERFILE = a recipe, built into a content-addressed tag
+    # Precedence: MEDULLA_IMAGE env > --var IMAGE > vars.IMAGE >
+    #             (--var DOCKERFILE > vars.DOCKERFILE > packaged default) build
+    dockerfile = None
+    pipeline_vars = read_pipeline_vars(workflow)
+    image = (os.environ.get("MEDULLA_IMAGE")
+             or cli_vars.get("IMAGE")
+             or pipeline_vars.get("IMAGE"))
+    if image is None:
+        if workflow:
+            dockerfile = resolve_dockerfile(workflow, cli_vars)
+            if not dockerfile.is_file():
+                raise SystemExit(f"error: Dockerfile not found: {dockerfile}")
+            image = image_tag_for(workflow, dockerfile)
+        else:
+            image = DEFAULT_IMAGE
+
+    rc = ensure_image(image, build, workflow, cli_vars, dockerfile=dockerfile,
+                      ready_image=dockerfile is None and workflow is not None)
     if rc != 0:
         return rc
 

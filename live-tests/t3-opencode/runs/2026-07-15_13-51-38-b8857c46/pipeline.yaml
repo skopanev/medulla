@@ -1,0 +1,15 @@
+version: "2"
+start: go
+timeout: 400
+nodes:
+  go:
+    agent: {harness: opencode}
+    prompt: |
+      Create a file named t3.txt in the current directory containing exactly
+      the word: charlie
+      Then emit the signal named done.
+    # glm often does the work silently: post is the voice — it verifies
+    # the artifact AND emits the routing signal (post override, contract)
+    post: 'grep -q charlie t3.txt && echo "<signal:done>verified</signal:done>"'
+    timeout: 360
+    on_signal: {done: __exit_ok__}

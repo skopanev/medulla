@@ -1,0 +1,15 @@
+version: "2"
+start: go
+timeout: 500
+nodes:
+  go:
+    agent: {harness: claude-code, model: this-model-does-not-exist-xyz}
+    prompt: |
+      Create a file named t6.txt in the current directory containing exactly
+      the word: echo
+      Then emit the signal named done.
+    fallback:
+      agent: {harness: claude-code, model: haiku}
+    post: 'grep -q echo t6.txt'
+    timeout: 200
+    on_signal: {done: __exit_ok__}

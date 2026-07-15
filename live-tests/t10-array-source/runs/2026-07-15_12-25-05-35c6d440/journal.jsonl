@@ -1,0 +1,2 @@
+{"ts": "12:25:05", "step": 1, "node": "sweep", "kind": "pool", "signal": "__done__", "next": "check", "duration_s": 0.09, "message": "3/3 inputs ok", "inputs_total": 3, "inputs_ok": 3, "min_success": 3}
+{"ts": "12:25:05", "step": 2, "node": "check", "kind": "decision", "signal": "verified", "next": "__exit_ok__", "duration_s": 0.04, "message": "array sniffed, 3 inputs fanned out", "attempts": 1, "rc": 0, "timed_out": false, "fallback": false, "harness": null, "model": null}

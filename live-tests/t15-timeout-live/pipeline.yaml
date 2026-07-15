@@ -1,0 +1,18 @@
+# a live agent killed by its own step timeout: rc 124, __failed__ routes on
+version: "2"
+start: go
+timeout: 300
+nodes:
+  go:
+    agent: {harness: claude-code, model: haiku}
+    prompt: |
+      Using your bash tool, run the command `sleep 5` forty times IN A ROW —
+      one separate tool call each, waiting for every call to finish before the
+      next (never in the background). After all forty, emit the signal named
+      done.
+    timeout: 15
+    on_signal: {__failed__: check}
+  check:
+    shell: '[ "$MEDULLA_LAST_RC" = "124" ] && echo "<signal:verified>timeout killed cleanly, rc=124</signal:verified>"'
+    timeout: 15
+    on_signal: {verified: __exit_ok__}
