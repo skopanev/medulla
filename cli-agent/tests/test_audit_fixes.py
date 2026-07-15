@@ -198,3 +198,21 @@ def test_stream_line_renderers():
     started = json.dumps({"type": "item.started",
                           "item": {"type": "command_execution", "command": "ls"}})
     assert c.stream_line(started) == "$ ls"
+
+
+def test_dotenv_three_tiers_nearest_wins(tmp_path, monkeypatch):
+    from medulla.v2.engine import load_dotenv
+    fake_home = tmp_path / "home"
+    (fake_home / ".medulla").mkdir(parents=True)
+    (fake_home / ".medulla" / ".env").write_text(
+        "TOKEN=global\nGLOBAL_ONLY=g\n", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
+    project = tmp_path / "proj"
+    pdir = project / ".medulla" / "pipelines" / "pipe"
+    pdir.mkdir(parents=True)
+    (project / ".medulla" / ".env").write_text(
+        "TOKEN=project\nPROJECT_ONLY=p\n", encoding="utf-8")
+    (pdir / ".env").write_text("TOKEN=pipeline\n", encoding="utf-8")
+    env = load_dotenv(pdir)
+    assert env["TOKEN"] == "pipeline"          # nearest wins
+    assert env["GLOBAL_ONLY"] == "g" and env["PROJECT_ONLY"] == "p"

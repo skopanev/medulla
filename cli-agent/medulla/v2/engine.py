@@ -169,11 +169,7 @@ class AttemptsOutcome:
     updates: list[str] = field(default_factory=list)
 
 
-def load_dotenv(pipeline_dir: Path) -> dict[str, str]:
-    """<pipeline>/.env -> child env for bodies/hooks (pilot pattern). Secrets
-    channel: NOT vars — never templated, never persisted to vars.yaml, never
-    in the run snapshot. KEY=VALUE lines, # comments, optional quotes."""
-    path = pipeline_dir / ".env"
+def _parse_dotenv(path: Path) -> dict[str, str]:
     if not path.is_file():
         return {}
     out: dict[str, str] = {}
@@ -189,6 +185,23 @@ def load_dotenv(pipeline_dir: Path) -> dict[str, str]:
             continue
         out[key] = value
     return out
+
+
+def load_dotenv(pipeline_dir: Path) -> dict[str, str]:
+    """Secrets channel for bodies/hooks: NOT vars — never templated, never
+    persisted. Three tiers, nearest wins:
+      ~/.medulla/.env            global (machine-wide provider tokens)
+      <project>/.medulla/.env    per-project (walk up from the pipeline dir)
+      <pipeline>/.env            per-pipeline
+    """
+    merged: dict[str, str] = {}
+    merged.update(_parse_dotenv(Path.home() / ".medulla" / ".env"))
+    for parent in reversed(pipeline_dir.resolve().parents):
+        candidate = parent / ".medulla" / ".env"
+        if candidate.is_file() and candidate != Path.home() / ".medulla" / ".env":
+            merged.update(_parse_dotenv(candidate))
+    merged.update(_parse_dotenv(pipeline_dir / ".env"))
+    return merged
 
 
 class Engine:

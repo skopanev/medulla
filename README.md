@@ -104,7 +104,15 @@ Adding `inputs:` turns the action into a pool: the body runs once per input, `ma
 
 ### Secrets: .env
 
-Put `KEY=VALUE` lines into `<pipeline>/.env` — bodies and hooks see them as environment (that's where provider API keys live). Deliberately **not** vars: never templated by `{{var:}}`, never persisted into run history. `init` seeds a `.gitignore` (`.env`, `runs/`) into every pipeline it creates.
+`KEY=VALUE` files, three tiers, nearest wins — bodies and hooks see the merge as environment; deliberately **not** vars (never templated, never persisted into run history):
+
+| File | Scope |
+|---|---|
+| `~/.medulla/.env` | global — machine-wide provider tokens (claude, openai, …); forwarded into `--docker` runs |
+| `<project>/.medulla/.env` | every pipeline in the project |
+| `<pipeline>/.env` | one pipeline |
+
+`init` seeds a `.gitignore` (`.env`, `runs/`) into every pipeline it creates.
 
 ## All variables
 
@@ -114,7 +122,7 @@ Put `KEY=VALUE` lines into `<pipeline>/.env` — bodies and hooks see them as en
 |---|---|---|
 | `MEDULLA_RUN_ID` / `MEDULLA_RUN_DIR` | always | run id / run directory. Put deliverables in `$MEDULLA_RUN_DIR/artifacts/` |
 | *all pipeline vars* | always | exported as-is, including `<signal:var>`-set ones |
-| *all `.env` entries* | always | secrets channel (see above) |
+| *all `.env` entries* | always | secrets merge: `~/.medulla/.env` < `<project>/.medulla/.env` < `<pipeline>/.env` |
 | `MEDULLA_TIMEOUT_S` | always | resolved, deadline-clamped timeout of the current step (CLIs size their own limits from it) |
 | `MEDULLA_ATTEMPT_ID` | body | unique attempt id: `<step>[.i<input>].<p|f><attempt>` — `003.p1` (decision, primary, 1st try), `003.i2.f1` (pool input 2, fallback, 1st try) |
 | `MEDULLA_HARNESS` | body + hooks | `shell` or the harness name |

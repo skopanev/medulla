@@ -83,6 +83,19 @@ def build_run_command(image, volumes, args, container_name: str) -> list[str]:
     if not os.environ.get("GEMINI_API_KEY") and os.environ.get("GOOGLE_API_KEY"):
         cmd.extend(["-e", f"GEMINI_API_KEY={os.environ['GOOGLE_API_KEY']}"])
 
+    # ~/.medulla/.env (global secrets) lives on the HOST — forward its keys;
+    # the project/pipeline .env tiers ride /workspace and need no help
+    global_env = Path.home() / ".medulla" / ".env"
+    if global_env.is_file():
+        for line in global_env.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip()
+            if k and not k.startswith("MEDULLA_"):
+                cmd.extend(["-e", f"{k}={v.strip()}"])
+
     cmd.extend(volumes)
     cmd.extend(["-w", "/workspace"])
     # inside the container the sandbox IS the isolation: adapters (agy trust
