@@ -104,6 +104,20 @@ def _collect_dotenv(workflow: str | None) -> dict:
 env_file_for_run = None
 
 
+def _unlink_env_file() -> None:
+    """The env-file holds merged provider tokens (0600 in $TMPDIR). Docker's
+    client reads --env-file at startup, so the file is only needed until the
+    run ends — remove it on EVERY exit path (finally + atexit belt): a timer
+    thread dies with the process and leaks secrets on Ctrl-C / early return."""
+    global env_file_for_run
+    if env_file_for_run:
+        try:
+            os.unlink(env_file_for_run)
+        except OSError:
+            pass
+        env_file_for_run = None
+
+
 def build_run_command(image, volumes, args, container_name: str) -> list[str]:
     cmd = ["docker", "run", "--init", "--rm", "--name", container_name]
     if sys.stdin.isatty():
@@ -132,11 +146,6 @@ def build_run_command(image, volumes, args, container_name: str) -> list[str]:
     cmd.extend([image, "medulla"])
     cmd.extend(args)
     return cmd
-
-
-def exec_docker_foreground(cmd: list[str], container_name: str) -> int:
-    os.execvp("docker", cmd)
-    return 1
 
 
 def read_pipeline_vars(workflow: str | None) -> dict:
@@ -371,20 +380,10 @@ def run_docker(image, volumes, args):
     container_name = f"medulla-{uuid.uuid4().hex[:8]}"
     cmd = build_run_command(image, volumes, args, container_name)
 
-    # single subprocess path (no execvp): the temp env-file must be deleted
-    # after docker has read it; stdio inheritance keeps -it interactive
+    # single subprocess path (no execvp): the temp env-file must outlive the
+    # docker client's startup read; stdio inheritance keeps -it interactive
     stdin = None if sys.stdin.isatty() else subprocess.DEVNULL
     proc = subprocess.Popen(cmd, stdin=stdin, start_new_session=True)
-    if env_file_for_run:
-        import threading
-        def _cleanup():
-            import time
-            time.sleep(5)                     # docker reads --env-file at start
-            try:
-                os.unlink(env_file_for_run)
-            except OSError:
-                pass
-        threading.Thread(target=_cleanup, daemon=True).start()
     interrupted = {"count": 0}
 
     def run_sigint(signum, frame):
@@ -419,6 +418,7 @@ def run_docker(image, volumes, args):
         return proc.returncode
     finally:
         signal.signal(signal.SIGINT, prev)
+        _unlink_env_file()
 
 
 def main():
@@ -490,12 +490,14 @@ def main():
     global env_file_for_run
     dotenv = _collect_dotenv(workflow)
     if dotenv:
-        import tempfile
+        import atexit, tempfile
         fd, env_file_for_run = tempfile.mkstemp(prefix="medulla-env-")
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w") as f:
             for k, v in dotenv.items():
                 f.write(f"{k}={v}\n")
+        # belt for exits that never reach run_docker (bad mount → return 1)
+        atexit.register(_unlink_env_file)
     volumes = build_volumes(claude_home, mount_agy=pipeline_uses_agy(workflow))
 
     # Mount extra folders into /workspace/<name> (nested mount inside workspace)

@@ -30,7 +30,7 @@ medulla -w .medulla/pipelines/my-pipe --resume         # continue the latest unf
 medulla -w .medulla/pipelines/my-pipe --run <dir>      # continue a specific run directory
 medulla -w .medulla/pipelines/my-pipe --validate       # load + validate only
 medulla --docker -w .medulla/pipelines/my-pipe         # run inside the pipeline's Docker image
-medulla upgrade                                        # pipx upgrade medulla
+medulla upgrade                                        # re-runs the installer (pipx installs: pipx upgrade)
 medulla --help                                         # the full env/signal reference, always current
 ```
 

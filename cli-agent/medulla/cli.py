@@ -36,6 +36,14 @@ def entry() -> int:
             rc = install_skill_md(name, _P(".medulla") / "pipelines" / name)
         return rc
     if argv and argv[0] == "upgrade":
+        # two install methods exist: install.sh (private venv at
+        # ~/.medulla-engine) and pipx. `pipx upgrade` on a venv install either
+        # errors or touches a different copy — match the method.
+        venv_medulla = Path.home() / ".medulla-engine" / "venv" / "bin" / "medulla"
+        if venv_medulla.exists():
+            return subprocess.call(
+                ["bash", "-c",
+                 "curl -sSL https://raw.githubusercontent.com/skopanev/medulla/main/install.sh | bash"])
         return subprocess.call(["pipx", "upgrade", "medulla"])
 
     if "--docker" in argv:

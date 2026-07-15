@@ -111,9 +111,11 @@ grep -q '/workspace/.medulla/scripts' ~/.bashrc 2>/dev/null || echo 'export PATH
 # apply without an image rebuild. Best-effort — offline/registry errors are
 # non-fatal. Set MEDULLA_NO_UPGRADE=1 to skip (pinned/offline runs).
 if [ -z "${MEDULLA_NO_UPGRADE:-}" ]; then
-    # reinstall, not upgrade: pipx/pip skip git installs when the version
-    # number is unchanged — the baked engine silently never updated
-    pipx reinstall medulla || echo "⚠ medulla reinstall skipped (offline?) — using baked version" >&2
+    # upgrade, not reinstall: reinstall removes-then-fetches, so a network
+    # hiccup leaves the container with NO medulla at all (exit 127). upgrade
+    # is non-destructive on failure and detects new versions because every
+    # behavioral change bumps the version (AGENTS.md discipline).
+    pipx upgrade medulla || echo "⚠ medulla upgrade skipped (offline?) — using baked version" >&2
 fi
 
 exec "$@"

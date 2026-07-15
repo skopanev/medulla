@@ -272,8 +272,21 @@ def test_entry_dispatches_documented_subcommands(tmp_path, monkeypatch):
     monkeypatch.setattr("subprocess.call",
                         lambda argv: (called.setdefault("argv", argv), 0)[1])
     monkeypatch.setattr("sys.argv", ["medulla", "upgrade"])
+    # panel FIX-FIRST #1: upgrade must match the install method.
+    # no installer venv → pipx-managed → pipx upgrade
+    from pathlib import Path
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
     assert shim.entry() == 0
     assert called["argv"] == ["pipx", "upgrade", "medulla"]
+
+    # installer venv present (install.sh path, the README default) →
+    # re-run install.sh; pipx upgrade would error or touch a different copy
+    venv_bin = tmp_path / ".medulla-engine" / "venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "medulla").touch()
+    called.clear()
+    assert shim.entry() == 0
+    assert called["argv"][:2] == ["bash", "-c"] and "install.sh" in called["argv"][2]
 
 
 def test_run_does_not_touch_pipeline_dir_files(tmp_path):
