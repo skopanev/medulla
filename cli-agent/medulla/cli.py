@@ -16,7 +16,10 @@ def entry() -> int:
 
     # documented subcommands (before any flag parsing)
     if argv and argv[0] == "init":
-        from .init import run_init
+        from .init import run_init, scaffold_pipeline
+        if len(argv) > 1 and not argv[1].startswith("-"):
+            run_init()                      # runtime first (idempotent)
+            return scaffold_pipeline(argv[1])
         return run_init()
     if argv and argv[0] == "install-skill":
         from .install_skill import run_install_skill

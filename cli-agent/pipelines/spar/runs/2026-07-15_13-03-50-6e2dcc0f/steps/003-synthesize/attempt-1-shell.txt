@@ -1,2 +1,0 @@
-[out] synthesized 4 takes -> medulla/cli-agent/pipelines/spar/runs/2026-07-15_13-03-50-6e2dcc0f/artifacts/synthesized.md
-[out] <signal:ready>medulla/cli-agent/pipelines/spar/runs/2026-07-15_13-03-50-6e2dcc0f/artifacts/synthesized.md</signal:ready>

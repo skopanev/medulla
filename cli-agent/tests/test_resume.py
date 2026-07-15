@@ -285,3 +285,20 @@ def test_pipeline_gitignore_seeded_not_clobbered(tmp_path):
     gi.write_text("# mine\n", encoding="utf-8")          # author's file
     assert run_pipeline(path, workdir=work) == 0
     assert gi.read_text() == "# mine\n"                  # never clobbered
+
+
+def test_init_scaffolds_a_pipeline(tmp_path, monkeypatch):
+    import medulla.cli as shim
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["medulla", "init", "my-pipe"])
+    assert shim.entry() == 0
+    pdir = tmp_path / ".medulla" / "pipelines" / "my-pipe"
+    assert (pdir / "pipeline.yaml").is_file()
+    assert (pdir / "README.md").is_file()
+    assert ".env" in (pdir / ".gitignore").read_text()
+    assert (pdir / "prompts").is_dir()
+    # the scaffold must be a VALID, runnable pipeline out of the box
+    assert run_pipeline(pdir / "pipeline.yaml", workdir=tmp_path) == 0
+    # re-init refuses to clobber
+    monkeypatch.setattr("sys.argv", ["medulla", "init", "my-pipe"])
+    assert shim.entry() == 1
