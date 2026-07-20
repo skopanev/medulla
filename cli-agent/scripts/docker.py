@@ -119,6 +119,37 @@ def _unlink_env_file() -> None:
         env_file_for_run = None
 
 
+def read_shadow_paths(workflow: str | None) -> list[str]:
+    """workflow.yaml `docker: {shadow: [...]}` — workspace-relative paths the
+    container must see EMPTY (tmpfs mounted over them; host untouched). The
+    block's law: a workflow may only SHRINK its container's exposure, never
+    enlarge it. Standalone fail-fast: this runs before the engine validator."""
+    if not workflow:
+        return []
+    yaml_path = _config_yaml(Path(workflow))
+    if not yaml_path.is_file():
+        return []
+    try:
+        import yaml
+    except ImportError:
+        raise SystemExit("error: pyyaml required (pip3 install pyyaml)")
+    data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+    block = data.get("docker")
+    if block is None:
+        return []
+    if not isinstance(block, dict) or not isinstance(block.get("shadow", []), list):
+        raise SystemExit("error: docker: must be a mapping with a 'shadow' list")
+    shadow = block.get("shadow") or []
+    for p in shadow:
+        parts = [s for s in str(p).split("/") if s not in ("", ".")]
+        if not isinstance(p, str) or not parts or p.startswith("/") or ".." in parts:
+            raise SystemExit(f"error: docker.shadow path escapes the workspace: {p!r}")
+    return ["/".join([s for s in p.split("/") if s not in ("", ".")]) for p in shadow]
+
+
+shadow_paths_for_run: list[str] = []
+
+
 def build_run_command(image, volumes, args, container_name: str) -> list[str]:
     cmd = ["docker", "run", "--init", "--rm", "--name", container_name]
     if sys.stdin.isatty():
@@ -140,6 +171,11 @@ def build_run_command(image, volumes, args, container_name: str) -> list[str]:
         cmd.extend(["--env-file", env_file_for_run])
 
     cmd.extend(volumes)
+    # shadow: an empty tmpfs mounted OVER a workspace subpath — the more
+    # specific mount wins, the container sees the dir empty, the host keeps
+    # the real content. Host existence is irrelevant: tmpfs never touches it.
+    for p in shadow_paths_for_run:
+        cmd.extend(["--tmpfs", f"/workspace/{p}"])
     cmd.extend(["-w", "/workspace"])
     # inside the container the sandbox IS the isolation: adapters (agy trust
     # preflight) key off this
@@ -496,6 +532,9 @@ def main():
 
     claude_config = os.environ.get("CLAUDE_CONFIG_DIR")
     claude_home = Path(claude_config).expanduser().resolve() if claude_config else Path.home() / ".claude"
+
+    global shadow_paths_for_run
+    shadow_paths_for_run = read_shadow_paths(workflow)
 
     global env_file_for_run
     dotenv = _collect_dotenv(workflow)

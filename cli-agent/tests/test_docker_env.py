@@ -33,6 +33,33 @@ def test_tier_merge_nearest_wins_all_tiers_whole(dockerpy, tmp_path, monkeypatch
     assert env["SLACK_TOKEN"] == "global-slack"               # ALL tiers whole (user's zone)
 
 
+def test_shadow_mounts_tmpfs_and_no_block_is_byte_identical(dockerpy, tmp_path):
+    wdir = tmp_path / "wf"
+    wdir.mkdir()
+    (wdir / "workflow.yaml").write_text(
+        'version: "2"\ndocker:\n  shadow: [secrets, sub/dir/]\n', encoding="utf-8")
+    assert dockerpy.read_shadow_paths(str(wdir)) == ["secrets", "sub/dir"]
+
+    base = dockerpy.build_run_command("img", [], ["-w", "x"], "c1")
+    dockerpy.shadow_paths_for_run = ["secrets"]
+    shadowed = dockerpy.build_run_command("img", [], ["-w", "x"], "c1")
+    i = shadowed.index("--tmpfs")
+    assert shadowed[i + 1] == "/workspace/secrets"
+
+    dockerpy.shadow_paths_for_run = []           # acceptance: no block ->
+    assert dockerpy.build_run_command("img", [], ["-w", "x"], "c1") == base
+
+
+def test_shadow_escape_fails_fast_and_reads_legacy_name(dockerpy, tmp_path):
+    wdir = tmp_path / "wf"
+    wdir.mkdir()
+    # legacy filename on purpose: the block must be readable there too
+    (wdir / "pipeline.yaml").write_text(
+        'version: "2"\ndocker: {shadow: ["../up"]}\n', encoding="utf-8")
+    with pytest.raises(SystemExit, match="escapes"):
+        dockerpy.read_shadow_paths(str(wdir))
+
+
 def test_env_file_unlinked_on_every_exit_path(dockerpy, tmp_path):
     # panel FIX-FIRST #3: the old 5s timer thread died with the process on
     # Ctrl-C / early return and leaked merged tokens in $TMPDIR forever.

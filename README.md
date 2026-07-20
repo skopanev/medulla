@@ -285,6 +285,19 @@ nodes:
 
 Image resolution: `MEDULLA_IMAGE` env → `--var IMAGE` → `vars.IMAGE` (a ready tag: pulled, never built) → otherwise **build** from `--var DOCKERFILE` → `vars.DOCKERFILE` → the packaged default (all four harnesses). Built tags are per-workflow and content-addressed (`medulla-<name>:<sha of Dockerfile>`) — workflows never share a tag by accident, and editing a Dockerfile rebuilds automatically.
 
+### Container policy: the `docker:` block
+
+A workflow that chews untrusted input (incoming mail, scraped pages) can declare what its container must NOT see:
+
+```yaml
+docker:
+  shadow: [secrets, .git]   # workspace-relative paths the container sees EMPTY
+```
+
+`shadow` mounts an empty tmpfs over each `/workspace/<path>`: the host keeps the real content, the container sees an empty dir (writes to it vanish with the container). Paths must stay inside the workspace — absolute or `..` paths are a validation error. Without the block, behavior is byte-identical to before.
+
+The law of the block: a workflow may only **shrink** its container's exposure here, never enlarge it — capability-adding knobs (extra mounts, host network) stay on the CLI, so a cloned workflow can't grant itself host access. Two practical notes: shadow paths should be **gitignored** (shadowing a tracked dir makes in-container git see it as deleted), and secrets forwarded via `.env` tiers still reach the container's env — shadow closes the filesystem channel only.
+
 ---
 
 ## Technical reference
@@ -299,6 +312,7 @@ Image resolution: `MEDULLA_IMAGE` env → `--var IMAGE` → `vars.IMAGE` (a read
 | `timeout` | 86400 | wall-clock deadline for the whole run; `0` = unlimited. Every child timeout is clamped to the remaining budget |
 | `defaults` | — | policy defaults for actions: `timeout`, `max_attempts`, `ignore_exit_code`, `fallback`, `on_signal` (per-key merge). Flat scalars only — never merged deep |
 | `keep_runs` | 20 | auto-prune of run history on start |
+| `docker` | — | container policy for `--docker` runs: `shadow: [paths]` (see [Docker](#docker)); shrink-only by law |
 
 ### Node fields
 

@@ -270,6 +270,22 @@ nodes:
     assert "reserved" in load_err(tmp_path, text)
 
 
+def test_docker_block_valid_loads(tmp_path):
+    p = load_workflow(write(tmp_path, MINIMAL + "\ndocker: {shadow: [secrets, .git]}\n"))
+    assert p.start == "a"                       # block accepted, engine ignores it
+
+
+def test_docker_block_unknown_key(tmp_path):
+    assert "unknown fields" in load_err(
+        tmp_path, MINIMAL + "\ndocker: {network: none}\n")
+
+
+def test_docker_shadow_escape_rejected(tmp_path):
+    assert "workspace" in load_err(tmp_path, MINIMAL + "\ndocker: {shadow: [/etc]}\n")
+    assert "workspace" in load_err(tmp_path, MINIMAL + '\ndocker: {shadow: ["../x"]}\n')
+    assert "workspace" in load_err(tmp_path, MINIMAL + '\ndocker: {shadow: ["."]}\n')
+
+
 def test_normalization(tmp_path):
     text = """
 version: "2"

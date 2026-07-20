@@ -232,6 +232,28 @@ def _validate_var_name(key: str, where: str) -> None:
         raise _err(f"{where}: var name {key!r} is reserved (vars are exported to child env)")
 
 
+def _validate_docker_block(raw) -> None:
+    """Shape-check only — scripts/docker.py is the consumer and re-checks
+    standalone (it runs before the engine and imports nothing from it)."""
+    if raw is None:
+        return
+    if not isinstance(raw, dict):
+        raise _err("docker: must be a mapping")
+    unknown = set(raw) - {"shadow"}
+    if unknown:
+        raise _err(f"docker: unknown fields: {sorted(unknown)} (only 'shadow' exists)")
+    shadow = raw.get("shadow")
+    if shadow is None:
+        return
+    if not isinstance(shadow, list) or not all(isinstance(p, str) for p in shadow):
+        raise _err("docker.shadow must be a list of workspace-relative paths")
+    for p in shadow:
+        parts = [s for s in p.split("/") if s not in ("", ".")]
+        if not parts or p.startswith("/") or ".." in parts:
+            raise _err("docker.shadow: path must stay inside the workspace "
+                       f"(relative, no '..'): {p!r}")
+
+
 def load_workflow(path: Path) -> Workflow:
     path = Path(path)
     if not path.is_file():
@@ -252,10 +274,16 @@ def load_workflow(path: Path) -> Workflow:
             f"This looks like a v1 workflow — see 'Migrating from v1' in README.md"
         )
 
-    top_keys = {"version", "start", "vars", "timeout", "keep_runs", "defaults", "nodes"}
+    top_keys = {"version", "start", "vars", "timeout", "keep_runs", "defaults", "nodes",
+                "docker"}
     unknown = set(data) - top_keys
     if unknown:
         raise _err(f"unknown top-level fields: {sorted(unknown)}")
+
+    # docker: — host-side container policy (consumed by scripts/docker.py, the
+    # engine only validates the shape). Law of the block: a workflow may only
+    # SHRINK its container's exposure here, never enlarge it.
+    _validate_docker_block(data.get("docker"))
 
     nodes_raw = data.get("nodes")
     if not isinstance(nodes_raw, dict) or not nodes_raw:
