@@ -95,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--validate", action="store_true", help="load + validate, no run")
     parser.add_argument("--dry-run", action="store_true", help="validate + print the plan, no run")
     parser.add_argument("--version", action="store_true", help="print version + installed commit")
+    parser.add_argument("--print-run-dir", action="store_true",
+                        help="print the run directory to stdout at start (scripting/backgrounded runs)")
     if argv and "--version" in argv:
         _print_version()
         return 0
@@ -144,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     return run_workflow(yaml_path, cli_vars=cli_vars, start_override=ns.node,
-                        resume_dir=resume_dir)
+                        resume_dir=resume_dir, print_run_dir=ns.print_run_dir)
 
 
 def _print_version() -> None:

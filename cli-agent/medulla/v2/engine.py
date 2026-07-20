@@ -957,6 +957,7 @@ def run_workflow(
     start_override: str | None = None,
     workdir: Path | None = None,
     resume_dir: Path | None = None,
+    print_run_dir: bool = False,
 ) -> int:
     """Load, run, write outcome.json, return the process exit code (0/1/2/130)."""
     import signal as _signal
@@ -997,6 +998,8 @@ def run_workflow(
             workflow.dir = Path(workflow_path).parent if Path(workflow_path).is_file() \
                 else Path(workflow_path)
             store = RunStore.open(resume_dir)
+            if print_run_dir:
+                print(store.dir, flush=True)   # stdout, line 1: caller captures it now
             log(f"resume {store.run_id} -> {store.dir}")
             engine = Engine(workflow, store, workdir)
             current = engine.replay()
@@ -1013,6 +1016,10 @@ def run_workflow(
                 _validate_var_name(k, "--var")
             workflow.vars.update({k: str(v) for k, v in cli_vars.items()})
         store = RunStore.create(workflow.dir, workflow.path.read_text(encoding="utf-8"))
+        if print_run_dir:
+            print(store.dir, flush=True)   # stdout, line 1 (before the 10-20min engine
+                                           # work): a backgrounded caller reads it now,
+                                           # relative so it resolves on host under docker
         prune_runs(workflow.dir, workflow.keep_runs, workflow.timeout)
         log(f"run {store.run_id} -> {store.dir}")
         engine = Engine(workflow, store, workdir)

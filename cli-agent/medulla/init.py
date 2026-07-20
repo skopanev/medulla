@@ -159,9 +159,9 @@ def deploy_template(name: str) -> int:
     """Copy a bundled workflow (template) into the project."""
     import shutil
     dest = Path(".medulla") / "workflows" / name
-    if (dest / "workflow.yaml").exists():
-        print(f"error: {dest}/workflow.yaml already exists")
-        return 1
+    existed = (dest / "workflow.yaml").exists()   # overwrite by default: re-deploy
+                                                  # refreshes template files; runs/ is
+                                                  # preserved (ignored from source below)
     from importlib import resources
     src_path = None
     try:
@@ -176,7 +176,8 @@ def deploy_template(name: str) -> int:
     dest.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src_path, dest, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("runs", "__pycache__", "*.pyc"))
-    print(f"deployed template '{name}' -> {dest}/")
+    verb = "re-deployed (overwrote)" if existed else "deployed"
+    print(f"{verb} template '{name}' -> {dest}/")
     print(f"  run:   medulla -w {dest}")
     return 0
 

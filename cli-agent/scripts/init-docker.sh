@@ -57,12 +57,12 @@ if [ -d "$BRIDGE" ]; then
     sleep 1
     if [ -f "$BRIDGE/exit_code.$PING_ID" ]; then
         rm -f "$BRIDGE/response.$PING_ID" "$BRIDGE/exit_code.$PING_ID"
-        echo "✓ host-builder connected"
+        echo "✓ host-builder connected" >&2
     else
-        echo "⚠ host-builder not responding (bridge mounted but no listener)"
+        echo "⚠ host-builder not responding (bridge mounted but no listener)" >&2
     fi
 else
-    echo "– host-builder not mounted (cargo runs locally)"
+    echo "– host-builder not mounted (cargo runs locally)" >&2
 fi
 
 # Workflow git identity (env vars override mounted read-only .gitconfig)
@@ -79,7 +79,7 @@ if command -v dbus-daemon >/dev/null 2>&1 && command -v gnome-keyring-daemon >/d
     _dbus_addr=$(dbus-daemon --session --print-address --fork 2>/dev/null)
     if [ -n "$_dbus_addr" ]; then
         export DBUS_SESSION_BUS_ADDRESS="$_dbus_addr"
-        echo "" | gnome-keyring-daemon --unlock --daemonize 2>/dev/null || true
+        echo "" | gnome-keyring-daemon --unlock --daemonize >/dev/null 2>&1 || true
         if command -v secret-tool >/dev/null 2>&1; then
             # OAuth token: macOS stores "go-keyring-base64:<b64json>"; Linux stores raw JSON
             if [ -f /mnt/agy-token ]; then
@@ -115,7 +115,7 @@ if [ -z "${MEDULLA_NO_UPGRADE:-}" ]; then
     # hiccup leaves the container with NO medulla at all (exit 127). upgrade
     # is non-destructive on failure and detects new versions because every
     # behavioral change bumps the version (AGENTS.md discipline).
-    pipx upgrade medulla || echo "⚠ medulla upgrade skipped (offline?) — using baked version" >&2
+    pipx upgrade medulla >&2 || echo "⚠ medulla upgrade skipped (offline?) — using baked version" >&2
 fi
 
 exec "$@"
