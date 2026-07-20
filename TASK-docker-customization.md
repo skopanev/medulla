@@ -1,5 +1,21 @@
 # Task: declarative per-workflow Docker customization (`docker:` block)
 
+> ## STATUS: shadow SHIPPED in 4.2.0 (`fa1d3ae`), rest deliberately cut
+> - `docker: {shadow: [...]}` live: tmpfs over `/workspace/<p>`, host untouched;
+>   validation both engine-side (E_VALIDATION) and docker.py-side (fail-fast);
+>   no block → byte-identical args (locked by test). E2E verified in a real
+>   container: `ls -A /workspace/secrets` = 0 entries, host file intact,
+>   in-container self-heal upgraded 4.0.0→4.2.0 on its own.
+> - **Law of the block (documented in README): shrink-only.** A workflow may
+>   only reduce its container's exposure; capability-adding knobs stay on the CLI.
+> - `network:` NOT built (owner call): caveat-heavy — breaks LLM API egress and
+>   silently puts self-heal offline (baked engine). Revisit with a live driver.
+> - `env:` passlist (forward only named .env keys) parked as the NEXT shrink key:
+>   shadow closes the filesystem channel, but forwarded env still carries every
+>   token from all tiers into an untrusted-input container. Separate task.
+> - Note for vault workflows: shadow paths must be gitignored, or in-container
+>   git sees them as deleted.
+
 ## Problem
 `medulla --docker` mounts the workflow's working dir as `/workspace` and forwards creds.
 Today the mount set + network mode are hardcoded in `scripts/docker.py`. Real workflows need
