@@ -128,6 +128,51 @@ nodes:
     assert find_resumable(pdir) == old_run            # no outcome.json = resumable
 
 
+def test_crash_window_after_terminal_journal_row_finalizes(tmp_path):
+    # the window: terminal row hits journal.jsonl, process dies BEFORE
+    # outcome.json — resume must synthesize the outcome, not E_VALIDATION
+    text = """
+version: "2"
+start: a
+nodes:
+  a:
+    shell: 'echo "<signal:ok>payload</signal:ok>"'
+    on_signal: {ok: __exit_ok__}
+"""
+    path, work = setup(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
+    run = runs_of(path.parent)[0]
+    (run / "outcome.json").unlink()                 # simulate the kill window
+    assert find_resumable(path.parent) == run       # no outcome = resumable
+    assert run_workflow(path, workdir=work, resume_dir=run) == 0
+    out = read_outcome(run)
+    assert out["outcome"] == "succeeded"
+    assert {"steps", "duration_s", "run_id"} <= set(out)
+
+    # same window, failed terminal: exit code and error body survive
+    text_fail = text.replace("__exit_ok__", "__exit_fail__")
+    (tmp_path / "f").mkdir()
+    path2, work2 = setup(tmp_path / "f", text_fail)
+    assert run_workflow(path2, workdir=work2) == 2
+    run2 = runs_of(path2.parent)[0]
+    (run2 / "outcome.json").unlink()
+    assert run_workflow(path2, workdir=work2, resume_dir=run2) == 2
+    out2 = read_outcome(run2)
+    assert out2["outcome"] == "failed"
+    assert out2["error"]["message"] == "payload"    # rebuilt from the journal row
+
+
+def test_crashed_outcome_shape_normalized(tmp_path):
+    # crashed/interrupted outcomes lacked steps/duration_s/run_id (field
+    # diff across real runs) — one shape for every outcome.json now
+    path, work = setup(tmp_path, POOL_RESUME.format(timeout=3, work=work_dir(tmp_path)))
+    assert run_workflow(path, workdir=work) == 1                # E_DEADLINE crash
+    out = read_outcome(runs_of(path.parent)[0])
+    assert out["outcome"] == "crashed"
+    assert {"steps", "duration_s", "run_id", "error"} <= set(out)
+    assert out["run_id"] == runs_of(path.parent)[0].name.rsplit("-", 1)[-1]
+
+
 def test_resume_refuses_finished_run(tmp_path):
     text = """
 version: "2"

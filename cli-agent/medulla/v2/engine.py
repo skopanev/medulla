@@ -855,12 +855,23 @@ class Engine:
                 self.manifests[row["node"]] = mp
         self.store.set_step_counter(self.steps)   # or step dirs silently collide from 001
         if current in TERMINALS:
-            raise EngineCrash(E_VALIDATION,
-                              f"run already reached {current} — nothing to resume")
+            return current                        # finished, outcome.json missing — caller finalizes
         if current not in self.p.nodes:
             raise EngineCrash(E_VALIDATION, f"resume: unknown node '{current}' in journal")
         log(f"resume: {len(rows)} completed step(s), continuing at '{current}'")
         return current
+
+    def synthesize_terminal(self, terminal: str) -> dict:
+        """The crash window between the terminal journal row and outcome.json:
+        the run DID finish — finalize from the journal instead of re-running
+        (or crashing with 'nothing to resume', which this replaced)."""
+        log(f"resume: journal already terminal ({terminal}) — finalizing outcome")
+        if terminal == EXIT_OK:
+            return {"outcome": "succeeded", "exit_code": 0}
+        return {"outcome": "failed", "exit_code": 2,
+                "error": {"code": "SIGNAL_FAIL", "message": self.last.get("message", ""),
+                          "node": self.last.get("node", ""), "step": self.steps,
+                          "signal": self.last.get("signal", "")}}
 
     # ── main loop ──
     def run(self, start_override: str | None = None) -> dict:
@@ -925,6 +936,17 @@ class Engine:
             current = target
 
 
+def _normalize_outcome(outcome: dict, store, engine) -> dict:
+    """One shape for every outcome.json: steps, duration_s, run_id always
+    present — crashed/interrupted used to lack them (found by a field diff
+    across real runs). setdefault: paths that computed better values keep them."""
+    outcome.setdefault("steps", engine.steps if engine is not None else 0)
+    outcome.setdefault("duration_s", round(
+        (__import__("datetime").datetime.now() - store.started_at).total_seconds(), 2))
+    outcome.setdefault("run_id", store.run_id)
+    return outcome
+
+
 RESUMABLE_OUTCOMES = {"interrupted", "crashed"}   # + no outcome.json at all.
 # `crashed` is a documented deviation from the contract's letter: the #1 resume
 # trigger is E_DEADLINE, which is a caught crash; config-class crashes just
@@ -966,6 +988,7 @@ def run_workflow(
     from .rundir import RunLocked, prune_runs
     workdir = workdir or Path.cwd()
     store = None
+    engine = None
 
     # SIGTERM (docker stop, systemd) joins the SIGINT path: kill every live
     # child FIRST (pool workers unblock from proc.wait), then raise into the
@@ -1003,10 +1026,11 @@ def run_workflow(
             log(f"resume {store.run_id} -> {store.dir}")
             engine = Engine(workflow, store, workdir)
             current = engine.replay()
-            outcome = engine.run(start_override=current)
+            outcome = (engine.synthesize_terminal(current) if current in TERMINALS
+                       else engine.run(start_override=current))
             outcome["duration_s"] = round(
                 (__import__("datetime").datetime.now() - store.started_at).total_seconds(), 2)
-            store.write_outcome(outcome)
+            store.write_outcome(_normalize_outcome(outcome, store, engine))
             return outcome["exit_code"]
 
         workflow = load_workflow(Path(workflow_path))
@@ -1024,7 +1048,7 @@ def run_workflow(
         log(f"run {store.run_id} -> {store.dir}")
         engine = Engine(workflow, store, workdir)
         outcome = engine.run(start_override)
-        store.write_outcome(outcome)
+        store.write_outcome(_normalize_outcome(outcome, store, engine))
         return outcome["exit_code"]
     except RunLocked as locked:
         log(str(locked))
@@ -1036,11 +1060,12 @@ def run_workflow(
         }
         log(f"crash {crash.code}: {crash.message}")
         if store is not None:
-            store.write_outcome(outcome)
+            store.write_outcome(_normalize_outcome(outcome, store, engine))
         return 1
     except KeyboardInterrupt:
         if store is not None:
-            store.write_outcome({"outcome": "interrupted", "exit_code": 130})
+            store.write_outcome(_normalize_outcome(
+                {"outcome": "interrupted", "exit_code": 130}, store, engine))
         return 130
     finally:
         for sig, prev in prev_handlers.items():
