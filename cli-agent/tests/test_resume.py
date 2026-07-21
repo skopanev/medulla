@@ -162,6 +162,38 @@ nodes:
     assert out2["error"]["message"] == "payload"    # rebuilt from the journal row
 
 
+def test_journal_records_every_produced_signal(tmp_path):
+    # owner decision: the journal row carries EVERY signal the node produced
+    # (update/var/bare, stdout order) — not just the one that routed
+    text = """
+version: "2"
+start: a
+nodes:
+  a:
+    shell: |
+      echo "<signal:update>halfway</signal:update>"
+      echo "<signal:var key=SLUG>x1</signal:var>"
+      echo "<signal:ok>done</signal:ok>"
+    on_signal: {ok: b}
+  b:
+    inputs: [only]
+    shell: |
+      echo "<signal:update>chewing</signal:update>"
+      echo "<signal:ready>artifact</signal:ready>"
+    on_signal: {__done__: __exit_ok__}
+"""
+    path, work = setup(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
+    run = runs_of(path.parent)[0]
+    journal = [json.loads(l) for l in (run / "journal.jsonl").read_text().splitlines()]
+    assert [(e["name"], e["message"]) for e in journal[0]["signals"]] == [
+        ("update", "halfway"), ("var", "x1"), ("ok", "done")]
+    assert journal[0]["signals"][1]["key"] == "SLUG"
+    manifest = [json.loads(l) for l in
+                (run / "steps" / "002-b" / "manifest.jsonl").read_text().splitlines()]
+    assert [e["name"] for e in manifest[0]["signals"]] == ["update", "ready"]
+
+
 def test_crashed_outcome_shape_normalized(tmp_path):
     # crashed/interrupted outcomes lacked steps/duration_s/run_id (field
     # diff across real runs) — one shape for every outcome.json now

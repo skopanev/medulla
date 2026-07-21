@@ -407,7 +407,8 @@ A workflow is a self-contained directory — contract, code, history:
   harness/                 # phase 2: harness HOME (sessions), shared by all runs
   runs/<ts>-<run_id>/      # one directory per run
     workflow.yaml          # config snapshot as loaded (immutable for the run)
-    journal.jsonl          # graph chronology, append-only (step, node, rc, signal, message, duration)
+    journal.jsonl          # graph chronology, append-only (step, node, rc, signal, message, duration,
+                           #   signals: every signal the node produced — update/var/bare, stdout order)
     vars.yaml              # variables (updated on var signals)
     outcome.json           # written only on completion (atomic); absent = running or hard-killed
     steps/

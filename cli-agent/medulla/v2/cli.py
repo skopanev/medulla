@@ -48,7 +48,8 @@ environment the engine provides to bodies and hooks (agents: read this, it is th
   after a pool node completes
     MEDULLA_MANIFEST_<NODE> path to its manifest.jsonl (dashes->underscores, uppercased);
                             rows: {index,key,input,ok,reason,signal,message,rc,timed_out,
-                                   attempts,fallback,harness,model,vars,updates,duration_s,log}
+                                   attempts,fallback,harness,model,vars,updates,signals,
+                                   duration_s,log}
 
   inside a pool input
     MEDULLA_INPUT           the input (objects as compact JSON)

@@ -121,6 +121,7 @@ class ScanResult:
     first_body: str = ""
     vars: dict[str, str] = field(default_factory=dict)
     updates: list[str] = field(default_factory=list)
+    events: list[dict] = field(default_factory=list)   # EVERY signal, stdout order
 
 
 def scan_stdout(stdout: str, known: set[str] | None) -> ScanResult:
@@ -131,6 +132,11 @@ def scan_stdout(stdout: str, known: set[str] | None) -> ScanResult:
     tables hold only dunders, yet body signals must reach the manifest)."""
     res = ScanResult()
     for name, attrs, body in extract_signals(stdout):
+        event = {"name": name, "message": _tail(body, 2000)}
+        if name == "var" and (attrs or {}).get("key"):
+            event["key"] = attrs["key"]
+        res.events.append(event)      # the journal's full record: routing rules
+                                      # below stay untouched (namespace law)
         if name == "update":
             res.updates.append(body)
             continue
@@ -168,6 +174,7 @@ class AttemptsOutcome:
     recorded_body: str = ""
     pending_vars: dict[str, str] = field(default_factory=dict)  # fold law: caller applies
     updates: list[str] = field(default_factory=list)
+    signals: list[dict] = field(default_factory=list)  # every produced signal (concluding path)
 
 
 def _parse_dotenv(path: Path) -> dict[str, str]:
@@ -347,6 +354,7 @@ class Engine:
         action = node.action
 
         pre_updates: list[str] = []
+        pre_events: list[dict] = []
         primary_tag = "shell" if action.kind == "shell" else action.agent.harness
         if node.pre is not None:
             pre_rendered = render_fn(node.pre, "pre")
@@ -358,19 +366,21 @@ class Engine:
                                extra_env=pre_env, log_path=step_dir / "pre.txt")
             pre_scan = scan_stdout(pre_res.stdout, known)
             pre_updates = pre_scan.updates
+            pre_events = pre_scan.events
             # a known signal wins over rc — same grammar as everywhere else
             if pre_scan.first_known is not None:
                 apply_pre_vars(pre_scan.vars)     # env prep applies before the guard routes
                 return AttemptsOutcome(           # guard: body and post are skipped
                     signal=pre_scan.first_known, message=pre_scan.first_body,
                     attempts=0, rc=pre_res.rc, guarded=True, updates=pre_updates,
+                    signals=pre_events,
                 )
             if pre_res.rc != 0:
                 return AttemptsOutcome(
                     signal=SIG_FAILED,
                     message=f"pre hook failed: rc={pre_res.rc}; stderr: {_tail(pre_res.stderr)}",
                     attempts=0, rc=pre_res.rc, timed_out=pre_res.timed_out,
-                    failure_class="pre", updates=pre_updates,
+                    failure_class="pre", updates=pre_updates, signals=pre_events,
                 )
             apply_pre_vars(pre_scan.vars)   # env prep BEFORE the body renders
 
@@ -487,6 +497,7 @@ class Engine:
             # communication failure: its vars must not leak (fold law).
             pending: dict[str, str] = {}
             updates = pre_updates + body_scan.updates + post_scan.updates
+            events = pre_events + body_scan.events + post_scan.events
             silent_ok = pool_mode and decision.verdict is Verdict.SILENT
             if decision.verdict is Verdict.ROUTE or silent_ok:
                 pending = {**body_scan.vars, **post_scan.vars}   # post wins on conflict
@@ -520,7 +531,7 @@ class Engine:
                 failure_class=last_failure_class if signal == SIG_FAILED else None,
                 recorded_signal=post_scan.first_known or body_scan.first_known,
                 recorded_body=post_scan.first_body or body_scan.first_body,
-                pending_vars=pending, updates=updates,
+                pending_vars=pending, updates=updates, signals=events,
             )
 
     def _prepare_body(self, action: Action, node: Node, step_dir: Path,
@@ -589,7 +600,7 @@ class Engine:
         return outcome.signal, outcome.message, {
             "attempts": outcome.attempts, "rc": outcome.rc, "timed_out": outcome.timed_out,
             "fallback": outcome.fallback_used, "harness": outcome.harness,
-            "model": outcome.model,
+            "model": outcome.model, "signals": outcome.signals,
         }
 
     # ── pool machinery ────────────────────────────────────────────────────────
@@ -700,7 +711,7 @@ class Engine:
         except RenderError as exc:
             row.update(ok=False, reason="render", signal=None, message=str(exc),
                        rc=None, timed_out=False, attempts=0, fallback=False,
-                       harness=None, model=None, vars={}, updates=[],
+                       harness=None, model=None, vars={}, updates=[], signals=[],
                        duration_s=round(time.monotonic() - t0, 2), log=None)
             return row
 
@@ -722,7 +733,7 @@ class Engine:
             rc=outcome.rc, timed_out=outcome.timed_out, attempts=outcome.attempts,
             fallback=outcome.fallback_used, harness=outcome.harness, model=outcome.model,
             vars={**pool_pre_vars, **outcome.pending_vars} if ok else pool_pre_vars,
-            updates=outcome.updates,
+            updates=outcome.updates, signals=outcome.signals,
             duration_s=round(time.monotonic() - t0, 2),
             log=f"input-{idx:04d}/",
         )
@@ -917,6 +928,9 @@ class Engine:
                     "attempts": stats.get("attempts"), "rc": stats.get("rc"),
                     "timed_out": stats.get("timed_out"), "fallback": stats.get("fallback"),
                     "harness": stats.get("harness"), "model": stats.get("model"),
+                    # owner decision: EVERY signal the node produced (update/var/bare,
+                    # stdout order, concluding path) — replay ignores the field
+                    "signals": stats.get("signals") or [],
                 })
             self.store.journal_append(journal_row)
             log(f"step {step} | {node.name} -> {signal_name} -> {target} ({duration}s)")
