@@ -66,6 +66,10 @@ Cover:
 
 # Run the panel
 
+**Preflight:** if `.medulla/workflows/spar/workflow.yaml` doesn't exist in this
+repo, the panel isn't deployed here yet — run `medulla init spar --skill`
+first, then proceed.
+
 Mechanical contract — invoke verbatim, substituting your built prompt
 for the heredoc body (quoted 'EOF' keeps `$(...)`, backticks and
 quotes in the prompt inert):
@@ -74,8 +78,9 @@ quotes in the prompt inert):
     <your prompt>
     EOF
     )"
-    medulla --docker -w .medulla/workflows/spar --var "QUESTION=$QUESTION" >&2
-    cat "$(ls -td .medulla/workflows/spar/runs/* | head -1)/artifacts/synthesized.md"
+    medulla --print-run-dir --docker -w .medulla/workflows/spar --var "QUESTION=$QUESTION" >run.log 2>err.log &
+    run=$(head -1 run.log)                        # run dir, no grep; race-safe
+    cat "$run/artifacts/synthesized.md"           # after the job finishes
 
 The cat'd output is the panel's combined takes, separated by headers.
 A `WARNING: only N/4 panelists delivered` line means partial delivery —

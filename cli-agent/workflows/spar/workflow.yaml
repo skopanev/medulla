@@ -41,8 +41,8 @@ nodes:
   panel:
     inputs:
       - {slug: glm5,   harness: opencode,    model: zai-coding-plan/glm-5.2, effort: max}
-      - {slug: gpt5,   harness: codex,       model: gpt-5.5,                 effort: xhigh}
-      - {slug: sonnet, harness: claude-code, model: sonnet}
+      - {slug: gpt5,   harness: codex,       model: gpt-5.6-sol,             effort: high}
+      - {slug: sonnet, harness: claude-code, model: claude-sonnet-5}
       - {slug: gemini, harness: agy,         model: "Gemini 3.1 Pro (High)"}
     max_parallel: all
     min_success: 1
@@ -57,17 +57,19 @@ nodes:
 
       {{var:QUESTION}}
 
-      Use your file-write tool to write your full response to this exact path:
+      FIRST, use your file-write tool to write your FULL response to this exact
+      path. This file IS your deliverable — printing a SUMMARY without writing
+      the file counts as NO answer, however trivial the task seems:
 
       ```
       {{var:ROUND_DIR}}/{{input.slug}}.md
       ```
 
-      Do not paste the response in chat. After writing the file, print exactly
-      one line and stop:
+      Only AFTER the file exists on disk, print exactly one line and stop:
 
       SUMMARY: <your one-sentence summary>
     post: 'test -s "$ROUND_DIR/$MEDULLA_INPUT_SLUG.md"'
+    max_attempts: 2                       # a panelist that skips the file-write retries once
     timeout: 1800
     on_signal:
       __done__: synthesize
