@@ -15,6 +15,40 @@ def entry() -> int:
     argv = sys.argv[1:]
 
     # documented subcommands (before any flag parsing)
+    if argv and argv[0] == "refresh":
+        from .init import bundled_templates, refresh_skill
+        rest, pos, depth, dry = argv[1:], [], None, False
+        i = 0
+        while i < len(rest):
+            a = rest[i]
+            if a == "--dry-run":
+                dry = True
+            elif a == "--depth":
+                if i + 1 >= len(rest) or not rest[i + 1].isdecimal() or int(rest[i + 1]) < 1:
+                    print("error: --depth needs a positive integer, e.g. --depth 8", file=sys.stderr)
+                    return 1
+                depth = int(rest[i + 1]); i += 1
+            elif a.startswith("-"):
+                print(f"error: unknown flag: {a}", file=sys.stderr)
+                return 1
+            else:
+                pos.append(a)
+            i += 1
+        if not pos:
+            print("usage: medulla refresh <name> <root> [--depth N] [--dry-run]", file=sys.stderr)
+            print("  rescans <root>, refreshes every medulla-owned copy of the skill", file=sys.stderr)
+            print("  (.medulla/workflows/<name> + {.claude,.agents,.opencode}/skills/<name>) to the bundle", file=sys.stderr)
+            print(f"  bundled: {', '.join(bundled_templates()) or 'none'}", file=sys.stderr)
+            return 1
+        name = pos[0]
+        if len(pos) < 2:
+            print("error: no search folder given — WHERE should I look?", file=sys.stderr)
+            print(f"  usage: medulla refresh {name} <root> [--depth N]   e.g. medulla refresh {name} ~/Projects --depth 4",
+                  file=sys.stderr)
+            return 1
+        kw = {"dry_run": dry} if depth is None else {"depth": depth, "dry_run": dry}
+        return refresh_skill(name, pos[1], **kw)
+
     if argv and argv[0] == "init":
         from .init import (bundled_templates, deploy_template, install_skill_md,
                            run_init, scaffold_workflow)

@@ -460,3 +460,58 @@ def test_init_skill_flag(tmp_path, monkeypatch):
     # scaffold got a starter SKILL.md, and it is registered
     assert (tmp_path / ".medulla" / "workflows" / "fresh" / "SKILL.md").is_file()
     assert (tmp_path / ".claude" / "skills" / "fresh" / "SKILL.md").is_file()
+
+
+def test_refresh_scans_and_updates(tmp_path, monkeypatch):
+    import medulla.cli as shim
+    # stale workflow deploy (+ a run to preserve) and stale SKILL.md copy
+    wf = tmp_path / "projA" / ".medulla" / "workflows" / "spar"
+    (wf / "runs" / "old").mkdir(parents=True)
+    wf.joinpath("workflow.yaml").write_text("STALE", encoding="utf-8")
+    wf.joinpath("runs", "old", "keep").write_text("x", encoding="utf-8")
+    sk = tmp_path / "projB" / ".claude" / "skills" / "spar"
+    sk.mkdir(parents=True)
+    sk.joinpath("SKILL.md").write_text("STALE", encoding="utf-8")
+    pruned = tmp_path / "projC" / "node_modules" / "x" / ".claude" / "skills" / "spar"
+    pruned.mkdir(parents=True)
+    pruned.joinpath("SKILL.md").write_text("PRUNED", encoding="utf-8")
+    # grandparent traps: same-named dirs NOT owned by medulla must be left alone
+    foreign_wf = tmp_path / "other" / "workflows" / "spar"           # no .medulla grandparent
+    foreign_wf.mkdir(parents=True)
+    foreign_wf.joinpath("workflow.yaml").write_text("FOREIGN", encoding="utf-8")
+    foreign_sk = tmp_path / "other2" / "config" / "skills" / "spar"  # grandparent not .claude/.agents/.opencode
+    foreign_sk.mkdir(parents=True)
+    foreign_sk.joinpath("SKILL.md").write_text("FOREIGN", encoding="utf-8")
+
+    monkeypatch.setattr("sys.argv", ["medulla", "refresh", "spar", str(tmp_path)])
+    assert shim.entry() == 0
+    assert wf.joinpath("workflow.yaml").read_text() != "STALE"        # workflow refreshed
+    assert wf.joinpath("runs", "old", "keep").is_file()              # runs preserved
+    assert sk.joinpath("SKILL.md").read_text() != "STALE"           # SKILL.md refreshed
+    assert pruned.joinpath("SKILL.md").read_text() == "PRUNED"      # node_modules pruned
+    assert foreign_wf.joinpath("workflow.yaml").read_text() == "FOREIGN"   # grandparent gate
+    assert foreign_sk.joinpath("SKILL.md").read_text() == "FOREIGN"        # grandparent gate
+
+    # --dry-run touches nothing
+    sk.joinpath("SKILL.md").write_text("STALE2", encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["medulla", "refresh", "spar", str(tmp_path), "--dry-run"])
+    assert shim.entry() == 0
+    assert sk.joinpath("SKILL.md").read_text() == "STALE2"          # dry-run: unchanged
+
+    # no folder -> refuses with a clear error
+    monkeypatch.setattr("sys.argv", ["medulla", "refresh", "spar"])
+    assert shim.entry() == 1
+
+
+def test_refresh_never_clobbers_through_symlink(tmp_path):
+    # CWE-59: a booby-trapped deploy (a bundle-path file symlinked to a victim
+    # OUTSIDE the deploy) must not be written through — the victim stays intact.
+    from medulla.init import refresh_skill
+    victim = tmp_path / "victim.txt"
+    victim.write_text("SECRET", encoding="utf-8")
+    wf = tmp_path / "proj" / ".medulla" / "workflows" / "spar"
+    wf.mkdir(parents=True)
+    (wf / "workflow.yaml").symlink_to(victim)        # deploy's workflow.yaml -> victim
+    assert refresh_skill("spar", str(tmp_path)) == 0
+    assert victim.read_text() == "SECRET"            # NOT clobbered
+    assert (wf / "workflow.yaml").is_symlink()        # symlink left untouched

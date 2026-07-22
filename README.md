@@ -33,6 +33,9 @@ medulla -w .medulla/workflows/my-pipe --run <dir>      # continue a specific run
 medulla -w .medulla/workflows/my-pipe --validate       # load + validate only
 medulla --docker -w .medulla/workflows/my-pipe         # run inside the workflow's Docker image
 medulla upgrade                                        # re-runs the installer (pipx installs: pipx upgrade)
+medulla refresh spar ~/Projects [--depth N] [--dry-run] # after upgrade: re-sync every deployed spar copy
+                                                       # under a folder to the current bundle (workflow +
+                                                       # SKILL.md; only medulla-owned .medulla/… & */skills/…)
 medulla --help                                         # the full env/signal reference, always current
 ```
 
