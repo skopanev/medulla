@@ -143,13 +143,36 @@ nodes:
 """, encoding="utf-8")
     work = tmp_path / "work"
     work.mkdir()
-    cli_dir = str((tmp_path / "..").resolve())
     proc = subprocess.Popen(
         [sys.executable, "-m", "medulla.v2.cli", "-w", str(pdir)],
         cwd=work, env={**os.environ,
                        "PYTHONPATH": str(Path(__file__).resolve().parent.parent)},
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(2.5)                              # engine boots, sleep-child starts
+
+    # capture THIS run's descendant PIDs (the sleep child) — identity, not a
+    # string match: collision-free (an unrelated `sleep 30…` on the box can't
+    # fool it) and portable (no shell builtins).
+    def _descendants(pid):
+        kids = subprocess.run(["pgrep", "-P", str(pid)],
+                              capture_output=True).stdout.decode().split()
+        out = []
+        for k in kids:
+            out.append(int(k))
+            out += _descendants(int(k))
+        return out
+
+    def _alive(pid):
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+
+    child_pids = _descendants(proc.pid)
+    assert child_pids                            # the sleep child is actually running
     proc.terminate()                             # SIGTERM
     rc = proc.wait(timeout=15)
     assert rc == 130
@@ -157,9 +180,7 @@ nodes:
     outcome = json.loads((run / "outcome.json").read_text())
     assert outcome["outcome"] == "interrupted"
     time.sleep(1)
-    sleepers = subprocess.run(["pgrep", "-f", "sleep 30"],
-                              capture_output=True).stdout.decode().split()
-    assert not sleepers                          # no orphaned children
+    assert not [p for p in child_pids if _alive(p)]   # no orphaned children
 
 
 def test_dotenv_reaches_bodies_but_not_vars(tmp_path):
