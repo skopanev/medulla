@@ -362,6 +362,12 @@ def build_volumes(claude_home, mount_agy=True):
     if ntk_dir.is_dir():
         add(ntk_dir.resolve(), "/home/medulla/.config/ntk", ro=True)
 
+    # hltm token-broker config for the in-image `cx` codex wrapper (optional):
+    # mounted only when present, so non-broker installs are unaffected.
+    broker_dir = home / ".config" / "hltm-broker"
+    if broker_dir.is_dir():
+        add(broker_dir.resolve(), "/home/medulla/.config/hltm-broker", ro=True)
+
     opencode_auth = home / ".local" / "share" / "opencode" / "auth.json"
     if opencode_auth.exists():
         add(opencode_auth.resolve(), "/mnt/opencode-auth.json", ro=True)
