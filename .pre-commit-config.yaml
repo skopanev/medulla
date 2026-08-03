@@ -1,0 +1,26 @@
+# Pre-commit gates. Activate once per clone:  pre-commit install
+# (install the framework first:  pipx install pre-commit  — or  pip install pre-commit)
+#
+# Two gates:
+#   1. ruff  — lint + import hygiene, auto-fixing what it safely can (a first
+#      commit that triggers a fix "fails", writes the fix, you re-stage + commit).
+#   2. file-loc — the 250-LOC-of-code-per-file budget (blanks + comments excluded),
+#      scoped to the PACKAGE (cli-agent/medulla). Tests and one-off scripts grow
+#      legitimately and are out of scope. The four modules already over budget are
+#      grandfathered in the script; every other package module must stay under it.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.1
+    hooks:
+      - id: ruff
+        name: ruff (lint + auto-fix)
+        args: [--fix, --config, ruff.toml]
+        files: ^cli-agent/.*\.py$
+
+  - repo: local
+    hooks:
+      - id: file-loc
+        name: file LOC budget (<=250 code lines)
+        entry: python3 cli-agent/scripts/check_file_loc.py
+        language: system
+        files: ^cli-agent/medulla/.*\.py$
