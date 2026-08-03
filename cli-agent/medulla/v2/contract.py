@@ -14,7 +14,7 @@ from .model import (
     Action, AgentSpec, Defaults, InputsSpec, Node, Workflow, Pool,
     BOOLEAN_TRAP_NAMES, CHANNEL_SIGNALS, DEFAULTS_ALLOWED_KEYS, ENGINE_FACTS,
     ENV_BLACKLIST_EXACT, ENV_BLACKLIST_PREFIX, SIG_DONE, TERMINALS,
-    DEFAULT_WORKFLOW_TIMEOUT, DEFAULT_SOURCE_TIMEOUT,
+    DEFAULT_WORKFLOW_TIMEOUT, DEFAULT_SOURCE_TIMEOUT, SANDBOX_LEVELS,
 )
 
 DUNDER_RE = re.compile(r"^__.*__$")
@@ -63,11 +63,17 @@ def _parse_agent(raw, where: str) -> AgentSpec:
         args = raw.get("args", [])
         if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
             raise _err(f"{where}: agent.args must be a list of strings")
+        sandbox = _opt_str(raw.get("sandbox"), f"{where}: agent.sandbox")
+        # A literal level is checked here so a typo fails --validate, not mid-run.
+        # A templated value (harness/model/effort do the same) can only resolve after
+        # render, so it defers to the build-time check in harness._read_only.
+        if sandbox and "{{" not in sandbox and sandbox not in SANDBOX_LEVELS:
+            raise _err(f"{where}: agent.sandbox: {sandbox!r} is not one of {list(SANDBOX_LEVELS)}")
         return AgentSpec(
             harness=harness.strip(),
             model=_opt_str(raw.get("model"), f"{where}: agent.model"),
             effort=_opt_str(raw.get("effort"), f"{where}: agent.effort"),
-            sandbox=_opt_str(raw.get("sandbox"), f"{where}: agent.sandbox"),
+            sandbox=sandbox,
             args=args,
         )
     raise _err(f"{where}: agent must be a string (harness shortcut) or a mapping")
