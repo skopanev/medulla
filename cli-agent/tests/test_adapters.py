@@ -329,3 +329,61 @@ def test_claude_fatal_error_signature():
     hard_fail = json.dumps({"type": "result", "is_error": True,
                             "result": "server overloaded"})
     assert a.fatal_error(hard_fail) is None    # transient errors stay retryable
+
+
+# ── sandbox: read-only maps to each CLI's native lock ───────────────────────
+
+def test_claude_sandbox_read_only_is_plan_mode(tmp_path):
+    a = H.ClaudeAdapter.__new__(H.ClaudeAdapter)
+    inv = a.build(AgentSpec(harness="claude-code", sandbox="read-only"),
+                  tmp_path / "p.md", "P", 60)
+    i = inv.argv.index("--permission-mode")
+    assert inv.argv[i + 1] == "plan"
+    assert "--dangerously-skip-permissions" not in inv.argv
+
+
+def test_claude_sandbox_danger_is_skip_permissions(tmp_path):
+    a = H.ClaudeAdapter.__new__(H.ClaudeAdapter)
+    for spec in (AgentSpec(harness="claude-code"),                      # default
+                 AgentSpec(harness="claude-code", sandbox="danger")):
+        inv = a.build(spec, tmp_path / "p.md", "P", 60)
+        assert "--dangerously-skip-permissions" in inv.argv
+        assert "--permission-mode" not in inv.argv
+
+
+def test_codex_sandbox_read_only(tmp_path):
+    a = H.CodexAdapter.__new__(H.CodexAdapter)
+    inv = a.build(AgentSpec(harness="codex", sandbox="read-only"),
+                  tmp_path / "p.md", "P", 60)
+    i = inv.argv.index("-s")
+    assert inv.argv[i + 1] == "read-only"
+    assert "--dangerously-bypass-approvals-and-sandbox" not in inv.argv
+
+
+def test_opencode_sandbox_read_only_denies_writes(tmp_path):
+    # opencode has no read-only flag — the config is the only lever. bash is
+    # denied too: a shell is a write primitive.
+    a = H.OpenCodeAdapter.__new__(H.OpenCodeAdapter)
+    inv = a.build(AgentSpec(harness="opencode", model="zai/glm-5.2", sandbox="read-only"),
+                  tmp_path / "p.md", "P", 60)
+    perm = json.loads(inv.env["OPENCODE_CONFIG_CONTENT"])["permission"]
+    assert perm == {"edit": "deny", "write": "deny", "patch": "deny", "bash": "deny"}
+
+
+def test_agy_sandbox_read_only_is_e_harness(tmp_path):
+    # agy has only a boolean --sandbox (terminal restrictions), which cannot
+    # stop writes — asking for read-only must fail loudly, not downgrade
+    a = H.AgyAdapter.__new__(H.AgyAdapter)
+    with pytest.raises(EngineCrash) as exc:
+        a.build(AgentSpec(harness="agy", sandbox="read-only"), tmp_path / "p.md", "P", 60)
+    assert exc.value.code == "E_HARNESS" and "not expressible" in exc.value.message
+
+
+def test_sandbox_unknown_value_is_e_harness(tmp_path):
+    # the build-time backstop for a value that got past load (e.g. a template
+    # that rendered to a typo)
+    a = H.ClaudeAdapter.__new__(H.ClaudeAdapter)
+    with pytest.raises(EngineCrash) as exc:
+        a.build(AgentSpec(harness="claude-code", sandbox="readonly"),
+                tmp_path / "p.md", "P", 60)
+    assert exc.value.code == "E_HARNESS" and "not one of" in exc.value.message

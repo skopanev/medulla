@@ -52,7 +52,6 @@ class Action:
     shell: str | None = None
     agent: AgentSpec | None = None
     prompt: str | None = None
-    prompt_file: str | None = None      # templated path; its CONTENT is appended to prompt
     timeout: int | None = None          # per attempt; None -> defaults -> 1800
     max_attempts: int | None = None     # per runner; None -> defaults -> 1
     ignore_exit_code: bool | None = None

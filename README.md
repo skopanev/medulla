@@ -161,7 +161,7 @@ Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-fil
 | Template | Meaning |
 |---|---|
 | `{{var:KEY}}`, `{{var:KEY:-default}}` | workflow variable, with optional default |
-| `{{file:path}}` | file inclusion, recursive (depth ≤ 10); relative paths resolve against the **including file** |
+| `{{file:path}}` | file inclusion, recursive (depth ≤ 10); relative paths resolve against the **including file**. The path may contain `{{var:…}}` / `{{input…}}`, so a pool can include one file per input — only the path is substituted, never the included content |
 | `{{input}}` | the pool input; objects render as compact JSON |
 | `{{input.a.b:-default}}` | dot-walk into object inputs; missing field without default = render error |
 | `{{input_index}}` / `{{input_count}}` | 1-based position / total |
@@ -328,7 +328,6 @@ Action (exactly one of `shell` / `agent`):
 | `shell` | shell command; its config *is* the command. `prompt` here is a validation error |
 | `agent` | `{harness, model, effort, sandbox, args}` — one entity, one block. Scalar shortcut: `agent: codex`. `sandbox` is `danger` (default — the container is the sandbox) or `read-only` (deny file writes). `args` is a raw CLI escape hatch — non-portable across harnesses |
 | `prompt` | agent input (not config); every scalar action field is a template. The engine appends the signal protocol automatically — name signals in words; literal tags are allowed (see Signals) |
-| `prompt_file` | a path whose CONTENT is appended to the prompt. Unlike `{{file:}}` the path is a TEMPLATE, so a pool can name one file per input — file inclusion runs before input substitution, so a per-input path cannot be written there. Use it when the payload is too big to carry in the input (inputs are exported to the environment, and argv+env share a ~1 MB ceiling) or when the step is `sandbox: read-only` and the model therefore cannot read it itself |
 | `timeout` | per **attempt**, seconds |
 | `max_attempts` | attempts per runner, default 1. Primary gets N, then fallback gets N |
 | `fallback` | alternate agent action after primary attempts are exhausted. Agent-only; a fallback has no fallback |

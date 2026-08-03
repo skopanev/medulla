@@ -95,3 +95,42 @@ def test_last_tokens(tmp_path):
 
 def test_last_empty_when_no_history(tmp_path):
     assert render("[{{last.message}}]", tmp_path, {}) == "[]"
+
+
+# ── {{file:}} paths carry var/input tokens (a pool includes one file per input) ─
+
+def test_file_path_from_var(tmp_path):
+    (tmp_path / "alpha.md").write_text("A", encoding="utf-8")
+    assert render("{{file:{{var:F}}}}", tmp_path, {"F": "alpha.md"}) == "A"
+
+
+def test_file_path_from_scalar_input(tmp_path):
+    (tmp_path / "beta.md").write_text("B", encoding="utf-8")
+    out = render("{{file:{{input}}}}", tmp_path, {}, input_value="beta.md", has_input=True)
+    assert out == "B"
+
+
+def test_file_path_from_input_field(tmp_path):
+    (tmp_path / "gamma.md").write_text("G", encoding="utf-8")
+    out = render("{{file:{{input.name}}}}", tmp_path, {},
+                 input_value={"name": "gamma.md"}, has_input=True)
+    assert out == "G"
+
+
+def test_file_path_static_still_works(tmp_path):
+    (tmp_path / "t.md").write_text("T", encoding="utf-8")
+    assert render("x {{file:t.md}} y", tmp_path, {}) == "x T y"
+
+
+def test_file_path_rendered_empty_raises(tmp_path):
+    # a path that renders to nothing is a bug, not a silent no-op
+    with pytest.raises(RenderError, match="rendered empty"):
+        render("{{file:{{var:F:-}}}}", tmp_path, {})
+
+
+def test_file_path_value_is_inert(tmp_path):
+    # the law holds for the PATH too: a value that looks like a token is not
+    # re-expanded — it can name a file the author chose, never become one
+    (tmp_path / "real.md").write_text("R", encoding="utf-8")
+    with pytest.raises(RenderError, match="not found"):
+        render("{{file:{{var:F}}}}", tmp_path, {"F": "{{var:G}}", "G": "real.md"})

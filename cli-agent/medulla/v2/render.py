@@ -1,7 +1,8 @@
 """Two-phase render. Law: files are code, values are data.
 
 Phase 1: {{file:path}} inclusion — recursive (depth <= 10, exceeding = error with the
-chain), relative paths resolve against the INCLUDING file's directory, paths static.
+chain), relative paths resolve against the INCLUDING file's directory. The path may
+carry var/input tokens, so a pool can include one file per input.
 Phase 2: ONE simultaneous pass over the expanded text for var/input/last tokens.
 Substituted values are never re-scanned (inert — injection-safe by construction).
 """
@@ -15,7 +16,8 @@ from .errors import EngineCrash, E_RENDER
 
 MAX_INCLUDE_DEPTH = 10
 
-FILE_RE = re.compile(r"\{\{file:([^}]+)\}\}")
+# the path itself may hold {{var:...}} / {{input...}}, hence one level of nesting
+FILE_RE = re.compile(r"\{\{file:((?:[^{}]|\{\{[^{}]*\}\})+)\}\}")
 # one alternation = one simultaneous pass; values stay inert
 TOKEN_RE = re.compile(
     r"\{\{var:(?P<var>[A-Za-z][A-Za-z0-9_]*)(?::-(?P<vdef>[^}]*))?\}\}"
@@ -31,17 +33,34 @@ class RenderError(Exception):
     or to a per-input failure (pool input) — the split lives in the engine, not here."""
 
 
-def expand_files(text: str, base_dir: Path, _depth: int = 0, _chain: tuple[str, ...] = ()) -> str:
+def expand_files(text: str, base_dir: Path, _depth: int = 0, _chain: tuple[str, ...] = (),
+                 sub=None) -> str:
+    """Include {{file:...}} targets, resolving tokens in the PATH first.
+
+    Mind what is substituted: the path EXPRESSION, which the workflow author wrote, and
+    nothing else. The included content is scanned for further includes exactly as before
+    and never for values; phase 2 still leaves substituted values inert. So the law holds
+    — a value can name a file the author already decided to read, it cannot become one.
+
+    This is what lets a pool feed one file per input. Carrying the payload in the input
+    instead dies at ~1 MB (inputs are exported to the environment, and argv+env share that
+    ceiling), and telling the model to read the file itself both extracts less and is
+    impossible under sandbox: read-only.
+    """
     if _depth > MAX_INCLUDE_DEPTH:
         raise RenderError(f"file inclusion deeper than {MAX_INCLUDE_DEPTH}: {' -> '.join(_chain)}")
 
     def repl(m: re.Match) -> str:
         rel = m.group(1).strip()
+        if sub is not None and "{{" in rel:
+            rel = sub(rel).strip()
+            if not rel:
+                raise RenderError("{{file:}} path rendered empty")
         target = (base_dir / rel).resolve()
         if not target.is_file():
             raise RenderError(f"included file not found: {rel} (from {base_dir})")
         content = target.read_text(encoding="utf-8")
-        return expand_files(content, target.parent, _depth + 1, _chain + (rel,))
+        return expand_files(content, target.parent, _depth + 1, _chain + (rel,), sub)
 
     return FILE_RE.sub(repl, text)
 
@@ -75,7 +94,6 @@ def render(
     last: dict | None = None,
 ) -> str:
     """Render a code field (node prompt/shell/hook). Raises RenderError on broken refs."""
-    text = expand_files(text, base_dir)
 
     def repl(m: re.Match) -> str:
         if m.group("var") is not None:
@@ -110,4 +128,6 @@ def render(
             raise RenderError(f"input field '{dotted}' is missing and has no default")
         return _scalar(value)
 
+    # phase 1 needs the same substituter, to resolve tokens inside {{file:}} paths
+    text = expand_files(text, base_dir, sub=lambda t: TOKEN_RE.sub(repl, t))
     return TOKEN_RE.sub(repl, text)

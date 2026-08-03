@@ -562,27 +562,6 @@ class Engine:
         adapter.prepare(rendered_spec, self.workdir)   # idempotent preflight (agy trust, opencode.json)
         if action.prompt is not None:
             prompt_text = render_fn(action.prompt, "prompt")
-            # prompt_file: the engine reads the file and appends its text. The PATH is a
-            # template (so a pool can name one file per input) while `{{file:}}` is not —
-            # file inclusion runs before input substitution, so a per-input path cannot
-            # be expressed there.
-            #
-            # This exists because the alternatives both fail on real payloads. Carrying
-            # the text in the input hits `[Errno 7] Argument list too long`: the input is
-            # exported to the environment, and argv+env share a ~1 MB ceiling. Telling
-            # the model to read the file itself works, but costs quality (the material
-            # arrives through a tool call instead of in front of it) and is impossible
-            # under `sandbox: read-only`, where the read is blocked by design.
-            #
-            # Reading it here keeps the payload out of the environment entirely and off
-            # the model's tool path: it arrives as prompt text, on stdin, unbounded.
-            if action.prompt_file is not None:
-                pf = render_fn(action.prompt_file, "prompt_file")
-                try:
-                    extra = (self.workdir / pf).read_text(encoding="utf-8", errors="replace")
-                except OSError as e:
-                    raise EngineCrash(E_RENDER, f"prompt_file: cannot read {pf!r}: {e}")
-                prompt_text = f"{prompt_text}\n{extra}"
         elif inherited_prompt is not None:
             prompt_text = inherited_prompt      # fallback reuses the primary's rendered prompt
         else:

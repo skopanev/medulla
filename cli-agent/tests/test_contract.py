@@ -309,3 +309,35 @@ nodes:
     pool = p.nodes["b"].pool
     assert pool.max_parallel is None and pool.min_success == 2
     assert pool.inputs.shell == "echo x" and pool.inputs.shell_timeout == 5
+
+
+# ── sandbox: enum validated at load, like every other agent field ────────────
+
+AGENT = """
+version: "2"
+start: a
+nodes:
+  a:
+    agent: {harness: codex%s}
+    prompt: "p"
+    on_signal: {ok: __exit_ok__}
+"""
+
+
+def test_sandbox_typo_rejected_at_load(tmp_path):
+    # the whole point: a literal typo fails --validate, not mid-run
+    msg = load_err(tmp_path, AGENT % ", sandbox: readonly")
+    assert "sandbox" in msg and "read-only" in msg
+
+
+def test_sandbox_valid_levels_load(tmp_path):
+    for level in ("read-only", "danger"):
+        p = load_workflow(write(tmp_path, AGENT % f", sandbox: {level}"))
+        assert p.nodes["a"].action.agent.sandbox == level
+
+
+def test_sandbox_templated_value_deferred(tmp_path):
+    # a template can only resolve after render — load must not reject it (it
+    # defers to the build-time _read_only check, like harness/model/effort)
+    p = load_workflow(write(tmp_path, AGENT % ', sandbox: "{{var:SB}}"'))
+    assert p.nodes["a"].action.agent.sandbox == "{{var:SB}}"
