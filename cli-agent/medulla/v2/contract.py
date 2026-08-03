@@ -106,6 +106,8 @@ def _parse_action(raw: dict, where: str, allow_fallback: bool = True,
     # a fallback may omit prompt (inherits the primary's rendered text)
     if has_agent and not is_fallback and not isinstance(raw.get("prompt"), str):
         raise _err(f"{where}: agent actions require 'prompt'")
+    if has_shell and "prompt_file" in raw:
+        raise _err(f"{where}: prompt_file belongs to an agent, not a shell body")
     if has_shell and "prompt" in raw:
         raise _err(f"{where}: 'prompt' belongs to agent actions only")
     if has_shell and (not isinstance(raw["shell"], str) or not raw["shell"].strip()):
@@ -134,6 +136,7 @@ def _parse_action(raw: dict, where: str, allow_fallback: bool = True,
         shell=raw.get("shell"),
         agent=_parse_agent(raw["agent"], where) if has_agent else None,
         prompt=_opt_str(raw.get("prompt"), f"{where}: prompt"),
+        prompt_file=_opt_str(raw.get("prompt_file"), f"{where}: prompt_file"),
         timeout=_opt_int(raw.get("timeout"), f"{where}: timeout"),
         max_attempts=_opt_int(raw.get("max_attempts"), f"{where}: max_attempts"),
         ignore_exit_code=ignore,
@@ -169,7 +172,7 @@ def _parse_inputs(raw, where: str) -> InputsSpec:
 
 
 NODE_KEYS = {
-    "shell", "agent", "prompt", "timeout", "max_attempts", "ignore_exit_code", "fallback",
+    "shell", "agent", "prompt", "prompt_file", "timeout", "max_attempts", "ignore_exit_code", "fallback",
     "inputs", "max_parallel", "min_success", "pre", "post", "on_signal",
 }
 

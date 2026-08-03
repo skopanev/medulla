@@ -328,6 +328,7 @@ Action (exactly one of `shell` / `agent`):
 | `shell` | shell command; its config *is* the command. `prompt` here is a validation error |
 | `agent` | `{harness, model, effort, sandbox, args}` — one entity, one block. Scalar shortcut: `agent: codex`. `sandbox` is `danger` (default — the container is the sandbox) or `read-only` (deny file writes). `args` is a raw CLI escape hatch — non-portable across harnesses |
 | `prompt` | agent input (not config); every scalar action field is a template. The engine appends the signal protocol automatically — name signals in words; literal tags are allowed (see Signals) |
+| `prompt_file` | a path whose CONTENT is appended to the prompt. Unlike `{{file:}}` the path is a TEMPLATE, so a pool can name one file per input — file inclusion runs before input substitution, so a per-input path cannot be written there. Use it when the payload is too big to carry in the input (inputs are exported to the environment, and argv+env share a ~1 MB ceiling) or when the step is `sandbox: read-only` and the model therefore cannot read it itself |
 | `timeout` | per **attempt**, seconds |
 | `max_attempts` | attempts per runner, default 1. Primary gets N, then fallback gets N |
 | `fallback` | alternate agent action after primary attempts are exhausted. Agent-only; a fallback has no fallback |
