@@ -24,8 +24,8 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .errors import EngineCrash, E_HARNESS, E_INTERNAL
-from .model import AgentSpec, SANDBOX_LEVELS
+from .errors import E_HARNESS, EngineCrash
+from .model import SANDBOX_LEVELS, AgentSpec
 
 
 def _read_only(spec: AgentSpec) -> bool:

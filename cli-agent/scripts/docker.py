@@ -13,7 +13,6 @@ import os
 import signal
 import subprocess
 import sys
-import termios
 import uuid
 from pathlib import Path
 
@@ -395,7 +394,10 @@ def _mount_init_docker(vols: list) -> None:
 
 
 def _mount_agy_keys(vols: list) -> None:
-    import platform, subprocess, tempfile, atexit
+    import atexit
+    import platform
+    import subprocess
+    import tempfile
     if platform.system() != "Darwin":
         return
 
@@ -539,7 +541,8 @@ def main():
     global env_file_for_run
     dotenv = _collect_dotenv(workflow)
     if dotenv:
-        import atexit, tempfile
+        import atexit
+        import tempfile
         fd, env_file_for_run = tempfile.mkstemp(prefix="medulla-env-")
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w") as f:

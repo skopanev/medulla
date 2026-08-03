@@ -55,7 +55,7 @@ class Action:
     timeout: int | None = None          # per attempt; None -> defaults -> 1800
     max_attempts: int | None = None     # per runner; None -> defaults -> 1
     ignore_exit_code: bool | None = None
-    fallback: "Action | None" = None    # agent-only; a fallback has no fallback
+    fallback: Action | None = None    # agent-only; a fallback has no fallback
 
     @property
     def kind(self) -> str:

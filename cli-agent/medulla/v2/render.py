@@ -12,8 +12,6 @@ import json
 import re
 from pathlib import Path
 
-from .errors import EngineCrash, E_RENDER
-
 MAX_INCLUDE_DEPTH = 10
 
 # the path itself may hold {{var:...}} / {{input...}}, hence one level of nesting

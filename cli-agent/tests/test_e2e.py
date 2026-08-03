@@ -2,7 +2,6 @@
 import json
 
 import pytest
-
 from medulla.v2.engine import run_workflow
 
 

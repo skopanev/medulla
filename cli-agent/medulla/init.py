@@ -269,7 +269,6 @@ def bundled_templates() -> list[str]:
 
 def deploy_template(name: str) -> int:
     """Copy a bundled workflow (template) into the project."""
-    import shutil
     dest = Path(".medulla") / "workflows" / name
     existed = (dest / "workflow.yaml").exists()   # overwrite by default: re-deploy
                                                   # refreshes template files; runs/ is

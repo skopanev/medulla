@@ -61,7 +61,7 @@ class RunStore:
             self._lock_fd = None
 
     @classmethod
-    def create(cls, workflow_dir: Path, config_text: str, run_id: str | None = None) -> "RunStore":
+    def create(cls, workflow_dir: Path, config_text: str, run_id: str | None = None) -> RunStore:
         run_id = run_id or os.environ.get("MEDULLA_RUN_ID", "").strip() or uuid.uuid4().hex[:8]
         ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         run_dir = workflow_dir / "runs" / f"{ts}-{run_id}"
@@ -73,7 +73,7 @@ class RunStore:
         return store
 
     @classmethod
-    def open(cls, run_dir: Path) -> "RunStore":
+    def open(cls, run_dir: Path) -> RunStore:
         """Reopen an existing run for resume. run_id comes from the dir name."""
         run_dir = Path(run_dir)
         if not config_yaml(run_dir).is_file():

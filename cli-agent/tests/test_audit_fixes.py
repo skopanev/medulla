@@ -7,7 +7,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from medulla.v2 import harness as H
 from medulla.v2.procrun import run as proc_run
 

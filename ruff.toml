@@ -1,25 +1,23 @@
-# ruff — the "eslint for Python". Lint + import hygiene for the medulla package.
-# Run: ruff check cli-agent/    (add --fix to auto-apply the safe fixes)
-#
-# The file-length budget (250 LOC of code, blanks + comments excluded) is NOT a
-# ruff rule — ruff has no per-file line cap — it lives in scripts/check_file_loc.py
-# and is wired through pre-commit alongside this config.
+# ruff — the linter for the medulla package ("eslint for Python", faster).
+# Run:  ruff check cli-agent/          (add --fix to apply the safe fixes)
+#       ruff check cli-agent/ --watch  (while iterating)
 
 target-version = "py310"
-line-length = 120           # a ceiling, not the 250 file-LOC budget — different axis
+line-length = 120
 extend-exclude = ["venv", ".opencode", "**/__pycache__"]
 
 [lint]
-# Start honest and enforceable: pyflakes (real bugs — unused/undefined names),
-# a slice of pycodestyle, import sorting, and pyupgrade. The judgement-heavy
-# families (bandit S, blind-except BLE, datetimez DTZ) are left OUT on purpose so
-# the gate flags facts, not taste — widen the select in a dedicated cleanup pass.
+# Facts, not taste. pyflakes (F) is the real-bug core — unused/undefined names;
+# I sorts imports; UP modernizes; E4/E9 guard import placement + syntax. The
+# statement-style family (E7 — deliberate semicolons and one-letter names here)
+# and judgement-heavy S/BLE/DTZ/B904 are left out on purpose: this codebase makes
+# those choices deliberately. Widen the select in a dedicated pass if you want.
 select = ["E4", "E9", "F", "I", "UP"]
 ignore = [
-    "E501",   # line length is handled by the formatter, not a hard fail
-    "E402",   # imports deliberately placed after module constants (harness.py) — author's call
+    "E501",   # line length: the formatter's job, not a hard fail
+    "E402",   # imports deliberately placed after module constants (harness.py)
 ]
 
 [lint.per-file-ignores]
-# tests lean on fixtures and star-ish imports; don't nag them about unused names
+# tests lean on fixtures; unused/redefined names there are noise, not bugs
 "cli-agent/tests/**" = ["F401", "F811"]

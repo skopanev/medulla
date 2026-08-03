@@ -13,22 +13,40 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .signals import extract_signals
 from .classify import Move, Verdict, classify_attempt, next_move
-from .contract import load_workflow, VAR_NAME_RE
+from .contract import VAR_NAME_RE, load_workflow
 from .errors import (
-    EngineCrash, E_DEADLINE, E_HARNESS, E_INPUTS, E_INPUTS_LIMIT, E_INTERNAL,
-    E_RENDER, E_VALIDATION,
+    E_DEADLINE,
+    E_HARNESS,
+    E_INPUTS,
+    E_INPUTS_LIMIT,
+    E_INTERNAL,
+    E_RENDER,
+    E_VALIDATION,
+    EngineCrash,
 )
 from .harness import resolve as resolve_harness
 from .model import (
-    Action, CHANNEL_SIGNALS, ENGINE_FACTS, ENV_BLACKLIST_EXACT, ENV_BLACKLIST_PREFIX,
-    EXIT_FAIL, EXIT_OK, HOOK_TIMEOUT_S, INPUTS_HARD_CAP, Node, Workflow,
-    SIG_DEFAULT, SIG_DONE, SIG_EMPTY, SIG_FAILED, TERMINALS,
+    CHANNEL_SIGNALS,
+    ENGINE_FACTS,
+    ENV_BLACKLIST_EXACT,
+    ENV_BLACKLIST_PREFIX,
+    EXIT_OK,
+    HOOK_TIMEOUT_S,
+    INPUTS_HARD_CAP,
+    SIG_DEFAULT,
+    SIG_DONE,
+    SIG_EMPTY,
+    SIG_FAILED,
+    TERMINALS,
+    Action,
+    Node,
+    Workflow,
 )
 from .procrun import run as proc_run
 from .render import RenderError, render
 from .rundir import RunStore, config_yaml
+from .signals import extract_signals
 
 EXIT_CODE = {"succeeded": 0, "crashed": 1, "failed": 2, "interrupted": 130}
 
@@ -999,6 +1017,7 @@ def run_workflow(
     """Load, run, write outcome.json, return the process exit code (0/1/2/130)."""
     import signal as _signal
     import threading as _threading
+
     from .procrun import kill_live_processes
     from .rundir import RunLocked, prune_runs
     workdir = workdir or Path.cwd()

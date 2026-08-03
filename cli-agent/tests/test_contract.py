@@ -1,6 +1,5 @@
 """Validator matrix — every rejection is E_VALIDATION at load time."""
 import pytest
-
 from medulla.v2.contract import load_workflow
 from medulla.v2.errors import EngineCrash
 

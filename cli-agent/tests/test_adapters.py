@@ -5,7 +5,6 @@ import stat
 from pathlib import Path
 
 import pytest
-
 from medulla.v2 import harness as H
 from medulla.v2.errors import EngineCrash
 from medulla.v2.model import AgentSpec

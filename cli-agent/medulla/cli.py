@@ -50,8 +50,7 @@ def entry() -> int:
         return refresh_skill(name, pos[1], **kw)
 
     if argv and argv[0] == "init":
-        from .init import (bundled_templates, deploy_template, install_skill_md,
-                           run_init, scaffold_workflow)
+        from .init import bundled_templates, deploy_template, install_skill_md, run_init, scaffold_workflow
         args = [a for a in argv[1:] if not a.startswith("-")]
         want_skill = "--skill" in argv
         if not args:

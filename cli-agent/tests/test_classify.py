@@ -1,11 +1,13 @@
 """Exhaustive matrix for the pure classifier — the silent-failure surface (panel P2)."""
 import pytest
-
 from medulla.v2.classify import (
-    AttemptDecision, Move, Verdict, classify_attempt, next_move,
+    AttemptDecision,
+    Move,
+    Verdict,
+    classify_attempt,
+    next_move,
 )
 from medulla.v2.model import SIG_DEFAULT, SIG_FAILED
-
 
 # ── classify_attempt ─────────────────────────────────────────────────────────
 

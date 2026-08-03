@@ -1,6 +1,5 @@
 """Render laws: files are code, values are data; one inert pass; dot-walk rules."""
 import pytest
-
 from medulla.v2.render import RenderError, render
 
 
