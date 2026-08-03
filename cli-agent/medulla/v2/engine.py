@@ -550,12 +550,13 @@ class Engine:
         harness = render_fn(spec.harness, "agent.harness").strip()
         model = render_fn(spec.model, "agent.model", required=False) if spec.model else None
         effort = render_fn(spec.effort, "agent.effort", required=False) if spec.effort else None
+        sandbox = render_fn(spec.sandbox, "agent.sandbox", required=False) if spec.sandbox else None
         # an arg rendering empty is absent (never the literal template text back)
         args = [r for a in spec.args
                 if (r := render_fn(a, "agent.args", required=False)).strip()]
         from .model import AgentSpec
         rendered_spec = AgentSpec(harness=harness, model=model or None,
-                                  effort=effort or None, args=args)
+                                  effort=effort or None, sandbox=sandbox or None, args=args)
 
         adapter = resolve_harness(rendered_spec)
         adapter.prepare(rendered_spec, self.workdir)   # idempotent preflight (agy trust, opencode.json)

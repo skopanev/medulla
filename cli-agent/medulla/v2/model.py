@@ -34,11 +34,15 @@ ENV_BLACKLIST_PREFIX = ("LD_", "DYLD_", "PYTHON", "MEDULLA_")
 DEFAULTS_ALLOWED_KEYS = {"timeout", "max_attempts", "ignore_exit_code", "fallback", "on_signal"}
 
 
+SANDBOX_LEVELS = ("read-only", "danger")
+
+
 @dataclass
 class AgentSpec:
     harness: str
     model: str | None = None
     effort: str | None = None
+    sandbox: str | None = None          # "read-only"; None/"danger" -> today's behavior
     args: list[str] = field(default_factory=list)
 
 

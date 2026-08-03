@@ -25,7 +25,29 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .errors import EngineCrash, E_HARNESS, E_INTERNAL
-from .model import AgentSpec
+from .model import AgentSpec, SANDBOX_LEVELS
+
+
+def _read_only(spec: AgentSpec) -> bool:
+    """Does this step ask to be unable to write?
+
+    Default is off: under --docker the container IS the sandbox, and every workflow
+    written before this field existed relies on that. Tightening the default would
+    silently change them; a step that wants less power asks for less.
+
+    Worth having because "the container is the sandbox" stops being enough the moment
+    a workflow feeds the model UNTRUSTED text — mail, chat logs, scraped pages — while
+    the workspace is mounted read-write. Then the blast radius of an injected
+    instruction is exactly the data the pipeline exists to protect.
+
+    A typo raises instead of falling through: a sandbox quietly weaker than the one
+    asked for is the single failure this field exists to prevent.
+    """
+    sb = (spec.sandbox or "danger").strip()
+    if sb not in SANDBOX_LEVELS:
+        raise EngineCrash(E_HARNESS,
+                          f"agent.sandbox: {sb!r} is not one of {list(SANDBOX_LEVELS)}")
+    return sb == "read-only"
 
 REAL_HARNESSES = ("claude-code", "codex", "opencode", "agy")
 
@@ -125,7 +147,11 @@ class ClaudeAdapter(HarnessAdapter):
     binary = "claude"
 
     def build(self, spec, prompt_file, prompt_text, timeout_s):
-        argv = ["claude", "--dangerously-skip-permissions",
+        # sandbox → claude permission modes. `plan` is the only mode that refuses
+        # edits outright, so it is what read-only means here.
+        ro = _read_only(spec)
+        perm = ["--permission-mode", "plan"] if ro else ["--dangerously-skip-permissions"]
+        argv = ["claude", *perm,
                 "--output-format", "stream-json", "--verbose"]
         if spec.model:
             argv += ["--model", spec.model]
@@ -217,9 +243,14 @@ class CodexAdapter(HarnessAdapter):
     def build(self, spec, prompt_file, prompt_text, timeout_s):
         bin_ = shutil.which("cx") or "codex"    # cx refreshes the token via the broker
         inner_ms = (int(timeout_s) + INNER_SLACK_S) * 1000
-        argv = [bin_, "exec", "--json",
-                "--dangerously-bypass-approvals-and-sandbox",
-                "--skip-git-repo-check"]
+        # sandbox: codex has native modes, so this maps exactly. The historical
+        # default stays `danger` — the container IS the sandbox for most workflows,
+        # and tightening it silently would break every existing one.
+        ro = _read_only(spec)
+        argv = [bin_, "exec", "--json", "--skip-git-repo-check"]
+        argv.insert(3, "-s" if ro else "--dangerously-bypass-approvals-and-sandbox")
+        if ro:
+            argv.insert(4, "read-only")
         if spec.model:
             argv += ["-c", f'model="{spec.model}"']
         if spec.effort:
@@ -302,7 +333,15 @@ class OpenCodeAdapter(HarnessAdapter):
         # pools, and forced one shared config per workdir. The env layers on
         # top of any real project config and is naturally PER-INVOCATION —
         # heterogeneous per-input efforts now just work.
-        data: dict = {"$schema": "https://opencode.ai/config.json", "permission": "allow"}
+        # sandbox → opencode permissions. It has no read-only flag; the config is
+        # the only lever, so deny the tools that mutate. bash is denied for
+        # read-only because a shell is a write primitive.
+        ro = _read_only(spec)
+        # bash is denied too: a shell is a write primitive, so allowing it would make
+        # read-only a label rather than a constraint.
+        perm: object = ({"edit": "deny", "write": "deny", "patch": "deny", "bash": "deny"}
+                        if ro else "allow")
+        data: dict = {"$schema": "https://opencode.ai/config.json", "permission": perm}
         if spec.model and "/" in spec.model:
             provider, model_id = spec.model.split("/", 1)
             inner_ms = (int(timeout_s) + INNER_SLACK_S) * 1000
@@ -376,6 +415,15 @@ class AgyAdapter(HarnessAdapter):
                 f"\"trustedWorkspaces\" in {_AGY_SETTINGS}).")
 
     def build(self, spec, prompt_file, prompt_text, timeout_s):
+        # sandbox → agy. It offers one boolean (`--sandbox`, terminal restrictions)
+        # and cannot express read-only, so asking for it here is an error rather
+        # than a silent downgrade to something looser than requested.
+        if _read_only(spec):
+            raise EngineCrash(
+                E_HARNESS,
+                "harness 'agy': sandbox: read-only is not expressible — agy offers only a "
+                "boolean --sandbox (terminal restrictions), which does not stop file writes. "
+                "Use codex, claude-code or opencode for a read-only step.")
         argv = ["agy", "--dangerously-skip-permissions",
                 "--print-timeout", f"{int(timeout_s) + INNER_SLACK_S}s"]
         if spec.model:

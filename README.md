@@ -86,6 +86,8 @@ In agent prompts, naming the signal is enough — "emit the signal named done" �
 
 Harnesses: `claude-code`, `codex`, `opencode`, `agy`. `effort` maps to each CLI's native knob. `max_attempts` retries flaky attempts (non-zero exit, timeout, agent silence); `fallback` is a second agent tried after the primary's attempts are exhausted. While an agent works, its text streams live to your terminal (`MEDULLA_STREAM=0` to silence).
 
+`sandbox` restricts a step's power. Default is `danger` — under `--docker` the container *is* the sandbox and every workflow written before this field relies on that. Set `sandbox: read-only` when a step feeds the model **untrusted** text (mail, chat logs, scraped pages) while the workspace is mounted read-write: it maps to the harness's native lock — claude `--permission-mode plan`, codex `-s read-only`, opencode denies `edit`/`write`/`patch`/`bash` (a shell is a write primitive). `agy` cannot express read-only and raises rather than silently downgrade.
+
 ### Hooks: pre and post
 
 Shell around any body — the only way to put deterministic checks before/after an agent. Hooks get a fixed 60s timeout (deadline-clamped); they are one-line artifact tests, not workloads:
@@ -324,7 +326,7 @@ Action (exactly one of `shell` / `agent`):
 | Field | Meaning |
 |---|---|
 | `shell` | shell command; its config *is* the command. `prompt` here is a validation error |
-| `agent` | `{harness, model, effort, args}` — one entity, one block. Scalar shortcut: `agent: codex`. `args` is a raw CLI escape hatch — non-portable across harnesses |
+| `agent` | `{harness, model, effort, sandbox, args}` — one entity, one block. Scalar shortcut: `agent: codex`. `sandbox` is `danger` (default — the container is the sandbox) or `read-only` (deny file writes). `args` is a raw CLI escape hatch — non-portable across harnesses |
 | `prompt` | agent input (not config); every scalar action field is a template. The engine appends the signal protocol automatically — name signals in words; literal tags are allowed (see Signals) |
 | `timeout` | per **attempt**, seconds |
 | `max_attempts` | attempts per runner, default 1. Primary gets N, then fallback gets N |

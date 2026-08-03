@@ -57,7 +57,7 @@ def _parse_agent(raw, where: str) -> AgentSpec:
         harness = raw.get("harness")
         if not isinstance(harness, str) or not harness.strip():
             raise _err(f"{where}: agent.harness is required and must be a string")
-        unknown = set(raw) - {"harness", "model", "effort", "args"}
+        unknown = set(raw) - {"harness", "model", "effort", "sandbox", "args"}
         if unknown:
             raise _err(f"{where}: unknown agent fields: {sorted(unknown)}")
         args = raw.get("args", [])
@@ -67,6 +67,7 @@ def _parse_agent(raw, where: str) -> AgentSpec:
             harness=harness.strip(),
             model=_opt_str(raw.get("model"), f"{where}: agent.model"),
             effort=_opt_str(raw.get("effort"), f"{where}: agent.effort"),
+            sandbox=_opt_str(raw.get("sandbox"), f"{where}: agent.sandbox"),
             args=args,
         )
     raise _err(f"{where}: agent must be a string (harness shortcut) or a mapping")
