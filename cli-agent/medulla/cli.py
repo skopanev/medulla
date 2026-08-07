@@ -1,11 +1,12 @@
-"""`medulla` console entrypoint — the v2 engine plus the --docker exec boundary.
+"""`medulla` entrypoint — v2 engine plus direct container-runtime dispatch.
 
---docker re-invokes medulla inside the workflow's image (scripts/docker.py owns
-mounts/credentials); every other flag passes through to the v2 CLI untouched.
+--docker selects Docker, --apple selects Apple Container, and no runtime flag
+runs on the host. Every other flag passes through to the v2 CLI untouched.
 v1 is gone: this file is a thin shim, the engine lives in medulla.v2.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -14,10 +15,17 @@ from pathlib import Path
 def entry() -> int:
     argv = sys.argv[1:]
 
-    # documented subcommands (before any flag parsing)
+    if "--docker" in argv and "--apple" in argv:
+        print("error: --docker and --apple are mutually exclusive", file=sys.stderr)
+        return 1
+
     if argv and argv[0] == "refresh":
         from .init import bundled_templates, refresh_skill
         rest, pos, depth, dry = argv[1:], [], None, False
+        if "--help" in rest:
+            print("usage: medulla refresh <name> <root> [--depth N] [--dry-run]")
+            print("  rescans <root>, refreshes every medulla-owned workflow and skill copy")
+            return 0
         i = 0
         while i < len(rest):
             a = rest[i]
@@ -51,22 +59,52 @@ def entry() -> int:
 
     if argv and argv[0] == "init":
         from .init import bundled_templates, deploy_template, install_skill_md, run_init, scaffold_workflow
-        args = [a for a in argv[1:] if not a.startswith("-")]
-        want_skill = "--skill" in argv
-        if not args:
+        rest, pos, want_skill, want_apple = argv[1:], [], False, False
+        if "--help" in rest:
+            print("usage: medulla init <name> [--skill [--apple]]")
+            print("  deploy a bundled workflow or scaffold a new one")
+            print("  --skill registers SKILL.md with claude-code, codex, and opencode")
+            print("  --apple makes the installed skill use Apple Container")
+            print("          bundled Docker skills stay on Docker by default")
+            return 0
+        i = 0
+        while i < len(rest):
+            arg = rest[i]
+            if arg == "--skill":
+                want_skill = True
+            elif arg == "--apple":
+                want_apple = True
+            elif arg.startswith("-"):
+                print(f"error: unknown flag: {arg}", file=sys.stderr)
+                return 1
+            else:
+                pos.append(arg)
+            i += 1
+        if not pos:
             names = ", ".join(bundled_templates()) or "none bundled"
-            print("usage: medulla init <name> [--skill]", file=sys.stderr)
+            print("usage: medulla init <name> [--skill [--apple]]", file=sys.stderr)
             print(f"  a bundled template name deploys that template ({names});",
                   file=sys.stderr)
             print("  any other name scaffolds a new workflow;", file=sys.stderr)
             print("  --skill also registers SKILL.md with Claude Code", file=sys.stderr)
             return 1
+        if len(pos) != 1:
+            print("error: init accepts exactly one workflow name", file=sys.stderr)
+            return 1
+        if want_apple and not want_skill:
+            print("error: init --apple requires --skill", file=sys.stderr)
+            return 1
         run_init()                          # project runtime (.medulla/), idempotent
-        name = args[0]
-        rc = deploy_template(name) if name in bundled_templates()             else scaffold_workflow(name)
+        name = pos[0]
+        workflow_dir = Path(".medulla") / "workflows" / name
+        if want_skill and (workflow_dir / "workflow.yaml").is_file():
+            print(f"using existing workflow '{name}' -> {workflow_dir}/")
+            rc = 0
+        else:
+            rc = (deploy_template(name) if name in bundled_templates()
+                  else scaffold_workflow(name))
         if rc == 0 and want_skill:
-            from pathlib import Path as _P
-            rc = install_skill_md(name, _P(".medulla") / "workflows" / name)
+            rc = install_skill_md(name, workflow_dir, apple=want_apple)
         return rc
     if argv and argv[0] == "upgrade":
         # two install methods exist: install.sh (venv at ~/.medulla/engine;
@@ -91,16 +129,41 @@ def entry() -> int:
             return 1
         return subprocess.call([sys.executable, str(docker_py), *argv])
 
+    if "--apple" in argv:
+        argv = [a for a in argv if a != "--apple"]
+        if any(arg in ("-h", "--help") for arg in argv):
+            from .v2.cli import main
+            try:
+                return main(["--help"])
+            except SystemExit as exc:
+                return int(exc.code or 0)
+        runner = _find_script("apple_container.py")
+        if runner is None:
+            print("error: scripts/apple_container.py not found (run `medulla init`)",
+                  file=sys.stderr)
+            return 1
+        return _exec_runner(runner, argv)
+
     from .v2.cli import main
     return main(argv)
 
 
 def _find_docker_py() -> Path | None:
+    return _find_script("docker.py")
+
+
+def _exec_runner(runner: Path, argv: list[str]) -> int:
+    """Replace the shim so one process owns Apple runtime signal cleanup."""
+    os.execv(sys.executable, [sys.executable, str(runner), *argv])
+    return 1
+
+
+def _find_script(name: str) -> Path | None:
     here = Path(__file__).resolve().parent
     candidates = [
-        Path.cwd() / ".medulla" / "scripts" / "docker.py",
-        here.parent / "scripts" / "docker.py",   # source: cli-agent/scripts
-        here / "scripts" / "docker.py",          # installed: site-packages/medulla/scripts
+        Path.cwd() / ".medulla" / "scripts" / name,
+        here.parent / "scripts" / name,   # source: cli-agent/scripts
+        here / "scripts" / name,          # installed: site-packages/medulla/scripts
     ]
     for c in candidates:
         if c.is_file():

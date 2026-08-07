@@ -31,7 +31,7 @@ from .model import SANDBOX_LEVELS, AgentSpec
 def _read_only(spec: AgentSpec) -> bool:
     """Does this step ask to be unable to write?
 
-    Default is off: under --docker the container IS the sandbox, and every workflow
+    Default is off: in a container runtime the container IS the sandbox, and every workflow
     written before this field existed relies on that. Tightening the default would
     silently change them; a step that wants less power asks for less.
 
@@ -222,7 +222,7 @@ class ClaudeAdapter(HarnessAdapter):
                 if "Not logged in" in text or "Invalid API key" in text \
                         or "/login" in text:
                     return f"claude-code is not authenticated: {text!r} — " \
-                           f"run `claude /login` (in docker: keychain-bound OAuth " \
+                           f"run `claude /login` (in a container: keychain-bound OAuth " \
                            f"does not reach the container; use CLAUDE_CODE_OAUTH_TOKEN)"
         return None
 
@@ -371,8 +371,24 @@ class OpenCodeAdapter(HarnessAdapter):
         # stderr with ANSI decoration; --format json is half-alive on 1.15.5
         # (single step_start event, rc 0 — probed live). Pilot's scar: merge
         # the streams, then filter hard.
-        return Invoke(argv=argv, stdin=prompt_text, merge_stderr=True,
-                      env={"OPENCODE_CONFIG_CONTENT": json.dumps(data)})
+        session_args = {
+            "--continue", "--continue=true", "-c", "-c=true",
+            "--session", "-s", "--fork", "--fork=true",
+        }
+        uses_session = any(
+            arg in session_args or arg.startswith(("--session=", "-s="))
+            for arg in spec.args
+        )
+        if not uses_session:
+            # Default Medulla agents are one-shot. A private in-memory DB keeps
+            # parallel workers out of the shared SQLite migration/write path.
+            # Snapshots share one git index per worktree and collide too; Medulla
+            # owns retry/resume, so OpenCode's session-level undo is redundant here.
+            data["snapshot"] = False
+        env = {"OPENCODE_CONFIG_CONTENT": json.dumps(data)}
+        if not uses_session:
+            env["OPENCODE_DB"] = ":memory:"
+        return Invoke(argv=argv, stdin=prompt_text, merge_stderr=True, env=env)
 
     def filter_stdout(self, stdout: str) -> str:
         # merged stream with ANSI decoration: strip escapes, then the
@@ -420,7 +436,7 @@ class AgyAdapter(HarnessAdapter):
         # Untrusted workspace makes --dangerously-skip-permissions HANG waiting for
         # interactive trust — deterministic, environment-level, unresolvable at
         # runtime: the E_HARNESS razor's spirit ("unresolvable"), not a flake.
-        # In Docker the container is the sandbox and trust files are unreliable;
+        # In a container runtime the container is the sandbox and trust files are unreliable;
         # --print-timeout bounds any residual hang, so the guard is host-only.
         if os.environ.get("MEDULLA_DOCKER") == "1":
             return

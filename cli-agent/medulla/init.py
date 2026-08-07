@@ -1,11 +1,11 @@
 """`medulla init` — bootstrap the runtime in the current project.
 
-Lays down only what medulla needs to run in-place and inside docker:
+Lays down only what medulla needs to run in-place and inside a container:
 
   .medulla/
     medulla/           symlink → the installed medulla package
     scripts/           symlink → the installed package's scripts/
-                       (docker.py, host-builder.sh, init-docker.sh)
+                       (docker.py, apple_container.py, host-builder.sh, init-docker.sh)
     snapshot/          empty state dir for per-round artifacts
 
 The runtime is SYMLINKED to the active (global) install rather than copied,
@@ -125,19 +125,85 @@ SKILL_DESTS = (          # every agent CLI that reads skills (main@dca7dbf)
     Path(".opencode") / "skills",    # opencode
 )
 
+_DOCKER_SKILL_RUN = "medulla --print-run-dir --docker"
+_APPLE_SKILL_RUN = "medulla --print-run-dir --apple"
+_HOST_SKILL_RUN = "medulla -w .medulla/workflows/"
+_APPLE_HOST_SKILL_RUN = "medulla --apple -w .medulla/workflows/"
+_DOCKER_SPAR_INIT = "medulla init spar --skill"
+_APPLE_SPAR_INIT = "medulla init spar --skill --apple"
 
-def install_skill_md(name: str, workflow_dir: Path) -> int:
+
+def _skill_uses_apple(path: Path) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8")
+        return _APPLE_SKILL_RUN in text or _APPLE_HOST_SKILL_RUN in text
+    except OSError:
+        return False
+
+
+def _path_has_symlink(path: Path) -> bool:
+    current = Path(path.anchor) if path.is_absolute() else Path()
+    for part in path.parts:
+        if part == path.anchor:
+            continue
+        current /= part
+        if current.is_symlink():
+            return True
+    return False
+
+
+def _set_skill_runtime(path: Path, apple: bool) -> None:
+    text = path.read_text(encoding="utf-8")
+    if apple:
+        if _APPLE_SKILL_RUN in text or _APPLE_HOST_SKILL_RUN in text:
+            updated = text
+        elif _DOCKER_SKILL_RUN in text:
+            updated = text.replace(_DOCKER_SKILL_RUN, _APPLE_SKILL_RUN)
+        elif _HOST_SKILL_RUN in text:
+            updated = text.replace(_HOST_SKILL_RUN, _APPLE_HOST_SKILL_RUN)
+        else:
+            raise ValueError(f"SKILL.md has no Medulla run command: {path}")
+        if _APPLE_SPAR_INIT not in updated:
+            updated = updated.replace(_DOCKER_SPAR_INIT, _APPLE_SPAR_INIT)
+    else:
+        updated = text.replace(_APPLE_SKILL_RUN, _DOCKER_SKILL_RUN)
+        updated = updated.replace(_APPLE_HOST_SKILL_RUN, _HOST_SKILL_RUN)
+        updated = updated.replace(_APPLE_SPAR_INIT, _DOCKER_SPAR_INIT)
+    if updated != text:
+        path.write_text(updated, encoding="utf-8")
+
+
+def _set_skill_apple(path: Path) -> None:
+    _set_skill_runtime(path, apple=True)
+
+
+def install_skill_md(name: str, workflow_dir: Path, apple: bool = False) -> int:
     """Register the workflow's SKILL.md with every agent CLI's skill dir."""
     import shutil
     src = workflow_dir / "SKILL.md"
+    targets = [root / name / "SKILL.md" for root in SKILL_DESTS]
+    unsafe = [path for path in [src, *targets] if _path_has_symlink(path)]
+    if unsafe:
+        print(f"error: refusing to write skill through symlink: {unsafe[0]}")
+        return 1
     if not src.is_file():                      # scaffolds get a starter
-        src.write_text(SKILL_MD.replace("<NAME>", name), encoding="utf-8")
-        print(f"  created starter {src} — edit the description")
-    for root in SKILL_DESTS:
-        dest = root / name
-        dest.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dest / "SKILL.md")
-        print(f"  skill installed -> {dest}/SKILL.md")
+        bundle = _bundle_dir(name)
+        bundle_skill = bundle / "SKILL.md" if bundle is not None else None
+        if bundle_skill is not None and bundle_skill.is_file():
+            shutil.copy2(bundle_skill, src)
+            print(f"  restored bundled {src}")
+        else:
+            src.write_text(SKILL_MD.replace("<NAME>", name), encoding="utf-8")
+            print(f"  created starter {src} — edit the description")
+    try:
+        _set_skill_runtime(src, apple=apple)
+    except (OSError, ValueError) as exc:
+        print(f"error: cannot select skill runtime: {exc}")
+        return 1
+    for target in targets:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, target)
+        print(f"  skill installed -> {target}")
     return 0
 
 
@@ -169,9 +235,11 @@ DEFAULT_REFRESH_DEPTH = 8
 
 
 def _copy_bundle_over(src: Path, dst: Path) -> None:
-    """Copy every bundle file into `dst`, skipping runs/ — and NEVER writing
-    through a symlink (a symlinked dest file OR subdir is left untouched, so a
-    booby-trapped deploy can't clobber a file outside itself: CWE-59)."""
+    """Copy bundle files into `dst`, preserving runs/ state.
+
+    Never write through a symlink: a symlinked destination file or directory
+    is left untouched, so a booby-trapped deploy cannot escape (CWE-59).
+    """
     import os
     import shutil
     for base_dir, dirnames, filenames in os.walk(src):
@@ -226,24 +294,33 @@ def refresh_skill(name: str, root: str, depth: int = DEFAULT_REFRESH_DEPTH, dry_
         gp = p.parent.parent.name
         if (p.parent.name == "workflows" and gp == ".medulla"
                 and (p / "workflow.yaml").is_file() and p.resolve() != bundle):
+            target = p / "SKILL.md"
+            if _path_has_symlink(target):
+                print(f"  skip symlink {target}"); continue
             if dry_run:
                 print(f"  [dry-run] workflow -> {p}"); n_wf += 1; continue
             try:                                     # one bad deploy must not abort the rest
+                preserve_apple = _skill_uses_apple(target)
                 _copy_bundle_over(bundle, p)
+                if preserve_apple:
+                    _set_skill_apple(target)
                 print(f"  workflow  -> {p}"); n_wf += 1
-            except OSError as e:
+            except (OSError, ValueError) as e:
                 print(f"  FAILED    -> {p}: {e}"); failures.append(str(p))
         elif (p.parent.name == "skills" and gp in _SKILL_PARENTS
                 and (p / "SKILL.md").is_file() and bundle_skill.is_file()):
             target = p / "SKILL.md"
-            if target.is_symlink():                  # never write through a symlink
+            if _path_has_symlink(target):            # never write through a symlink
                 print(f"  skip symlink {target}"); continue
             if dry_run:
                 print(f"  [dry-run] SKILL.md -> {p}"); n_sk += 1; continue
             try:
+                preserve_apple = _skill_uses_apple(target)
                 shutil.copy2(bundle_skill, target)
+                if preserve_apple:
+                    _set_skill_apple(target)
                 print(f"  SKILL.md  -> {p}"); n_sk += 1
-            except OSError as e:
+            except (OSError, ValueError) as e:
                 print(f"  FAILED    -> {target}: {e}"); failures.append(str(target))
     verb = "would refresh" if dry_run else "refreshed"
     print(f"{verb} {n_wf} workflow(s) + {n_sk} skill(s) under {root_p} (depth {depth})")
@@ -336,5 +413,6 @@ def run_init() -> int:
     print("\ndone.\n")
     print("  # drop your workflows into .medulla/workflows/<name>/workflow.yaml")
     print("  # then run:")
-    print("  medulla --docker -w <workflow>\n")
+    print("  medulla --docker -w <workflow>  # Docker")
+    print("  medulla --apple -w <workflow>   # Apple Container\n")
     return 0
