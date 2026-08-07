@@ -124,11 +124,35 @@ def test_opencode_config_rides_in_env(tmp_path):
     a = H.OpenCodeAdapter.__new__(H.OpenCodeAdapter)
     spec = AgentSpec(harness="opencode", model="zai/glm-5.3", effort="high")
     inv = a.build(spec, tmp_path / "p.md", "P", 600)
+    assert inv.env["OPENCODE_DB"] == ":memory:"
     cfg = json.loads(inv.env["OPENCODE_CONFIG_CONTENT"])
     assert cfg["permission"] == "allow"
+    assert cfg["snapshot"] is False
     assert cfg["provider"]["zai"]["options"]["timeout"] == (600 + 300) * 1000
     assert cfg["provider"]["zai"]["models"]["glm-5.3"]["options"]["reasoningEffort"] == "high"
     assert not (tmp_path / "opencode.json").exists()
+
+
+@pytest.mark.parametrize("args", [
+    ["--continue"], ["--continue=true"], ["-c"], ["-c=true"],
+    ["--session", "ses_123"], ["-s=ses_123"], ["--fork"], ["--fork=true"],
+])
+def test_opencode_explicit_session_keeps_persistent_db(tmp_path, args):
+    a = H.OpenCodeAdapter.__new__(H.OpenCodeAdapter)
+    spec = AgentSpec(harness="opencode", model="zai/glm-5.2", args=args)
+    inv = a.build(spec, tmp_path / "p.md", "P", 60)
+    assert "OPENCODE_DB" not in inv.env
+    assert "snapshot" not in json.loads(inv.env["OPENCODE_CONFIG_CONTENT"])
+
+
+@pytest.mark.parametrize("session,resume", [("work", None), (None, "ses_123")])
+def test_opencode_named_or_resumed_session_keeps_persistent_db(
+        tmp_path, session, resume):
+    a = H.OpenCodeAdapter.__new__(H.OpenCodeAdapter)
+    spec = AgentSpec(harness="opencode", model="zai/glm-5.2", session=session)
+    inv = a.build(spec, tmp_path / "p.md", "P", 60, resume=resume)
+    assert "OPENCODE_DB" not in inv.env
+    assert "snapshot" not in json.loads(inv.env["OPENCODE_CONFIG_CONTENT"])
 
 
 def test_agy_untrusted_workspace_is_e_harness(tmp_path, monkeypatch):
@@ -266,6 +290,39 @@ nodes:
 """
     rc, _ = run_pipe(tmp_path, text)
     assert rc == 0                                  # stdin actually delivered the prompt
+
+
+def test_opencode_parallel_pool_gets_private_one_shot_state(tmp_path, on_path):
+    make_bin(on_path, "opencode", r'''
+[ "$OPENCODE_DB" = ":memory:" ] || exit 41
+case "$OPENCODE_CONFIG_CONTENT" in
+  *'"snapshot": false'*) ;;
+  *) exit 42;;
+esac
+touch ".opencode-worker-$MEDULLA_INPUT_INDEX"
+count=0
+for _ in $(seq 1 100); do
+  count=$(printf '%s\n' .opencode-worker-* | wc -l | tr -d ' ')
+  [ "$count" -ge 4 ] && break
+  sleep 0.02
+done
+[ "$count" -ge 4 ] || exit 43
+echo "<signal:ok>isolated</signal:ok>" >&2
+''')
+    text = """
+version: "2"
+start: panel
+nodes:
+  panel:
+    inputs: [one, two, three, four]
+    max_parallel: 4
+    agent: {harness: opencode}
+    prompt: "{{input}}"
+    on_signal: {__done__: __exit_ok__}
+"""
+    rc, _ = run_pipe(tmp_path, text)
+    assert rc == 0
+    assert len(list((tmp_path / "work").glob(".opencode-worker-*"))) == 4
 
 
 def test_claude_e2e_tool_echo_never_routes(tmp_path, on_path):

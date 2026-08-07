@@ -1,4 +1,4 @@
-"""The reference text `medulla --help` prints: the env API, the signal grammar, docker.
+"""The reference text `medulla --help` prints: env API, signals, container runtimes.
 
 Split from cli.py under the project's 250-line rule ($MAX_LOC). It is prose the engine
 publishes as a contract — agents read it to learn what they may rely on — so keeping it
@@ -41,7 +41,7 @@ environment the engine provides to bodies and hooks (agents: read this, it is th
     MEDULLA_BODY_RC / MEDULLA_BODY_SIGNAL
                             the body attempt's exit code and its raw signal (if any)
 
---var and --docker: values cross the boundary AS-IS, paths do not
+--var and container runtimes: values cross the boundary AS-IS, paths do not
     --var KEY=/host/path    arrives byte for byte; that path does not exist inside
     --var-file KEY=/host/f  the FILE is mounted at its own absolute path, so the
                             argument the engine receives is valid on both sides
@@ -54,20 +54,24 @@ agent nodes (fields beyond harness/model/effort/sandbox/args):
                             every later one continues it. Recorded in <run>/sessions.json;
                             templated, so a pool uses "panel-{{input.slug}}"
 
-docker (host-side, handled by scripts/docker.py before the engine starts):
-    medulla --docker -w <dir> ...   run inside the workflow's image
+container runtimes (host-side, handled before the engine starts):
+    medulla -w <dir> ...             run directly on the host
+    medulla --docker -w <dir> ...    run with Docker
+    medulla --apple -w <dir> ...     run with Apple Container
     --build                         force a no-cache image rebuild
     --mount <dir> / --mount-rw <dir>  extra mounts under /workspace/<name>
     image resolution precedence:    MEDULLA_IMAGE env > --var IMAGE >
                                     vars.IMAGE > build from (--var DOCKERFILE >
                                     vars.DOCKERFILE > packaged default)
 
-subcommands: init <name> [--skill] (deploy a bundled template or scaffold a new workflow; --skill registers it with Claude Code), upgrade
+subcommands: init <name> [--skill [--apple]] [--local], refresh, launch, upgrade
 
 environment the engine reads:
     MEDULLA_RETRY_DELAY_S   pause between attempts / before fallback (default 2)
     MEDULLA_RUN_ID          pre-seed the run id
-    MEDULLA_DOCKER=1        set by scripts/docker.py: container is the sandbox
+    MEDULLA_DOCKER=1        compatibility marker: Docker or Apple container is the sandbox
+    MEDULLA_APPLE_CPUS      Apple container CPU limit (default 4)
+    MEDULLA_APPLE_MEMORY    Apple container memory limit (default 4g)
 
 signals (print on stdout, must start the line for plain-text harnesses):
     <signal:NAME>message</signal:NAME>      route the graph (decision) / record (pool)

@@ -27,16 +27,35 @@ set -uo pipefail
 # MEDULLA_PANEL_RUNS overrides it whole.
 WORKFLOW="spar"               # a bare name: local .medulla/workflows/spar wins, else machine-wide
 DEFAULT_TIMEOUT=2700          # 45 min: a panel is 10-20, so this is "something hung"
+CONTAINER_RUNTIME="${MEDULLA_CONTAINER_RUNTIME:-docker}"
 
 die() { echo "spar-run: $*" >&2; exit 1; }
 
 preflight() {
     # Fail HERE, not halfway through a session, and say which piece is missing.
     command -v medulla >/dev/null 2>&1 || die "medulla is not installed (see the medulla repo)"
-    command -v docker  >/dev/null 2>&1 || die "docker is not installed — the panel runs in a container"
-    docker info >/dev/null 2>&1        || die "the docker daemon is not responding (colima start?)"
+    case "$CONTAINER_RUNTIME" in
+        docker)
+            command -v docker >/dev/null 2>&1 || die "docker is not installed"
+            docker info >/dev/null 2>&1 || die "the docker daemon is not responding (colima start?)"
+            ;;
+        apple)
+            command -v container >/dev/null 2>&1 || die "Apple container CLI is not installed"
+            container system status >/dev/null 2>&1 \
+                || die "Apple container service is not responding (container system start)"
+            ;;
+        *) die "unknown container runtime: $CONTAINER_RUNTIME" ;;
+    esac
     [ -d ".medulla/workflows/$WORKFLOW" ] || [ -d "$HOME/.medulla/workflows/$WORKFLOW" ] \
         || die "no spar workflow: neither ./.medulla/workflows/$WORKFLOW nor ~/.medulla/workflows/$WORKFLOW (medulla init spar)"
+}
+
+container_running() {
+    case "$CONTAINER_RUNTIME" in
+        docker) docker ps -q --filter 'name=^medulla-' | grep -q . ;;
+        apple)  container list 2>/dev/null | grep -q 'medulla-' ;;
+        *)      return 1 ;;
+    esac
 }
 
 box_for() {
@@ -87,7 +106,7 @@ cmd_start() {
     qfile="$box/question.$id.md"; log="$box/run.$id.log"; err="$box/err.$id.log"
     cp "$question" "$qfile" || die "cannot write $qfile"
 
-    medulla --print-run-dir --docker --cwd-ro --runs-folder "$box" \
+    medulla --print-run-dir "--$CONTAINER_RUNTIME" --cwd-ro --runs-folder "$box" \
         -w "$WORKFLOW" "$@" --var-file "QUESTION=$qfile" \
         >"$log" 2>"$err" &
     local pid=$!
@@ -157,7 +176,7 @@ cmd_wait() {
         # A panel that died on its second minute should not cost forty-five. Give the
         # container a moment to appear first, then treat "no container and no outcome"
         # as death rather than patience.
-        if [ "$waited" -ge 60 ] && [ "$(docker ps -q --filter 'name=^medulla-' | wc -l)" -eq 0 ]; then
+        if [ "$waited" -ge 60 ] && ! container_running; then
             gone=$((gone + 1))
             if [ "$gone" -ge 2 ]; then
                 echo "spar-run: no medulla container is running and no outcome was written." >&2

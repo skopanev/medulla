@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
                              "workflow (pairs with --cwd-ro: a panel that must not write "
                              "into the tree it reviews)")
     parser.add_argument("--cwd-ro", action="store_true",
-                        help="mount the WORKING DIRECTORY read-only (--docker only; "
+                        help="mount the WORKING DIRECTORY read-only (container runs only; "
                              "requires --runs-folder). The rest of the container stays "
                              "writable — the entrypoint copies credentials into $HOME "
                              "and agents write sessions there — so anything a body "
@@ -63,10 +63,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     ns = parser.parse_args(argv)
 
-    # scripts/docker.py consumes --cwd-ro before the engine starts, so seeing it here
+    # Container runners consume --cwd-ro before the engine starts, so seeing it here
     # means there is no container — and nothing to mount read-only.
     if ns.cwd_ro:
-        parser.error("--cwd-ro only applies to --docker runs")
+        parser.error("--cwd-ro only applies to --docker or --apple runs")
 
     yaml_path = _resolve_workflow_yaml(ns.workflow)
 

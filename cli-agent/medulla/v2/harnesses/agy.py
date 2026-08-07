@@ -52,7 +52,7 @@ class AgyAdapter(HarnessAdapter):
         # Untrusted workspace makes --dangerously-skip-permissions HANG waiting for
         # interactive trust — deterministic, environment-level, unresolvable at
         # runtime: the E_HARNESS razor's spirit ("unresolvable"), not a flake.
-        # In Docker the container is the sandbox and trust files are unreliable;
+        # In a container runtime the container is the sandbox and trust files are unreliable;
         # --print-timeout bounds any residual hang, so the guard is host-only.
         if os.environ.get("MEDULLA_DOCKER") == "1":
             return
@@ -158,5 +158,4 @@ class AgyAdapter(HarnessAdapter):
         # Not stream-json at all — an older agy, or plain text on stderr. Fall back to
         # the heuristic rather than returning nothing.
         return "" if saw_json else plain_text_signal_filter(stdout)
-
 

@@ -94,18 +94,22 @@ def refresh_skill(name: str, root: str, depth: int = DEFAULT_REFRESH_DEPTH, dry_
     # one per Claude Code profile. Only where the skill is ALREADY installed — refresh
     # updates what exists, it does not deploy.
     from .init import skill_dests_global
+    from .skill_runtime import path_has_symlink, set_skill_apple, skill_uses_apple
     if bundle_skill.is_file():
         for dest in skill_dests_global():
             target = dest / name / "SKILL.md"
-            if not target.is_file() or target.is_symlink():
+            if not target.is_file() or path_has_symlink(target):
                 continue
             if dry_run:
                 print(f"  [dry-run] SKILL.md -> {dest / name} (machine-wide)")
             else:
                 try:
+                    preserve_apple = skill_uses_apple(target)
                     shutil.copy2(bundle_skill, target)
+                    if preserve_apple:
+                        set_skill_apple(target)
                     print(f"  SKILL.md  -> {dest / name} (machine-wide)")
-                except OSError as exc:
+                except (OSError, ValueError) as exc:
                     failures.append(f"{target}: {exc}")
             n_sk += 1
 
@@ -123,9 +127,14 @@ def refresh_skill(name: str, root: str, depth: int = DEFAULT_REFRESH_DEPTH, dry_
             print(f"  [dry-run] workflow -> {shared} (machine-wide)")
         else:
             try:
+                target = shared / "SKILL.md"
+                skill_safe = not path_has_symlink(target)
+                preserve_apple = skill_safe and skill_uses_apple(target)
                 _copy_bundle_over(bundle, shared)
+                if preserve_apple:
+                    set_skill_apple(target)
                 print(f"  workflow  -> {shared} (machine-wide)")
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
                 failures.append(f"{shared}: {exc}")
         n_wf += 1
     for dirpath, dirnames, _ in os.walk(root_p):     # followlinks=False: no escape/cycles
@@ -138,24 +147,33 @@ def refresh_skill(name: str, root: str, depth: int = DEFAULT_REFRESH_DEPTH, dry_
         gp = p.parent.parent.name
         if (p.parent.name == "workflows" and gp == ".medulla"
                 and (p / "workflow.yaml").is_file() and p.resolve() != bundle):
+            target = p / "SKILL.md"
+            if path_has_symlink(target):
+                print(f"  skip symlink {target}"); continue
             if dry_run:
                 print(f"  [dry-run] workflow -> {p}"); n_wf += 1; continue
             try:                                     # one bad deploy must not abort the rest
+                preserve_apple = skill_uses_apple(target)
                 _copy_bundle_over(bundle, p)
+                if preserve_apple:
+                    set_skill_apple(target)
                 print(f"  workflow  -> {p}"); n_wf += 1
-            except OSError as e:
+            except (OSError, ValueError) as e:
                 print(f"  FAILED    -> {p}: {e}"); failures.append(str(p))
         elif (p.parent.name == "skills" and gp in _SKILL_PARENTS
                 and (p / "SKILL.md").is_file() and bundle_skill.is_file()):
             target = p / "SKILL.md"
-            if target.is_symlink():                  # never write through a symlink
+            if path_has_symlink(target):             # never write through a symlink
                 print(f"  skip symlink {target}"); continue
             if dry_run:
                 print(f"  [dry-run] SKILL.md -> {p}"); n_sk += 1; continue
             try:
+                preserve_apple = skill_uses_apple(target)
                 shutil.copy2(bundle_skill, target)
+                if preserve_apple:
+                    set_skill_apple(target)
                 print(f"  SKILL.md  -> {p}"); n_sk += 1
-            except OSError as e:
+            except (OSError, ValueError) as e:
                 print(f"  FAILED    -> {target}: {e}"); failures.append(str(target))
     verb = "would refresh" if dry_run else "refreshed"
     print(f"{verb} {n_wf} workflow(s) + {n_sk} skill(s) under {root_p} (depth {depth})")
@@ -163,5 +181,3 @@ def refresh_skill(name: str, root: str, depth: int = DEFAULT_REFRESH_DEPTH, dry_
         print(f"  {len(failures)} failed mid-write (may be partial): " + ", ".join(failures[:5])
               + (" …" if len(failures) > 5 else ""))
     return 2 if failures else 0
-
-

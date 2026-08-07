@@ -466,7 +466,10 @@ def test_init_skill_flag(tmp_path, monkeypatch):
     for root in (home / ".claude" / "skills", home / ".agents" / "skills",
                  home / ".config" / "opencode" / "skills"):
         skill = root / "spar" / "SKILL.md"
-        assert skill.is_file() and "spar" in skill.read_text()
+        text = skill.read_text()
+        assert skill.is_file() and "spar" in text
+        assert "medulla launch spar start" in text
+        assert "medulla launch spar --apple" not in text
     # a scaffold is this repo's own work: it stays local, skill included
     monkeypatch.setattr("sys.argv", ["medulla", "init", "fresh", "--skill"])
     assert shim.entry() == 0
@@ -485,6 +488,97 @@ def test_init_local_flag_keeps_everything_in_the_project(tmp_path, monkeypatch):
     assert (tmp_path / ".claude" / "skills" / "spar" / "SKILL.md").is_file()
     assert not (home / ".medulla" / "workflows" / "spar").exists()
     assert not (home / ".claude" / "skills" / "spar").exists()
+
+
+def test_init_apple_skill_switch_survives_refresh(tmp_path, monkeypatch):
+    import medulla.cli as shim
+    from medulla.init import _bundle_dir, refresh_skill
+
+    home = tmp_path / "home"; home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv", ["medulla", "init", "spar", "--skill", "--apple"])
+    assert shim.entry() == 0
+
+    workflow_dir = home / ".medulla" / "workflows" / "spar"
+    skill_paths = [workflow_dir / "SKILL.md"]
+    skill_paths.extend(root / "spar" / "SKILL.md" for root in (
+        home / ".claude" / "skills",
+        home / ".agents" / "skills",
+        home / ".config" / "opencode" / "skills",
+    ))
+    for skill in skill_paths:
+        text = skill.read_text()
+        assert "medulla launch spar --apple start" in text
+        assert "medulla launch spar start" not in text
+
+    bundle = _bundle_dir("spar")
+    assert bundle is not None
+    assert "medulla launch spar start" in (bundle / "SKILL.md").read_text()
+
+    assert refresh_skill("spar", str(tmp_path)) == 0
+    for skill in skill_paths:
+        assert "medulla launch spar --apple start" in skill.read_text()
+
+    custom = (workflow_dir / "workflow.yaml").read_text() + "\n# keep me\n"
+    (workflow_dir / "workflow.yaml").write_text(custom, encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["medulla", "init", "spar", "--skill"])
+    assert shim.entry() == 0
+    assert (workflow_dir / "workflow.yaml").read_text() == custom
+    for skill in skill_paths:
+        text = skill.read_text()
+        assert "medulla launch spar start" in text
+        assert "medulla launch spar --apple" not in text
+
+
+def test_init_local_apple_skill_stays_local(tmp_path, monkeypatch):
+    import medulla.cli as shim
+
+    home = tmp_path / "home"; home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv", ["medulla", "init", "spar", "--skill", "--apple", "--local"])
+    assert shim.entry() == 0
+    for root in (tmp_path / ".medulla" / "workflows",
+                 tmp_path / ".claude" / "skills",
+                 tmp_path / ".agents" / "skills",
+                 tmp_path / ".opencode" / "skills"):
+        assert "medulla launch spar --apple start" in (root / "spar" / "SKILL.md").read_text()
+    assert not (home / ".medulla" / "workflows" / "spar").exists()
+
+
+def test_init_skill_refuses_source_or_destination_symlink(tmp_path, monkeypatch):
+    import medulla.cli as shim
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["medulla", "init", "spar", "--local"])
+    assert shim.entry() == 0
+    source = tmp_path / ".medulla" / "workflows" / "spar" / "SKILL.md"
+    source_text = source.read_text()
+    victim = tmp_path / "victim.md"
+    victim.write_text(source_text, encoding="utf-8")
+    source.unlink()
+    source.symlink_to(victim)
+
+    monkeypatch.setattr(
+        "sys.argv", ["medulla", "init", "spar", "--skill", "--apple", "--local"])
+    assert shim.entry() == 1
+    assert victim.read_text() == source_text
+
+    source.unlink()
+    source.write_text(source_text, encoding="utf-8")
+    dest = tmp_path / ".claude" / "skills" / "spar"
+    dest.mkdir(parents=True)
+    target_victim = tmp_path / "target-victim.md"
+    target_victim.write_text("safe", encoding="utf-8")
+    (dest / "SKILL.md").symlink_to(target_victim)
+
+    assert shim.entry() == 1
+    assert target_victim.read_text() == "safe"
 
 
 def test_refresh_scans_and_updates(tmp_path, monkeypatch):
@@ -534,12 +628,16 @@ def test_refresh_never_clobbers_through_symlink(tmp_path):
     from medulla.init import refresh_skill
     victim = tmp_path / "victim.txt"
     victim.write_text("SECRET", encoding="utf-8")
+    skill_victim = tmp_path / "skill-victim.txt"
+    skill_victim.write_text("medulla --apple -w SECRET", encoding="utf-8")
     wf = tmp_path / "proj" / ".medulla" / "workflows" / "spar"
     wf.mkdir(parents=True)
     (wf / "workflow.yaml").symlink_to(victim)        # deploy's workflow.yaml -> victim
+    (wf / "SKILL.md").symlink_to(skill_victim)
     assert refresh_skill("spar", str(tmp_path)) == 0
     assert victim.read_text() == "SECRET"            # NOT clobbered
     assert (wf / "workflow.yaml").is_symlink()        # symlink left untouched
+    assert skill_victim.read_text() == "medulla --apple -w SECRET"
 
 
 def test_empty_local_workflow_does_not_shadow_the_shared_one(tmp_path, monkeypatch):

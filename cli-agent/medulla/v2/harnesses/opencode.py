@@ -60,8 +60,24 @@ class OpenCodeAdapter(HarnessAdapter):
         # stderr with ANSI decoration; --format json is half-alive on 1.15.5
         # (single step_start event, rc 0 — probed live). Pilot's scar: merge
         # the streams, then filter hard.
-        return Invoke(argv=argv, stdin=prompt_text, merge_stderr=True,
-                      env={"OPENCODE_CONFIG_CONTENT": json.dumps(data)})
+        session_args = {
+            "--continue", "--continue=true", "-c", "-c=true",
+            "--session", "-s", "--fork", "--fork=true",
+        }
+        uses_session = bool(spec.session or resume) or any(
+            arg in session_args or arg.startswith(("--session=", "-s="))
+            for arg in spec.args
+        )
+        if not uses_session:
+            # Default Medulla agents are one-shot. A private in-memory DB keeps
+            # parallel workers out of the shared SQLite migration/write path.
+            # Snapshots share one git index per worktree and collide too; Medulla
+            # owns retry/resume, so OpenCode's session-level undo is redundant here.
+            data["snapshot"] = False
+        env = {"OPENCODE_CONFIG_CONTENT": json.dumps(data)}
+        if not uses_session:
+            env["OPENCODE_DB"] = ":memory:"
+        return Invoke(argv=argv, stdin=prompt_text, merge_stderr=True, env=env)
 
     def stream_line(self, line: str) -> str | None:
         """One JSON event -> what a watcher should see, or nothing."""
@@ -115,5 +131,3 @@ AGY_MODEL_ALIASES = {
     "gemini-3.1-pro-low": "Gemini 3.1 Pro (Low)",
     "gemini-3.1-pro-high": "Gemini 3.1 Pro (High)",
 }
-
-

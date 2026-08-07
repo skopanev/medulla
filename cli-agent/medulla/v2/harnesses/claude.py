@@ -101,7 +101,7 @@ class ClaudeAdapter(HarnessAdapter):
                 if "Not logged in" in text or "Invalid API key" in text \
                         or "/login" in text:
                     return f"claude-code is not authenticated: {text!r} — " \
-                           f"run `claude /login` (in docker: keychain-bound OAuth " \
+                           f"run `claude /login` (in a container: keychain-bound OAuth " \
                            f"does not reach the container; use CLAUDE_CODE_OAUTH_TOKEN)"
         return None
 
@@ -119,5 +119,4 @@ class ClaudeAdapter(HarnessAdapter):
             out = " ".join(x for x in texts if x).strip()
             return out or None
         return None
-
 

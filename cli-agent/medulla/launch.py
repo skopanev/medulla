@@ -41,6 +41,12 @@ def launch(argv: list[str]) -> int:
         return 1
 
     name, rest = argv[0], argv[1:]
+    runtime_flags = [flag for flag in ("--docker", "--apple") if flag in rest]
+    if len(runtime_flags) > 1:
+        print("error: launch --docker and --apple are mutually exclusive", file=sys.stderr)
+        return 1
+    runtime = "apple" if runtime_flags == ["--apple"] else "docker"
+    rest = [arg for arg in rest if arg not in ("--docker", "--apple")]
     # Resolve the DEFINITION, not the directory: an unresolvable name comes back as
     # the caller typed it, and taking its .parent turns `nope` into `.` — which is a
     # directory, so the run got as far as "workflow 'nope' ships no launcher in
@@ -70,5 +76,6 @@ def launch(argv: list[str]) -> int:
     else:
         chosen = scripts[0]
 
+    os.environ["MEDULLA_CONTAINER_RUNTIME"] = runtime
     os.execv(str(chosen), [str(chosen), *rest])   # cwd stays the caller's, on purpose
     return 1                                      # unreachable; execv does not return

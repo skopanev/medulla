@@ -1,11 +1,12 @@
 """`medulla init` — bootstrap the runtime in the current project.
 
-Lays down only what medulla needs to run in-place and inside docker:
+Lays down only what medulla needs to run in-place and inside a container runtime:
 
   .medulla/
     medulla/           symlink → the installed medulla package
     scripts/           symlink → the installed package's scripts/
-                       (docker.py, host-builder.sh, init-docker.sh)
+                       (docker.py, apple_container.py, host-builder.sh,
+                        init-docker.sh)
     snapshot/          empty state dir for per-round artifacts
 
 The runtime is SYMLINKED to the active (global) install rather than copied,
@@ -76,7 +77,11 @@ def skill_dests_global() -> tuple[Path, ...]:
     return tuple(dests)
 
 
-def install_skill_md(name: str, workflow_dir: Path, local: bool = False) -> int:
+from .skill_runtime import path_has_symlink, set_skill_runtime  # noqa: E402
+
+
+def install_skill_md(name: str, workflow_dir: Path, local: bool = False,
+                     apple: bool = False) -> int:
     """Register the workflow's SKILL.md with every agent CLI's skill dir.
 
     Sourced the same way the workflow itself is: local copy first, then the
@@ -87,20 +92,36 @@ def install_skill_md(name: str, workflow_dir: Path, local: bool = False) -> int:
     """
     import shutil
     src = workflow_dir / "SKILL.md"
+    targets = [root / name / "SKILL.md"
+               for root in (SKILL_DESTS if local else skill_dests_global())]
     if not src.is_file():
         shared = Path.home() / ".medulla" / "workflows" / name / "SKILL.md"
         if shared.is_file():
             src = shared
+    unsafe = [path for path in [src, *targets] if path_has_symlink(path)]
+    if unsafe:
+        print(f"error: refusing to write skill through symlink: {unsafe[0]}")
+        return 1
     if not src.is_file():                      # scaffolds get a starter
         src = workflow_dir / "SKILL.md"
         src.parent.mkdir(parents=True, exist_ok=True)
-        src.write_text(SKILL_MD.replace("<NAME>", name), encoding="utf-8")
-        print(f"  created starter {src} — edit the description")
-    for root in (SKILL_DESTS if local else skill_dests_global()):
-        dest = root / name
-        dest.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dest / "SKILL.md")
-        print(f"  skill installed -> {dest}/SKILL.md")
+        bundle = _bundle_dir(name)
+        bundle_skill = bundle / "SKILL.md" if bundle is not None else None
+        if bundle_skill is not None and bundle_skill.is_file():
+            shutil.copy2(bundle_skill, src)
+            print(f"  restored bundled {src}")
+        else:
+            src.write_text(SKILL_MD.replace("<NAME>", name), encoding="utf-8")
+            print(f"  created starter {src} — edit the description")
+    try:
+        set_skill_runtime(src, apple=apple)
+    except (OSError, ValueError) as exc:
+        print(f"error: cannot select skill runtime: {exc}")
+        return 1
+    for target in targets:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, target)
+        print(f"  skill installed -> {target}")
     return 0
 
 
@@ -203,5 +224,6 @@ def run_init() -> int:
     print("\ndone.\n")
     print("  # drop your workflows into .medulla/workflows/<name>/workflow.yaml")
     print("  # then run:")
-    print("  medulla --docker -w <workflow>\n")
+    print("  medulla --docker -w <workflow>  # Docker")
+    print("  medulla --apple -w <workflow>   # Apple Container\n")
     return 0

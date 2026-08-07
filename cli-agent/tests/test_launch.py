@@ -56,6 +56,17 @@ def test_the_launcher_runs_in_the_callers_directory(tmp_path):
     assert res.stdout.strip() == str(elsewhere.resolve())
 
 
+def test_apple_runtime_flag_reaches_the_launcher(tmp_path):
+    home = tmp_path / "home"; home.mkdir()
+    _machine_wide(
+        home, "spar",
+        "#!/bin/sh\necho \"$MEDULLA_CONTAINER_RUNTIME:$*\"\n")
+
+    res = _run(tmp_path, home, "spar", "--apple", "start", "q.md")
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip() == "apple:start q.md"
+
+
 def test_a_local_copy_wins_exactly_as_for_the_workflow(tmp_path):
     home = tmp_path / "home"; home.mkdir()
     _machine_wide(home, "spar", "#!/bin/sh\necho machine-wide\n")
