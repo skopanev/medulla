@@ -22,7 +22,8 @@ curl -sSL https://raw.githubusercontent.com/skopanev/medulla/main/install.sh | b
 cd your-project
 medulla init my-pipe              # scaffold: commented workflow.yaml, README, .gitignore, prompts/
 medulla init spar                 # ...or deploy a bundled template (spar: a panel of models)
-medulla init spar --skill         # ...and register its SKILL.md with claude-code / codex / opencode
+medulla init spar --skill         # register its SKILL.md; SPAR uses Docker by default
+medulla init spar --skill --apple # register/switch the SPAR skill to Apple Container
 medulla init                      # lists available bundled templates
 
 medulla -w .medulla/workflows/my-pipe                  # run
@@ -32,6 +33,7 @@ medulla -w .medulla/workflows/my-pipe --resume         # continue the latest unf
 medulla -w .medulla/workflows/my-pipe --run <dir>      # continue a specific run directory
 medulla -w .medulla/workflows/my-pipe --validate       # load + validate only
 medulla --docker -w .medulla/workflows/my-pipe         # run inside the workflow's Docker image
+medulla --apple -w .medulla/workflows/my-pipe          # run inside its Apple Container image
 medulla upgrade                                        # re-runs the installer (pipx installs: pipx upgrade)
 medulla refresh spar ~/Projects [--depth N] [--dry-run] # after upgrade: re-sync every deployed spar copy
                                                        # under a folder to the current bundle (workflow +
@@ -39,7 +41,7 @@ medulla refresh spar ~/Projects [--depth N] [--dry-run] # after upgrade: re-sync
 medulla --help                                         # the full env/signal reference, always current
 ```
 
-The scaffold runs out of the box — edit `workflow.yaml` from there. Exit codes: `0` succeeded, `2` the workflow **failed** (routed to `__exit_fail__`), `1` the engine **crashed** (the workflow definition or environment is broken), `130` interrupted (Ctrl-C and `docker stop` both stop the run gracefully: children are killed, the run stays resumable).
+The scaffold runs out of the box — edit `workflow.yaml` from there. Exit codes: `0` succeeded, `2` the workflow **failed** (routed to `__exit_fail__`), `1` the engine **crashed** (the workflow definition/environment is broken, or container cleanup could not be verified), `130` interrupted (Ctrl-C and container stop both give the run a graceful shutdown window, then kill remaining children; the run stays resumable).
 
 ## Writing workflows
 
@@ -86,7 +88,7 @@ In agent prompts, naming the signal is enough — "emit the signal named done" �
 
 Harnesses: `claude-code`, `codex`, `opencode`, `agy`. `effort` maps to each CLI's native knob. `max_attempts` retries flaky attempts (non-zero exit, timeout, agent silence); `fallback` is a second agent tried after the primary's attempts are exhausted. While an agent works, its text streams live to your terminal (`MEDULLA_STREAM=0` to silence).
 
-`sandbox` restricts a step's power. Default is `danger` — under `--docker` the container *is* the sandbox and every workflow written before this field relies on that. Set `sandbox: read-only` when a step feeds the model **untrusted** text (mail, chat logs, scraped pages) while the workspace is mounted read-write: it maps to the harness's native lock — claude `--permission-mode plan`, codex `-s read-only`, opencode denies `edit`/`write`/`patch`/`bash` (a shell is a write primitive). `agy` cannot express read-only and raises rather than silently downgrade.
+`sandbox` restricts a step's power. Default is `danger` — under `--docker` or `--apple` the container *is* the sandbox and every workflow written before this field relies on that. Set `sandbox: read-only` when a step feeds the model **untrusted** text (mail, chat logs, scraped pages) while the workspace is mounted read-write: it maps to the harness's native lock — claude `--permission-mode plan`, codex `-s read-only`, opencode denies `edit`/`write`/`patch`/`bash` (a shell is a write primitive). `agy` cannot express read-only and raises rather than silently downgrade.
 
 ### Hooks: pre and post
 
@@ -121,7 +123,7 @@ Adding `inputs:` turns the action into a pool: the body runs once per input, `ma
 
 Nearest wins per key: a workflow declaring `CLAUDE_CODE_OAUTH_TOKEN` overrides the global one **for that workflow only**; keys not overridden still flow down from the wider tiers.
 
-Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-file` (never `-e`: values would leak into `ps`/`docker inspect`). All tiers forward whole — what lives in your .env files is your call.
+Under `--docker` and `--apple`, the merged tiers are forwarded via a transient 0600 `--env-file` (never `-e`: values would leak into process/image inspection). All tiers forward whole — what lives in your .env files is your call.
 
 `init` seeds a `.gitignore` (`.env`, `runs/`) into every workflow it creates.
 
@@ -153,8 +155,10 @@ Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-fil
 | `MEDULLA_RETRY_DELAY_S` | pause between attempts / before fallback (default 2 — retry storms hit rate limits) |
 | `MEDULLA_RUN_ID` | pre-seed the run id (external correlation) |
 | `MEDULLA_STREAM=0` | silence live operator streaming |
-| `MEDULLA_IMAGE` | docker: run this ready image instead of building |
-| `MEDULLA_DOCKER=1` | set by docker.py inside containers (adapters key off it) |
+| `MEDULLA_IMAGE` | containers: run this ready image instead of building |
+| `MEDULLA_DOCKER=1` | compatibility sandbox marker set inside Docker and Apple containers |
+| `MEDULLA_APPLE_CPUS` | Apple container CPU limit (default `4`) |
+| `MEDULLA_APPLE_MEMORY` | Apple container memory limit (default `4g`) |
 
 ### Templates (rendered in prompts, shell commands, agent fields)
 
@@ -169,11 +173,11 @@ Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-fil
 
 Rule of thumb: **data flows to shell via env** (quoting-safe — `"$MEDULLA_INPUT_TITLE"` survives any bytes), templates are for slugs, paths and prompts.
 
-### vars vs .env vs docker vars
+### vars vs .env vs container vars
 
 - `vars:` — workflow **data**: templated, exported to env, persisted in run history, mutable via `<signal:var>`. Reserved names (`PATH`, `HOME`, `LD_*`, `MEDULLA_*`, …) are rejected.
 - `.env` — **secrets**: env-only, never templated, never persisted.
-- `IMAGE` / `DOCKERFILE` vars — docker image selection (see [Docker](#docker)).
+- `IMAGE` / `DOCKERFILE` vars — container image selection (see [Container runtimes](#container-runtimes)).
 
 ## Examples
 
@@ -284,9 +288,42 @@ nodes:
 - **Entry cleanup** (crash-only): there is no `finally` — exit hooks are an illusion under `kill -9`. Clean stale state idempotently at the start of the node that needs it clean.
 - **Parallel tickets**: the engine guarantees vars isolation; file/git isolation is the body's job (`git worktree` per input), disjointness is the producer's contract. Run one medulla run per workdir at a time (the workdir itself — artifacts, `opencode.json` — is shared).
 
-## Docker
+## Container runtimes
 
-`medulla --docker -w <dir>` re-runs the workflow inside its image; `scripts/docker.py` owns mounts and credential forwarding, `--build` forces a rebuild, `--mount <dir>` / `--mount-rw <dir>` add extra mounts under `/workspace/<name>`.
+Runtime selection is direct and per invocation:
+
+```bash
+medulla -w .medulla/workflows/spar             # host
+medulla --docker -w .medulla/workflows/spar    # Docker
+medulla --apple -w .medulla/workflows/spar     # Apple Container
+```
+
+The installed SPAR skill uses Docker by default. Select Apple explicitly with
+`medulla init spar --skill --apple`; run `medulla init spar --skill` to switch
+it back to Docker. On an existing workflow these commands refresh Medulla's
+runtime links, then update the workflow's `SKILL.md` and the registered
+Claude/Codex/OpenCode copies; they do not overwrite `workflow.yaml` or prompts.
+`medulla refresh spar ...` preserves
+the runtime already selected in each installed copy. By contrast,
+`medulla init spar` without `--skill` is an explicit template deploy/re-deploy.
+
+Docker is handled by `scripts/docker.py`; Apple container is handled by
+`scripts/apple_container.py`. Both preserve the same image resolution, mounts,
+credential forwarding, tmpfs shadow policy, extra mounts, and workflow exit
+codes. Apple reports `1` instead of `130` when its interrupted exact-name VM
+cannot be verified as removed. `--build` forces a no-cache image rebuild, and `--mount <dir>` /
+`--mount-rw <dir>` add extra mounts under `/workspace/<name>`.
+
+Docker and Apple keep separate local image stores. Switching an existing
+workflow to Apple does not reuse its Docker-local image: the first Apple run
+pulls a configured ready `IMAGE`, or builds the selected Dockerfile when no
+ready image is configured.
+
+Apple container requires Apple silicon, macOS 26+, and the `container` CLI from
+<https://github.com/apple/container>. Medulla gives its VM 4 CPUs and a 4 GiB
+limit by default; override those host-side limits with `MEDULLA_APPLE_CPUS` and
+`MEDULLA_APPLE_MEMORY`. The same limits are passed to Apple’s builder when an
+image must be built. Docker settings and behavior are unchanged.
 
 Image resolution: `MEDULLA_IMAGE` env → `--var IMAGE` → `vars.IMAGE` (a ready tag: pulled, never built) → otherwise **build** from `--var DOCKERFILE` → `vars.DOCKERFILE` → the packaged default (all four harnesses). Built tags are per-workflow and content-addressed (`medulla-<name>:<sha of Dockerfile>`) — workflows never share a tag by accident, and editing a Dockerfile rebuilds automatically.
 
@@ -299,7 +336,11 @@ docker:
   shadow: [secrets, .git]   # workspace-relative paths the container sees EMPTY
 ```
 
-`shadow` mounts an empty tmpfs over each `/workspace/<path>`: the host keeps the real content, the container sees an empty dir (writes to it vanish with the container). Paths must stay inside the workspace — absolute or `..` paths are a validation error. Without the block, behavior is byte-identical to before.
+`shadow` mounts an empty tmpfs over each `/workspace/<path>` in either runtime:
+the host keeps the real content, the container sees an empty dir (writes to it
+vanish with the container). The existing `docker:` name is retained for
+workflow compatibility. Paths must stay inside the workspace — absolute or
+`..` paths are a validation error. Without the block, behavior is unchanged.
 
 The law of the block: a workflow may only **shrink** its container's exposure here, never enlarge it — capability-adding knobs (extra mounts, host network) stay on the CLI, so a cloned workflow can't grant itself host access. Two practical notes: shadow paths should be **gitignored** (shadowing a tracked dir makes in-container git see it as deleted), and secrets forwarded via `.env` tiers still reach the container's env — shadow closes the filesystem channel only.
 
@@ -317,7 +358,7 @@ The law of the block: a workflow may only **shrink** its container's exposure he
 | `timeout` | 86400 | wall-clock deadline for the whole run; `0` = unlimited. Every child timeout is clamped to the remaining budget |
 | `defaults` | — | policy defaults for actions: `timeout`, `max_attempts`, `ignore_exit_code`, `fallback`, `on_signal` (per-key merge). Flat scalars only — never merged deep |
 | `keep_runs` | 20 | auto-prune of run history on start |
-| `docker` | — | container policy for `--docker` runs: `shadow: [paths]` (see [Docker](#docker)); shrink-only by law |
+| `docker` | — | compatible container policy for `--docker` and `--apple` runs: `shadow: [paths]` (see [Container runtimes](#container-runtimes)); shrink-only by law |
 
 ### Node fields
 
@@ -435,9 +476,15 @@ Shell bodies and hooks run via `$SHELL -lc` (login shell — your PATH applies).
 
 ### Harness notes
 
-Signal filtering: claude-code/codex scan **assistant text** mined from their JSON streams (tool output can never route); opencode/agy have no structured output — signals must start a line, and never quote signal syntax in prompts. opencode's output is merged from stderr (that's where it talks) and ANSI-stripped. `effort` maps to: claude `--effort`, codex `model_reasoning_effort`, opencode `reasoningEffort` (config), agy model-name suffix. agy refuses to run in a workspace it doesn't trust (fail-fast instead of hanging; skipped in Docker). An unauthenticated claude-code ("Not logged in") crashes the run immediately as `E_HARNESS` instead of burning retries — in Docker note that macOS keychain-bound OAuth does not reach the container: pass `CLAUDE_CODE_OAUTH_TOKEN`.
+Signal filtering: claude-code/codex scan **assistant text** mined from their JSON streams (tool output can never route); opencode/agy have no structured output — signals must start a line, and never quote signal syntax in prompts. opencode's output is merged from stderr (that's where it talks) and ANSI-stripped. `effort` maps to: claude `--effort`, codex `model_reasoning_effort`, opencode `reasoningEffort` (config), agy model-name suffix. agy refuses to run in a workspace it doesn't trust (fail-fast instead of hanging; skipped in containers). An unauthenticated claude-code ("Not logged in") crashes the run immediately as `E_HARNESS` instead of burning retries — macOS keychain-bound OAuth does not reach either container runtime, so pass `CLAUDE_CODE_OAUTH_TOKEN`.
 
-Adapters also configure the CLIs themselves (not your API — listed for debugging): claude gets `API_TIMEOUT_MS` and a stripped `ANTHROPIC_API_KEY` (the OAuth account must win); codex gets `-c stream_idle_timeout_ms` and prefers the `cx` token-refreshing wrapper; opencode gets its config via `OPENCODE_CONFIG_CONTENT` (permission allow, provider timeout, per-model reasoningEffort — no opencode.json is written); agy gets `--print-timeout`. All inner timeouts are sized from the step timeout + 300s slack so the engine always kills first.
+Container auth mirrors the existing Docker path. For `agy`, Medulla copies
+`~/.gemini/antigravity-cli` and the supported `gemini/antigravity` Keychain
+entries when they exist. If neither contains a usable non-interactive session,
+`agy` prompts for OAuth and fails in a background SPAR run; the panel then
+reports partial delivery instead of hiding the missing answer.
+
+Adapters also configure the CLIs themselves (not your API — listed for debugging): claude gets `API_TIMEOUT_MS` and a stripped `ANTHROPIC_API_KEY` (the OAuth account must win); codex gets `-c stream_idle_timeout_ms` and prefers the `cx` token-refreshing wrapper; opencode gets its config via `OPENCODE_CONFIG_CONTENT` (permission allow, provider timeout, per-model reasoningEffort — no opencode.json is written); agy gets `--print-timeout`. Default one-shot OpenCode invocations use a private in-memory DB with snapshots disabled so parallel workers never share SQLite or git-index state; explicit `--continue` / `--session` / `--fork` agent args retain OpenCode's persistent session behavior. All inner timeouts are sized from the step timeout + 300s slack so the engine always kills first.
 
 Development: `live-tests/` in the repo holds 20 battle workflows that run the real CLIs (adapters, pools, fallback, interrupt, resume) — `live-tests/run-all.sh` before release pushes. Unit suite: `cd cli-agent && pytest`.
 
@@ -458,7 +505,7 @@ Development: `live-tests/` in the repo holds 20 battle workflows that run the re
 | `MEDULLA_TASK_ID` | `MEDULLA_RUN_ID` |
 | `.medulla/vars.<task>.yaml` | `.medulla/workflows/<name>/runs/<id>/` |
 | `--stage` | `--node` |
-| `install-skill` | `init <name> --skill` |
+| `install-skill` | `init <name> --skill` (add `--apple` for Apple Container) |
 | gemini executor | removed (use `agy`) |
 | exit codes 0/1/2/3 ad-hoc | 0 ok / 1 engine crash / 2 workflow fail / 130 interrupt |
 
