@@ -71,6 +71,7 @@ HARNESS_ENV_KEYS = (
     "MEDULLA_RUN_ID",
     "MEDULLA_BRIDGE",
 )
+CLAUDE_TOKEN_KEY = "CLAUDE_CODE_OAUTH_TOKEN"
 
 
 def _parse_env_file(path: Path) -> dict:
@@ -99,6 +100,24 @@ def _collect_dotenv(workflow: str | None) -> dict:
             merged.update(_parse_env_file(parent / ".medulla" / ".env"))
         merged.update(_parse_env_file(wdir / ".env"))
     return merged
+
+
+def _add_claude_token_fallback(env: dict) -> None:
+    """Use the standard Claude profile token when no explicit token exists."""
+    if os.environ.get(CLAUDE_TOKEN_KEY) or env.get(CLAUDE_TOKEN_KEY):
+        return
+    token_path = Path.home() / ".claude" / "token-home"
+    try:
+        token = token_path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise SystemExit(f"error: cannot read Claude OAuth token: {token_path}: {exc}") from exc
+    if not token:
+        return
+    if "\n" in token or "\r" in token:
+        raise SystemExit(f"error: Claude OAuth token must be one line: {token_path}")
+    env[CLAUDE_TOKEN_KEY] = token
 
 
 env_file_for_run = None
@@ -546,6 +565,7 @@ def main():
 
     global env_file_for_run
     dotenv = _collect_dotenv(workflow)
+    _add_claude_token_fallback(dotenv)
     if dotenv:
         import atexit
         import tempfile

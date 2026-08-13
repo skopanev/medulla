@@ -33,6 +33,40 @@ def test_tier_merge_nearest_wins_all_tiers_whole(dockerpy, tmp_path, monkeypatch
     assert env["SLACK_TOKEN"] == "global-slack"               # ALL tiers whole (user's zone)
 
 
+def test_claude_token_home_is_fallback_only(dockerpy, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    token_dir = home / ".claude"
+    token_dir.mkdir(parents=True)
+    (token_dir / "token-home").write_text("profile-token\n", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+    env = {}
+    dockerpy._add_claude_token_fallback(env)
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "profile-token"
+
+    env = {"CLAUDE_CODE_OAUTH_TOKEN": "dotenv-token"}
+    dockerpy._add_claude_token_fallback(env)
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "dotenv-token"
+
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "shell-token")
+    env = {}
+    dockerpy._add_claude_token_fallback(env)
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
+
+
+def test_claude_token_home_rejects_multiple_lines(dockerpy, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    token_dir = home / ".claude"
+    token_dir.mkdir(parents=True)
+    (token_dir / "token-home").write_text("first\nsecond\n", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+
+    with pytest.raises(SystemExit, match="must be one line"):
+        dockerpy._add_claude_token_fallback({})
+
+
 def test_shadow_mounts_tmpfs_and_no_block_is_byte_identical(dockerpy, tmp_path):
     wdir = tmp_path / "wf"
     wdir.mkdir()

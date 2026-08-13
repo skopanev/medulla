@@ -121,6 +121,10 @@ Adding `inputs:` turns the action into a pool: the body runs once per input, `ma
 
 Nearest wins per key: a workflow declaring `CLAUDE_CODE_OAUTH_TOKEN` overrides the global one **for that workflow only**; keys not overridden still flow down from the wider tiers.
 
+For Docker runs, Claude OAuth needs no duplicate `.env` entry when the standard
+`~/.claude/token-home` profile token exists. Resolution is explicit
+`CLAUDE_CODE_OAUTH_TOKEN` environment → nearest `.env` tier → `token-home`.
+
 Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-file` (never `-e`: values would leak into `ps`/`docker inspect`). All tiers forward whole — what lives in your .env files is your call.
 
 `init` seeds a `.gitignore` (`.env`, `runs/`) into every workflow it creates.
@@ -435,7 +439,7 @@ Shell bodies and hooks run via `$SHELL -lc` (login shell — your PATH applies).
 
 ### Harness notes
 
-Signal filtering: claude-code/codex scan **assistant text** mined from their JSON streams (tool output can never route); opencode/agy have no structured output — signals must start a line, and never quote signal syntax in prompts. opencode's output is merged from stderr (that's where it talks) and ANSI-stripped. `effort` maps to: claude `--effort`, codex `model_reasoning_effort`, opencode `reasoningEffort` (config), agy model-name suffix. agy refuses to run in a workspace it doesn't trust (fail-fast instead of hanging; skipped in Docker). An unauthenticated claude-code ("Not logged in") crashes the run immediately as `E_HARNESS` instead of burning retries — in Docker note that macOS keychain-bound OAuth does not reach the container: pass `CLAUDE_CODE_OAUTH_TOKEN`.
+Signal filtering: claude-code/codex scan **assistant text** mined from their JSON streams (tool output can never route); opencode/agy have no structured output — signals must start a line, and never quote signal syntax in prompts. opencode's output is merged from stderr (that's where it talks) and ANSI-stripped. `effort` maps to: claude `--effort`, codex `model_reasoning_effort`, opencode `reasoningEffort` (config), agy model-name suffix. agy refuses to run in a workspace it doesn't trust (fail-fast instead of hanging; skipped in Docker). An unauthenticated claude-code ("Not logged in") crashes the run immediately as `E_HARNESS` instead of burning retries. Docker resolves Claude OAuth from an explicit token, the `.env` tiers, or the standard `~/.claude/token-home` profile token, in that order.
 
 Adapters also configure the CLIs themselves (not your API — listed for debugging): claude gets `API_TIMEOUT_MS` and a stripped `ANTHROPIC_API_KEY` (the OAuth account must win); codex gets `-c stream_idle_timeout_ms` and prefers the `cx` token-refreshing wrapper; opencode gets its config via `OPENCODE_CONFIG_CONTENT` (permission allow, provider timeout, per-model reasoningEffort — no opencode.json is written); agy gets `--print-timeout`. All inner timeouts are sized from the step timeout + 300s slack so the engine always kills first.
 
