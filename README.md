@@ -125,6 +125,11 @@ For Docker runs, Claude OAuth needs no duplicate `.env` entry when the standard
 `~/.claude/token-home` profile token exists. Resolution is explicit
 `CLAUDE_CODE_OAUTH_TOKEN` environment → nearest `.env` tier → `token-home`.
 
+The in-image `cx` wrapper reads the optional broker account directly from
+`~/.config/hltm-broker/config.json`; no duplicate Medulla `.env` entry is needed.
+An explicit `CX_ACCOUNT` remains an override, and `default` is used only when the
+config has no account.
+
 Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-file` (never `-e`: values would leak into `ps`/`docker inspect`). All tiers forward whole — what lives in your .env files is your call.
 
 `init` seeds a `.gitignore` (`.env`, `runs/`) into every workflow it creates.
