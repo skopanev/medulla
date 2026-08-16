@@ -86,13 +86,33 @@ def test_agy_unknown_model_passes_verbatim(tmp_path):
     assert "Claude Opus 4.6 (Thinking)" in inv.argv
 
 
-def test_opencode_argv_positional_prompt(tmp_path):
+def test_opencode_prompt_rides_stdin(tmp_path):
+    # The prompt must NOT be a positional argv string: Linux caps one argv string
+    # at MAX_ARG_STRLEN (131072B), so a big prompt used to die with E2BIG.
     a = H.OpenCodeAdapter.__new__(H.OpenCodeAdapter)
     inv = a.build(AgentSpec(harness="opencode", model="zai/glm-5.3"),
                   tmp_path / "p.md", "PROMPT TEXT", 60)
     assert inv.argv[:3] == ["opencode", "run", "--agent"]
-    assert inv.argv[-1] == "PROMPT TEXT"
+    assert inv.stdin == "PROMPT TEXT"
+    assert "PROMPT TEXT" not in inv.argv
     assert "-m" in inv.argv and "zai/glm-5.3" in inv.argv
+
+
+def test_opencode_huge_prompt_stays_off_argv(tmp_path):
+    # 150KB — over MAX_ARG_STRLEN. Must build cleanly (no tripwire, no E2BIG).
+    a = H.OpenCodeAdapter.__new__(H.OpenCodeAdapter)
+    big = "x" * 150_000
+    inv = a.build(AgentSpec(harness="opencode", model="zai/glm-5.3"),
+                  tmp_path / "p.md", big, 60)
+    assert inv.stdin == big
+    assert max(len(s.encode()) for s in inv.argv) < 1_000
+
+
+def test_invoke_tripwire_rejects_oversized_argv():
+    # Regression guard for the whole adapter family, not just opencode.
+    with pytest.raises(EngineCrash) as e:
+        H.Invoke(argv=["cli", "x" * 150_000])
+    assert "E2BIG" in str(e.value)
 
 
 # ── prepare() ────────────────────────────────────────────────────────────────

@@ -82,6 +82,21 @@ class Invoke:
     merge_stderr: bool = False    # CLIs that talk on stderr (opencode); the filter
                                   # still gates what can route
 
+    # Linux caps a SINGLE argv string at MAX_ARG_STRLEN (131072 bytes) — exceed it
+    # and execve fails with E2BIG before the harness ever runs. Every adapter funnels
+    # through here, so the tripwire catches the regression class once, not per-CLI.
+    _MAX_ARGV_STR_BYTES = 100_000
+
+    def __post_init__(self):
+        for i, a in enumerate(self.argv):
+            n = len(a.encode("utf-8", "surrogatepass"))
+            if n >= self._MAX_ARGV_STR_BYTES:
+                raise EngineCrash(
+                    E_HARNESS,
+                    f"Invoke: argv[{i}] is {n} bytes (>= {self._MAX_ARGV_STR_BYTES}); "
+                    f"a single argv string this large will crash the child with E2BIG "
+                    f"(Linux MAX_ARG_STRLEN=131072). Big payloads must ride stdin, not argv.")
+
 
 class HarnessAdapter:
     name = "abstract"
@@ -326,7 +341,10 @@ class OpenCodeAdapter(HarnessAdapter):
         if spec.model:
             argv += ["-m", spec.model]
         argv += spec.args
-        argv.append(prompt_text)                 # positional prompt (argv list, no shell)
+        # The prompt rides STDIN, not positional argv — as in CodexAdapter. Linux
+        # caps a SINGLE argv string at MAX_ARG_STRLEN=131072 bytes, so a positional
+        # prompt made every run with a >128KB prompt die with E2BIG. Model/effort
+        # flags stay on argv: they are tiny.
         # Config rides in OPENCODE_CONFIG_CONTENT (ported from a parallel v1 fix,
         # main@217f751): the old on-disk opencode.json lingered in the workdir,
         # was stale-reused across runs, needed a TOCTOU lock under parallel
@@ -353,7 +371,7 @@ class OpenCodeAdapter(HarnessAdapter):
         # stderr with ANSI decoration; --format json is half-alive on 1.15.5
         # (single step_start event, rc 0 — probed live). Pilot's scar: merge
         # the streams, then filter hard.
-        return Invoke(argv=argv, merge_stderr=True,
+        return Invoke(argv=argv, stdin=prompt_text, merge_stderr=True,
                       env={"OPENCODE_CONFIG_CONTENT": json.dumps(data)})
 
     def filter_stdout(self, stdout: str) -> str:
