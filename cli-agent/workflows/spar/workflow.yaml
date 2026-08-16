@@ -40,10 +40,11 @@ nodes:
 
   panel:
     inputs:
-      - {slug: glm5,   harness: opencode,    model: zai-coding-plan/glm-5.2, effort: max}
+      - {slug: glm5,   harness: opencode,    model: zai-coding-plan/glm-5.3, effort: max}
       - {slug: gpt5,   harness: codex,       model: gpt-5.6-sol,             effort: high}
       - {slug: sonnet, harness: claude-code, model: claude-sonnet-5}
       - {slug: gemini, harness: agy,         model: "Gemini 3.1 Pro (High)"}
+      - {slug: qwen,   harness: opencode,    model: alibaba-token-plan/qwen3.8-max, effort: xhigh}
     max_parallel: all
     min_success: 1
     agent:

@@ -88,11 +88,11 @@ def test_agy_unknown_model_passes_verbatim(tmp_path):
 
 def test_opencode_argv_positional_prompt(tmp_path):
     a = H.OpenCodeAdapter.__new__(H.OpenCodeAdapter)
-    inv = a.build(AgentSpec(harness="opencode", model="zai/glm-5.2"),
+    inv = a.build(AgentSpec(harness="opencode", model="zai/glm-5.3"),
                   tmp_path / "p.md", "PROMPT TEXT", 60)
     assert inv.argv[:3] == ["opencode", "run", "--agent"]
     assert inv.argv[-1] == "PROMPT TEXT"
-    assert "-m" in inv.argv and "zai/glm-5.2" in inv.argv
+    assert "-m" in inv.argv and "zai/glm-5.3" in inv.argv
 
 
 # ── prepare() ────────────────────────────────────────────────────────────────
@@ -101,12 +101,12 @@ def test_opencode_config_rides_in_env(tmp_path):
     # ported from main@217f751: no on-disk opencode.json — the config layers
     # via OPENCODE_CONFIG_CONTENT, per-invocation (heterogeneous efforts work)
     a = H.OpenCodeAdapter.__new__(H.OpenCodeAdapter)
-    spec = AgentSpec(harness="opencode", model="zai/glm-5.2", effort="high")
+    spec = AgentSpec(harness="opencode", model="zai/glm-5.3", effort="high")
     inv = a.build(spec, tmp_path / "p.md", "P", 600)
     cfg = json.loads(inv.env["OPENCODE_CONFIG_CONTENT"])
     assert cfg["permission"] == "allow"
     assert cfg["provider"]["zai"]["options"]["timeout"] == (600 + 300) * 1000
-    assert cfg["provider"]["zai"]["models"]["glm-5.2"]["options"]["reasoningEffort"] == "high"
+    assert cfg["provider"]["zai"]["models"]["glm-5.3"]["options"]["reasoningEffort"] == "high"
     assert not (tmp_path / "opencode.json").exists()
 
 
@@ -363,7 +363,7 @@ def test_opencode_sandbox_read_only_denies_writes(tmp_path):
     # opencode has no read-only flag — the config is the only lever. bash is
     # denied too: a shell is a write primitive.
     a = H.OpenCodeAdapter.__new__(H.OpenCodeAdapter)
-    inv = a.build(AgentSpec(harness="opencode", model="zai/glm-5.2", sandbox="read-only"),
+    inv = a.build(AgentSpec(harness="opencode", model="zai/glm-5.3", sandbox="read-only"),
                   tmp_path / "p.md", "P", 60)
     perm = json.loads(inv.env["OPENCODE_CONFIG_CONTENT"])["permission"]
     assert perm == {"edit": "deny", "write": "deny", "patch": "deny", "bash": "deny"}
