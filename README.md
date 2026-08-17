@@ -162,6 +162,7 @@ Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-fil
 | `MEDULLA_RETRY_DELAY_S` | pause between attempts / before fallback (default 2 — retry storms hit rate limits) |
 | `MEDULLA_RUN_ID` | pre-seed the run id (external correlation) |
 | `MEDULLA_STREAM=0` | silence live operator streaming |
+| `MEDULLA_SHELL` | shell for bodies and hooks (default `bash` — never `$SHELL`, see [Harness notes](#harness-notes)) |
 | `MEDULLA_IMAGE` | docker: run this ready image instead of building |
 | `MEDULLA_DOCKER=1` | set by docker.py inside containers (adapters key off it) |
 
@@ -440,7 +441,7 @@ Retention: keep the newest `keep_runs` finished runs; unfinished dirs younger th
 
 ### Execution details
 
-Shell bodies and hooks run via `$SHELL -lc` (login shell — your PATH applies). Each child gets its own process group; on timeout the whole group is SIGTERMed, then SIGKILLed. Attempt logs stream to `steps/.../attempt-N-<tag>.txt` as they arrive (`tail -f` works mid-run).
+Shell bodies and hooks run via `bash -lc` — **not** your login shell. A workflow is code committed to a repo: it must mean the same thing on every machine, and `$SHELL` made it mean whatever the operator happens to use. The scar: zsh does not word-split an unquoted parameter, so `for x in $list` iterates **once** over the whole blob — a stage looped a single time, produced nothing, and still signalled ready, while the same file worked in the container. Set `MEDULLA_SHELL` to choose another shell deliberately. Two consequences on macOS: the PATH comes from `~/.bash_profile`/`~/.profile` (not `~/.zshrc`), and `/bin/bash` is 3.2 — no `mapfile`, no `declare -A`, no `${var^^}`, no `globstar`, unlike bash 5 in the container. `brew install bash` closes that gap. Each child gets its own process group; on timeout the whole group is SIGTERMed, then SIGKILLed. Attempt logs stream to `steps/.../attempt-N-<tag>.txt` as they arrive (`tail -f` works mid-run).
 
 ### Harness notes
 

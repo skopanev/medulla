@@ -204,7 +204,17 @@ def build_run_command(image, volumes, args, container_name: str) -> list[str]:
 
 
 def _config_yaml(d: Path) -> Path:
-    """workflow.yaml, else the pre-4.1 name pipeline.yaml (read-side only)."""
+    """workflow.yaml, else the pre-4.1 name pipeline.yaml (read-side only).
+
+    A PATH TO A YAML IS ALREADY THE ANSWER. `-w dir/other.yaml` is valid on the CLI side
+    (v2/cli.py::_resolve_workflow_yaml honours a file), so it has to be valid here too —
+    otherwise the identical command works bare and dies under --docker, looking for
+    "other.yaml/workflow.yaml". A workflow that lives as one file among several in a
+    directory (brain/resolve.yaml beside brain/workflow.yaml) could not be containerised
+    at all: found live, it forced that stage to run on the host instead.
+    """
+    if d.is_file():
+        return d
     w = d / "workflow.yaml"
     if w.is_file():
         return w
@@ -232,15 +242,19 @@ def resolve_dockerfile(workflow: str | None, cli_vars: dict) -> Path:
     the packaged default (one shared image for workflows that don't care)."""
     if not workflow:
         raise SystemExit("error: -w/--workflow required to resolve Dockerfile via workflow vars")
-    workflow_dir = Path(workflow)
+    # -w may name the yaml itself (see _config_yaml). A relative DOCKERFILE is relative to
+    # the workflow's DIRECTORY either way — without this, `-w brain/resolve.yaml` resolved
+    # to "brain/resolve.yaml/Dockerfile" and the build died on a path that cannot exist.
+    _w = Path(workflow)
+    workflow_dir = _w.parent if _w.is_file() else _w
 
     cli_df = cli_vars.get("DOCKERFILE")
     if cli_df:
         p = Path(cli_df)
         return p if p.is_absolute() else (workflow_dir / p)
 
-    workflow_yaml = _config_yaml(workflow_dir)
-    if not workflow_yaml.is_file():
+    workflow_yaml = _config_yaml(_w)          # _w, not workflow_dir: in file mode the
+    if not workflow_yaml.is_file():           # yaml IS the path; the dir has no workflow.yaml
         raise SystemExit(f"error: workflow.yaml not found: {workflow_yaml}")
     try:
         import yaml
@@ -265,7 +279,12 @@ def image_tag_for(workflow: str, dockerfile: Path) -> str:
     rebuild without a manual --build (a new hash is an absent image)."""
     import hashlib
     digest = hashlib.sha256(dockerfile.read_bytes()).hexdigest()[:12]
-    name = "default" if dockerfile == SCRIPT_DIR / "Dockerfile.default" else Path(workflow).name
+    # A yaml path drops its extension (`-w brain/resolve.yaml` must not tag the image
+    # "medulla-resolve.yaml:<sha>"); a DIRECTORY keeps its full name, or a dir called
+    # "my.workflows" would silently tag as "my".
+    p = Path(workflow)
+    wf_name = p.stem if p.is_file() else p.name
+    name = "default" if dockerfile == SCRIPT_DIR / "Dockerfile.default" else wf_name
     return f"medulla-{name}:{digest}"
 
 

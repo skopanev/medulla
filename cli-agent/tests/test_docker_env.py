@@ -104,3 +104,41 @@ def test_env_file_unlinked_on_every_exit_path(dockerpy, tmp_path):
     dockerpy._unlink_env_file()
     assert not f.exists() and dockerpy.env_file_for_run is None
     dockerpy._unlink_env_file()                               # second call is a no-op
+
+
+def test_workflow_may_be_a_yaml_file_not_only_a_dir(dockerpy, tmp_path):
+    # `-w dir/other.yaml` is valid on the CLI side (v2/cli.py::_resolve_workflow_yaml),
+    # so it must be valid under --docker too — otherwise the same command works bare
+    # and dies containerised, hunting for "other.yaml/workflow.yaml".
+    brain = tmp_path / "brain"
+    brain.mkdir()
+    yaml_file = brain / "resolve.yaml"
+    yaml_file.write_text("version: '2'\nstart: x\nnodes:\n  x:\n    shell: echo hi\n",
+                         encoding="utf-8")
+    assert dockerpy._config_yaml(yaml_file) == yaml_file
+
+
+def test_relative_dockerfile_resolves_against_the_dir_even_in_file_mode(dockerpy, tmp_path):
+    # The regression: workflow_dir was Path(workflow) verbatim, so a relative
+    # vars.DOCKERFILE became "brain/resolve.yaml/Dockerfile.custom" — unopenable.
+    brain = tmp_path / "brain"
+    brain.mkdir()
+    (brain / "Dockerfile.custom").write_text("FROM scratch\n", encoding="utf-8")
+    yaml_file = brain / "resolve.yaml"
+    yaml_file.write_text("version: '2'\nvars:\n  DOCKERFILE: Dockerfile.custom\n"
+                         "start: x\nnodes:\n  x:\n    shell: echo hi\n", encoding="utf-8")
+    df = dockerpy.resolve_dockerfile(str(yaml_file), {})
+    assert df == brain / "Dockerfile.custom" and df.is_file()
+
+
+def test_image_tag_drops_the_yaml_extension_but_keeps_dir_names_whole(dockerpy, tmp_path):
+    brain = tmp_path / "brain"
+    brain.mkdir()
+    df = brain / "Dockerfile.custom"
+    df.write_text("FROM scratch\n", encoding="utf-8")
+    yaml_file = brain / "resolve.yaml"
+    yaml_file.write_text("version: '2'\n", encoding="utf-8")
+    assert dockerpy.image_tag_for(str(yaml_file), df).startswith("medulla-resolve:")
+    dotted = tmp_path / "my.workflows"       # a DIRECTORY with a dot keeps its full name
+    dotted.mkdir()
+    assert dockerpy.image_tag_for(str(dotted), df).startswith("medulla-my.workflows:")

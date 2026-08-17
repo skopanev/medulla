@@ -560,7 +560,14 @@ class Engine:
         with per-input harness/model). Optional fields rendering empty count as absent."""
         from .harness import Invoke
         if action.kind == "shell":
-            shell = os.environ.get("SHELL", "bash")
+            # BASH, not $SHELL. A workflow is code committed to a repo and must behave the
+            # same everywhere it runs; $SHELL makes it behave like whatever the operator
+            # happens to use. On a mac that is zsh, which does NOT word-split an unquoted
+            # parameter — so `for x in $list` silently iterates ONCE over the whole blob.
+            # Found live: a stage read a 40-line list, looped once, produced nothing, and
+            # still signalled ready; in the container ($SHELL unset → bash) the same file
+            # worked. Honour MEDULLA_SHELL for anyone who deliberately wants another one.
+            shell = os.environ.get("MEDULLA_SHELL", "bash")
             rendered = render_fn(action.shell, "shell")
             return Invoke(argv=[shell, "-lc", rendered]), None, None
 

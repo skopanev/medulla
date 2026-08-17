@@ -406,3 +406,37 @@ def test_sandbox_unknown_value_is_e_harness(tmp_path):
         a.build(AgentSpec(harness="claude-code", sandbox="readonly"),
                 tmp_path / "p.md", "P", 60)
     assert exc.value.code == "E_HARNESS" and "not one of" in exc.value.message
+
+
+def test_shell_bodies_use_bash_not_the_login_shell(monkeypatch, tmp_path):
+    # A workflow is committed code: it must not change meaning because the operator
+    # runs zsh (which does NOT word-split `$var`, so `for x in $list` looped once).
+    import medulla.v2.procrun as P
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    monkeypatch.delenv("MEDULLA_SHELL", raising=False)
+    captured = {}
+
+    def fake_popen(argv, **kw):
+        captured["argv"] = argv
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(P.subprocess, "Popen", fake_popen)
+    with pytest.raises(RuntimeError):
+        P.run("for x in $list; do echo $x; done", cwd=tmp_path, timeout_s=5)
+    assert captured["argv"][0] == "bash" and captured["argv"][1] == "-lc"
+
+
+def test_medulla_shell_overrides_the_default(monkeypatch, tmp_path):
+    import medulla.v2.procrun as P
+    monkeypatch.setenv("SHELL", "/bin/zsh")
+    monkeypatch.setenv("MEDULLA_SHELL", "/bin/sh")
+    captured = {}
+
+    def fake_popen(argv, **kw):
+        captured["argv"] = argv
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(P.subprocess, "Popen", fake_popen)
+    with pytest.raises(RuntimeError):
+        P.run("echo hi", cwd=tmp_path, timeout_s=5)
+    assert captured["argv"][0] == "/bin/sh"

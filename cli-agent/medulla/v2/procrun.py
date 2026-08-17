@@ -53,7 +53,10 @@ def run(
     echo=None,   # callable(tag, line) for live operator streaming
 ) -> RunResult:
     if isinstance(command, str):
-        shell = os.environ.get("SHELL", "bash")
+        # bash, not $SHELL — same reason as engine.py: hooks are workflow code and must not
+        # change meaning because the operator's login shell differs (zsh does no word
+        # splitting on `$var`). MEDULLA_SHELL overrides for a deliberate choice.
+        shell = os.environ.get("MEDULLA_SHELL", "bash")
         argv = [shell, "-lc", command]
     else:
         argv = command
