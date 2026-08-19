@@ -53,20 +53,29 @@ def entry() -> int:
         from .init import bundled_templates, deploy_template, install_skill_md, run_init, scaffold_workflow
         args = [a for a in argv[1:] if not a.startswith("-")]
         want_skill = "--skill" in argv
+        local = "--local" in argv           # this project only; default is machine-wide
         if not args:
             names = ", ".join(bundled_templates()) or "none bundled"
-            print("usage: medulla init <name> [--skill]", file=sys.stderr)
+            print("usage: medulla init <name> [--skill] [--local]", file=sys.stderr)
             print(f"  a bundled template name deploys that template ({names});",
                   file=sys.stderr)
             print("  any other name scaffolds a new workflow;", file=sys.stderr)
-            print("  --skill also registers SKILL.md with Claude Code", file=sys.stderr)
+            print("  --skill also registers SKILL.md with the agent CLIs", file=sys.stderr)
+            print("  --local installs into THIS project instead of machine-wide;",
+                  file=sys.stderr)
+            print("    a local copy always wins over the machine-wide one", file=sys.stderr)
             return 1
         run_init()                          # project runtime (.medulla/), idempotent
         name = args[0]
-        rc = deploy_template(name) if name in bundled_templates()             else scaffold_workflow(name)
+        # A template is the same everywhere, so it installs once per machine and every
+        # repo resolves it; a scaffold is new work belonging to the repo you are in.
+        rc = (deploy_template(name, local=local) if name in bundled_templates()
+              else scaffold_workflow(name))
         if rc == 0 and want_skill:
             from pathlib import Path as _P
-            rc = install_skill_md(name, _P(".medulla") / "workflows" / name)
+            wdir = ((_P(".medulla") if local or name not in bundled_templates()
+                     else _P.home() / ".medulla") / "workflows" / name)
+            rc = install_skill_md(name, wdir, local=local)
         return rc
     if argv and argv[0] == "upgrade":
         # two install methods exist: install.sh (venv at ~/.medulla/engine;

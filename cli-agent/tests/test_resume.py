@@ -3,6 +3,7 @@ an interrupted pool must not re-source and must not re-run done inputs."""
 import fcntl
 import json
 import os
+from pathlib import Path
 
 from medulla.v2.cli import main as cli_main
 from medulla.v2.engine import find_resumable, run_workflow
@@ -419,11 +420,17 @@ def test_init_without_name_prints_usage(tmp_path, monkeypatch, capsys):
 
 
 def test_init_deploys_bundled_template(tmp_path, monkeypatch):
+    # A template installs machine-wide by default: same file everywhere, one to update.
+    # HOME is redirected so the suite never writes into the real one.
     import medulla.cli as shim
+    home = tmp_path / "home"; home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("sys.argv", ["medulla", "init", "spar"])
     assert shim.entry() == 0
-    pdir = tmp_path / ".medulla" / "workflows" / "spar"
+    assert not (tmp_path / ".medulla" / "workflows" / "spar" / "workflow.yaml").exists()
+    pdir = home / ".medulla" / "workflows" / "spar"
     assert (pdir / "workflow.yaml").is_file()
     assert (pdir / "prompts" / "spar.md").is_file()
     assert ".env" in (pdir / ".gitignore").read_text()
@@ -449,17 +456,35 @@ def test_init_scaffolds_a_workflow(tmp_path, monkeypatch):
 
 def test_init_skill_flag(tmp_path, monkeypatch):
     import medulla.cli as shim
+    home = tmp_path / "home"; home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("sys.argv", ["medulla", "init", "spar", "--skill"])
     assert shim.entry() == 0
-    for root in (".claude", ".agents", ".opencode"):
-        skill = tmp_path / root / "skills" / "spar" / "SKILL.md"
+    # machine-wide skill dirs: usable from every repo, no per-checkout install
+    for root in (home / ".claude" / "skills", home / ".agents" / "skills",
+                 home / ".config" / "opencode" / "skills"):
+        skill = root / "spar" / "SKILL.md"
         assert skill.is_file() and "spar" in skill.read_text()
+    # a scaffold is this repo's own work: it stays local, skill included
     monkeypatch.setattr("sys.argv", ["medulla", "init", "fresh", "--skill"])
     assert shim.entry() == 0
-    # scaffold got a starter SKILL.md, and it is registered
     assert (tmp_path / ".medulla" / "workflows" / "fresh" / "SKILL.md").is_file()
-    assert (tmp_path / ".claude" / "skills" / "fresh" / "SKILL.md").is_file()
+
+
+def test_init_local_flag_keeps_everything_in_the_project(tmp_path, monkeypatch):
+    import medulla.cli as shim
+    home = tmp_path / "home"; home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["medulla", "init", "spar", "--skill", "--local"])
+    assert shim.entry() == 0
+    assert (tmp_path / ".medulla" / "workflows" / "spar" / "workflow.yaml").is_file()
+    assert (tmp_path / ".claude" / "skills" / "spar" / "SKILL.md").is_file()
+    assert not (home / ".medulla" / "workflows" / "spar").exists()
+    assert not (home / ".claude" / "skills" / "spar").exists()
 
 
 def test_refresh_scans_and_updates(tmp_path, monkeypatch):

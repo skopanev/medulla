@@ -20,9 +20,10 @@ curl -sSL https://raw.githubusercontent.com/skopanev/medulla/main/install.sh | b
 #  dev: MEDULLA_REPO=/path/to/checkout bash install.sh — editable, edits apply instantly)
 
 cd your-project
-medulla init my-pipe              # scaffold: commented workflow.yaml, README, .gitignore, prompts/
-medulla init spar                 # ...or deploy a bundled template (spar: a panel of models)
-medulla init spar --skill         # ...and register its SKILL.md with claude-code / codex / opencode
+medulla init my-pipe              # scaffold THIS project's workflow: commented workflow.yaml, prompts/
+medulla init spar                 # install a bundled template MACHINE-WIDE (~/.medulla/workflows/)
+medulla init spar --skill         # ...and register its SKILL.md machine-wide with claude-code / codex / opencode
+medulla init spar --local         # ...or install into this project only (a local copy always wins)
 medulla init                      # lists available bundled templates
 
 medulla -w .medulla/workflows/my-pipe                  # run

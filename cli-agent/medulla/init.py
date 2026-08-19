@@ -125,15 +125,41 @@ SKILL_DESTS = (          # every agent CLI that reads skills (main@dca7dbf)
     Path(".opencode") / "skills",    # opencode
 )
 
+def skill_dests_global() -> tuple[Path, ...]:
+    """The same CLIs, machine-wide: a skill here works in EVERY repo, which is what a
+    machine-wide workflow wants — one copy to update, no install step per checkout.
 
-def install_skill_md(name: str, workflow_dir: Path) -> int:
-    """Register the workflow's SKILL.md with every agent CLI's skill dir."""
+    Resolved on CALL, never at import: Path.home() captured at import time ignores a
+    later HOME change, which silently wrote into the real home during tests.
+    opencode reads ~/.config/opencode — the per-user layout differs from per-project.
+    """
+    home = Path.home()
+    return (home / ".claude" / "skills",
+            home / ".agents" / "skills",
+            home / ".config" / "opencode" / "skills")
+
+
+def install_skill_md(name: str, workflow_dir: Path, local: bool = False) -> int:
+    """Register the workflow's SKILL.md with every agent CLI's skill dir.
+
+    Sourced the same way the workflow itself is: local copy first, then the
+    machine-wide one in ~/.medulla/workflows/<name>. A shared definition should not
+    force every repo to keep its own duplicate of the skill text — refresh already
+    reads it from the bundle, and this made `init --skill` the only command that
+    still demanded a local file.
+    """
     import shutil
     src = workflow_dir / "SKILL.md"
+    if not src.is_file():
+        shared = Path.home() / ".medulla" / "workflows" / name / "SKILL.md"
+        if shared.is_file():
+            src = shared
     if not src.is_file():                      # scaffolds get a starter
+        src = workflow_dir / "SKILL.md"
+        src.parent.mkdir(parents=True, exist_ok=True)
         src.write_text(SKILL_MD.replace("<NAME>", name), encoding="utf-8")
         print(f"  created starter {src} — edit the description")
-    for root in SKILL_DESTS:
+    for root in (SKILL_DESTS if local else skill_dests_global()):
         dest = root / name
         dest.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest / "SKILL.md")
@@ -267,9 +293,16 @@ def bundled_templates() -> list[str]:
         return []
 
 
-def deploy_template(name: str) -> int:
-    """Copy a bundled workflow (template) into the project."""
-    dest = Path(".medulla") / "workflows" / name
+def deploy_template(name: str, local: bool = False) -> int:
+    """Install a bundled workflow — machine-wide by default, or into this project.
+
+    Machine-wide (~/.medulla/workflows/<name>) is the default because a template is
+    the same everywhere: one copy to update, and every repo resolves it (see
+    v2/cli.py::_resolve_workflow_yaml). runs/ still land in the project that started
+    them, so history never pools. --local writes into .medulla/workflows/<name>
+    instead, and a local copy always wins over the machine-wide one.
+    """
+    dest = (Path(".medulla") if local else Path.home() / ".medulla") / "workflows" / name
     existed = (dest / "workflow.yaml").exists()   # overwrite by default: re-deploy
                                                   # refreshes template files; runs/ is
                                                   # preserved (ignored from source below)
