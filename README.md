@@ -134,6 +134,24 @@ Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-fil
 
 `init` seeds a `.gitignore` (`.env`, `runs/`) into every workflow it creates.
 
+### One shared workflow, many repos
+
+A workflow definition can live in ONE place and be used everywhere — symlink the file (not
+the directory) into each repo:
+
+```bash
+mkdir -p .medulla/workflows/spar
+ln -s ~/.medulla/workflows/spar/workflow.yaml .medulla/workflows/spar/workflow.yaml
+ln -s ~/.medulla/workflows/spar/prompts       .medulla/workflows/spar/prompts
+```
+
+The directory around the link stays repo-local, so `runs/` and artifacts are still written
+per-worktree — nothing pools into the shared copy. Under `--docker` the target is mounted
+read-only at the same `/workspace` path, so the link does not dangle inside the container.
+
+**Local overrides shared**: replace the symlink with a real file and that repo runs its own
+version. Nothing else changes.
+
 ## All variables
 
 ### Environment the engine provides (bodies and hooks)

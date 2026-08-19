@@ -383,6 +383,25 @@ def build_volumes(claude_home, mount_agy=True):
 
     add(cwd, "/workspace")
 
+    # Shared workflow definitions: a symlink under .medulla/workflows/ points OUT of the
+    # workspace (e.g. ~/.medulla/workflows/spar/workflow.yaml, one copy per machine), and
+    # only cwd is mounted — so inside the container the link dangles and the workflow is
+    # "not found". Mount each target read-only at the SAME path it occupies in /workspace.
+    # Only the linked file/dir travels: the directory around it stays repo-local, so runs/
+    # and artifacts are still written per-worktree. A real file always beats a link, so a
+    # project that wants its own version just replaces it — local overrides shared.
+    for link in sorted((cwd / ".medulla" / "workflows").rglob("*")):
+        if not link.is_symlink():
+            continue
+        try:
+            target = link.resolve(strict=True)
+            rel = link.relative_to(cwd)
+        except (OSError, ValueError):
+            continue                       # broken link or outside cwd: leave it be
+        if cwd in target.parents or target == cwd:
+            continue                       # points back inside the workspace: already there
+        add(target, f"/workspace/{rel}", ro=True)
+
     codex_dir = home / ".codex"
     if codex_dir.is_dir():
         add(codex_dir.resolve(), "/mnt/codex", ro=True)

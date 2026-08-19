@@ -142,3 +142,52 @@ def test_image_tag_drops_the_yaml_extension_but_keeps_dir_names_whole(dockerpy, 
     dotted = tmp_path / "my.workflows"       # a DIRECTORY with a dot keeps its full name
     dotted.mkdir()
     assert dockerpy.image_tag_for(str(dotted), df).startswith("medulla-my.workflows:")
+
+
+def test_symlinked_workflow_target_is_mounted_at_the_same_path(dockerpy, tmp_path, monkeypatch):
+    # A shared workflow lives outside the repo (~/.medulla/workflows/<name>) and only cwd
+    # is mounted, so inside the container the link dangles: "workflow not found". Its
+    # target must be mounted read-only at the SAME /workspace path the link occupies.
+    shared = tmp_path / "shared" / "spar"
+    shared.mkdir(parents=True)
+    real = shared / "workflow.yaml"
+    real.write_text("version: '2'\n", encoding="utf-8")
+
+    cwd = tmp_path / "repo"
+    (cwd / ".medulla" / "workflows" / "spar").mkdir(parents=True)
+    (cwd / ".medulla" / "workflows" / "spar" / "workflow.yaml").symlink_to(real)
+
+    monkeypatch.setenv("PWD", str(cwd))
+    monkeypatch.chdir(cwd)
+    vols = dockerpy.build_volumes(tmp_path / "no-claude", mount_agy=False)
+    spec = f"{real}:/workspace/.medulla/workflows/spar/workflow.yaml:ro"
+    assert spec in vols
+    # the directory itself is NOT mounted: runs/ must stay repo-local
+    assert not any(v.startswith(f"{shared}:") for v in vols)
+
+
+def test_workflow_symlink_pointing_inside_the_workspace_is_not_remounted(dockerpy, tmp_path, monkeypatch):
+    # Already inside /workspace — mounting it again would be noise, and a local real file
+    # (the override case) must not produce a mount at all.
+    cwd = tmp_path / "repo"
+    (cwd / ".medulla" / "workflows" / "a").mkdir(parents=True)
+    real = cwd / "shared-here.yaml"
+    real.write_text("version: '2'\n", encoding="utf-8")
+    (cwd / ".medulla" / "workflows" / "a" / "workflow.yaml").symlink_to(real)
+    (cwd / ".medulla" / "workflows" / "b").mkdir(parents=True)
+    (cwd / ".medulla" / "workflows" / "b" / "workflow.yaml").write_text("version: '2'\n", encoding="utf-8")
+
+    monkeypatch.setenv("PWD", str(cwd))
+    monkeypatch.chdir(cwd)
+    vols = dockerpy.build_volumes(tmp_path / "no-claude", mount_agy=False)
+    assert not any("/workspace/.medulla/workflows/" in v for v in vols)
+
+
+def test_broken_workflow_symlink_does_not_break_the_run(dockerpy, tmp_path, monkeypatch):
+    cwd = tmp_path / "repo"
+    (cwd / ".medulla" / "workflows" / "x").mkdir(parents=True)
+    (cwd / ".medulla" / "workflows" / "x" / "workflow.yaml").symlink_to(tmp_path / "gone.yaml")
+    monkeypatch.setenv("PWD", str(cwd))
+    monkeypatch.chdir(cwd)
+    vols = dockerpy.build_volumes(tmp_path / "no-claude", mount_agy=False)   # must not raise
+    assert not any("gone.yaml" in v for v in vols)
