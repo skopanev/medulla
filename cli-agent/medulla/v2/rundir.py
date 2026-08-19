@@ -183,14 +183,19 @@ def runs_root_for(workflow_dir: Path) -> Path:
     the directory medulla was LAUNCHED from, which is the project root and exactly
     what --docker mounts as /workspace.
     """
-    wdir = workflow_dir.resolve()
+    resolved = workflow_dir.resolve()          # resolve only to CLASSIFY, never to return:
     shared_root = (Path.home() / ".medulla" / "workflows").resolve()
-    if shared_root == wdir or shared_root in wdir.parents:
-        cwd = Path(os.environ.get("PWD") or Path.cwd()).resolve()
-        # The same path the container uses: --docker mounts the shared yaml at
-        # /workspace/.medulla/workflows/<name>/workflow.yaml, so history lands in one
-        # place either way and --resume works across host and container runs.
-        return cwd / ".medulla" / "workflows" / wdir.name
+    if not (shared_root == resolved or shared_root in resolved.parents):
+        # Repo-local workflow: hand back the path AS GIVEN. Returning the resolved one
+        # made --print-run-dir emit /workspace/... under --docker — a path that does not
+        # exist for the caller on the host.
+        return workflow_dir
+    # RELATIVE on purpose: --print-run-dir hands this path to the caller, who is on the
+    # HOST while the run
+    # happened inside the container: an absolute /workspace/... path would not exist for
+    # them. Relative to the launch dir it is valid in both places, and it is the same
+    # location --docker mounts, so --resume works across host and container runs.
+    return Path(".medulla") / "workflows" / resolved.name
     return wdir
 
 

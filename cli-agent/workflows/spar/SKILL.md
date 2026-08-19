@@ -19,7 +19,8 @@ someone says "запусти братву", "собери братву" or "сп
 they mean run this panel. Each member ("панелист") is one model in the
 братва. The panel does not see this conversation, your codebase, or your
 prior reasoning. Everything they need to give a useful answer has to be
-in the prompt you build.
+in the prompt you build. **DO NOT TRY TO CONVINCE THEM OF ANYTHING. YOUR
+JOB IS TO PROVOKE THEM, NOT TO ALIGN THEM.**
 
 # Build the prompt
 
@@ -35,6 +36,12 @@ Cover:
   the panel can attack it.
 - **The stuck point.** Where your reasoning runs out, what data
   you don't have, what you genuinely cannot decide alone.
+- **Zero agent bias (CRITICAL).** You, the agent writing this prompt, MUST NOT
+  solve the problem in advance and MUST NOT lead the witness. Do not pre-digest
+  the situation so your preferred answer looks like the only logical one. State
+  the raw facts, the conflicting constraints, and the options as they actually
+  stand. "I think we should do X, please critique" is a failure: it buys
+  agreement, not scrutiny. Let the panel do the thinking.
 - **Files in the repo (point, don't paste).** The panel runs as full
   agents with file-read and search tools. Point them at files and
   directories — "look at `src/payments/`, the deposit handler, the
@@ -45,7 +52,8 @@ Cover:
   code outside the current workspace: `--mount ../folder1 [--mount ../folder2] ...`
   Point the panel at them in the prompt — they can't search what
   isn't mounted.
-- **Framing.** Give the situation, not just your solution. Your ideas
+- **Framing.** Give the raw situation, not your solution — build an arena for
+  them to fight in, do not hand them a script. Your ideas
   belong in the brief — but as options to consider, not as the only
   path. Leave room for the panel to say "you're solving the wrong
   problem" or "here's an option you didn't consider." If you hand
@@ -59,29 +67,43 @@ Cover:
      organizational, or judgment calls.
    - Red-team for plans about to execute.
    - Whatever else suits the situation.
-- **Demands.** Depth, dissent, the strongest counter, the blind
-  spot you're least likely to see. Forbid sycophancy. Mark cited
-  facts `(R)` for confident recall, `(G)` for guess. Cap each
-  panelist at ~500 words.
+- **Demands.** These are words you WRITE INTO THE PROMPT — not medulla settings,
+  not workflow config. The panelists only obey what your prompt says, so spell
+  out: depth, dissent, the strongest counter, the blind spot you're least likely
+  to see, no sycophancy, mark each cited fact `(R)` for confirmed or `(G)` for
+  guess, ~500 words each.
 
 # Run the panel
 
-**Preflight:** if `.medulla/workflows/spar/workflow.yaml` doesn't exist in this
-repo, the panel isn't deployed here yet — run `medulla init spar --skill`
-first, then proceed.
+No preflight needed: a repo without its own copy falls back to the machine-wide
+definition in `~/.medulla/workflows/spar/`. A local `workflow.yaml` wins if present.
 
 Mechanical contract — invoke verbatim, substituting your built prompt
 for the heredoc body (quoted 'EOF' keeps `$(...)`, backticks and
-quotes in the prompt inert):
+quotes in the prompt inert). Add `--mount ../repo` (repeatable, read-only) for
+every sibling repo the panel must be able to read:
 
     QUESTION="$(cat <<'EOF'
     <your prompt>
     EOF
     )"
-    medulla --print-run-dir --docker -w .medulla/workflows/spar --var "QUESTION=$QUESTION" >run.log 2>err.log &
-    run=$(head -1 run.log)                        # run dir, no grep; race-safe
-    ls "$run/artifacts"/*.md                      # after the job finishes
-    cat "$run/artifacts"/*.md                     # EVERY panelist, not just the synthesis
+    medulla --print-run-dir --docker -w .medulla/workflows/spar \
+      --var "QUESTION=$QUESTION" >run.log 2>err.log &      # background: never block on the panel
+    until [ -s run.log ]; do sleep 1; done                 # the run dir is printed at startup,
+    run=$(head -1 run.log)                                 # but under --docker that takes ~20s
+    echo "$run"
+
+**Do not paste `--mount` away.** If the question touches code outside this
+workspace, the mounts belong in the command above — a panel that cannot read a
+repo will confidently reason about it from the brief alone.
+
+When the run finishes, LIST the artifacts and then read them **one file at a
+time with your own file-reading tool**:
+
+    ls "$run/artifacts"/*.md
+
+Do not `cat` them all into the terminal: five panelists × ~500 words is a wall
+of text that buries exactly the lone finding you are here to preserve.
 
 **Read every panelist's own file, not only `synthesized.md`.** The artifacts
 directory holds one `<slug>.md` per panelist plus the combined
