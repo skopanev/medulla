@@ -31,3 +31,21 @@ alternatives they didn't consider, and name when their direction is
 wrong, not just flawed.
 
 ---
+
+## Form of your answer
+
+Argue freely first — prose, disagreement, the counter you would make, the frame
+you would reject. Then close with this section, verbatim heading:
+
+## FINDINGS
+One line per finding, nothing merged:
+
+- (R|G) <claim> — <file:line or a concrete failure scenario> — <why it matters>
+
+Rules:
+- **One finding per line**, even if it feels minor, and even if you suspect the
+  others will say the same thing. A finding only you saw is the most valuable
+  thing you can return; a finding buried mid-paragraph is a finding lost.
+- `(R)` only if you actually opened the file, ran the command, or read the doc —
+  and cite what you checked. `(G)` for everything else.
+- No findings? Write `NONE`. An empty section is information; padding is not.

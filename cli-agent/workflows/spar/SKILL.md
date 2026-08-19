@@ -71,7 +71,7 @@ Cover:
   not workflow config. The panelists only obey what your prompt says, so spell
   out: depth, dissent, the strongest counter, the blind spot you're least likely
   to see, no sycophancy, mark each cited fact `(R)` for confirmed or `(G)` for
-  guess, ~500 words each.
+  guess, ~700 words each (they need room for both the argument and the FINDINGS list).
 
 # Run the panel
 
@@ -87,11 +87,22 @@ every sibling repo the panel must be able to read:
     <your prompt>
     EOF
     )"
-    medulla --print-run-dir --docker -w .medulla/workflows/spar \
-      --var "QUESTION=$QUESTION" >run.log 2>err.log &      # background: never block on the panel
-    until [ -s run.log ]; do sleep 1; done                 # the run dir is printed at startup,
-    run=$(head -1 run.log)                                 # but under --docker that takes ~20s
-    echo "$run"
+    medulla --print-run-dir --docker -w .medulla/workflows/spar [--mount ../repo] \
+      --var "QUESTION=$QUESTION" >run.log 2>err.log &
+    PID=$!
+    # The run dir is printed at startup, but under --docker that is ~20s away (the
+    # container upgrades medulla first). Watch the PROCESS too: if medulla dies before
+    # printing — bad yaml, Docker not running — waiting on the file alone hangs forever.
+    while [ ! -s run.log ] && kill -0 $PID 2>/dev/null; do sleep 1; done
+    if [ ! -s run.log ]; then
+        echo "ERROR: medulla failed to start:"; cat err.log; exit 1
+    fi
+    run=$(head -1 run.log)
+    echo "panel running in background (pid $PID), run dir: $run"
+
+This script returns in ~20s with the run dir; the panel keeps working in the
+background for its 10-20 minutes. **Do not sit and wait on it** — go do other
+work and come back for the artifacts.
 
 **Do not paste `--mount` away.** If the question touches code outside this
 workspace, the mounts belong in the command above — a panel that cannot read a
@@ -104,6 +115,11 @@ time with your own file-reading tool**:
 
 Do not `cat` them all into the terminal: five panelists × ~500 words is a wall
 of text that buries exactly the lone finding you are here to preserve.
+
+Each panelist closes with a `## FINDINGS` list — one line per finding, `(R)`
+confirmed or `(G)` guessed, with a `file:line` or a concrete scenario. That list
+is the machine-readable part: carry every line forward, attributed. If a
+panelist's FINDINGS says `NONE`, that is a real answer, not a failure.
 
 **Read every panelist's own file, not only `synthesized.md`.** The artifacts
 directory holds one `<slug>.md` per panelist plus the combined
