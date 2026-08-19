@@ -24,9 +24,26 @@ class _Parser(argparse.ArgumentParser):
         raise SystemExit(1)
 
 
+SHARED_WORKFLOWS = Path.home() / ".medulla" / "workflows"
+
+
 def _resolve_workflow_yaml(w: Path) -> Path:
+    """Local first, then the machine-wide copy — LOCAL ALWAYS WINS.
+
+    A definition can live once in ~/.medulla/workflows/<name>/ and serve every repo, so
+    fixing it fixes all of them. A project that needs its own version just puts a real
+    workflow.yaml in .medulla/workflows/<name>/ and nothing else changes. runs/ are rooted
+    at the LAUNCH directory (rundir.runs_root_for), so a shared definition never collects
+    other projects' history.
+    """
     from .rundir import config_yaml
-    return config_yaml(w) if w.is_dir() else w
+    local = config_yaml(w) if w.is_dir() else w
+    if local.is_file():
+        return local
+    name = w.name if w.is_dir() or not w.suffix else w.parent.name
+    shared = SHARED_WORKFLOWS / name
+    shared_yaml = config_yaml(shared) if shared.is_dir() else shared
+    return shared_yaml if shared_yaml.is_file() else local
 
 
 ENV_HELP = """\

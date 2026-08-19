@@ -136,21 +136,23 @@ Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-fil
 
 ### One shared workflow, many repos
 
-A workflow definition can live in ONE place and be used everywhere — symlink the file (not
-the directory) into each repo:
+Put a definition in `~/.medulla/workflows/<name>/` and every repo uses it — no copy, no
+symlink, no flag:
 
 ```bash
-mkdir -p .medulla/workflows/spar
-ln -s ~/.medulla/workflows/spar/workflow.yaml .medulla/workflows/spar/workflow.yaml
-ln -s ~/.medulla/workflows/spar/prompts       .medulla/workflows/spar/prompts
+mkdir -p ~/.medulla/workflows/spar && cp workflow.yaml prompts/ ~/.medulla/workflows/spar/
+cd any-repo && medulla -w .medulla/workflows/spar      # resolves to the shared copy
 ```
 
-The directory around the link stays repo-local, so `runs/` and artifacts are still written
-per-worktree — nothing pools into the shared copy. Under `--docker` the target is mounted
-read-only at the same `/workspace` path, so the link does not dangle inside the container.
+Resolution is **local first**: a real `workflow.yaml` in the repo always wins, so a project
+that needs its own version just writes one. Fix the shared file once and every repo that
+doesn't override it is fixed.
 
-**Local overrides shared**: replace the symlink with a real file and that repo runs its own
-version. Nothing else changes.
+`runs/` never pool into the shared copy — history is rooted at the directory medulla was
+**launched from** (the project root, which is exactly what `--docker` mounts), landing in
+`.medulla/workflows/<name>/runs/`. Same path on the host and in the container, so `--resume`
+works across both. Under `--docker` the shared yaml is mounted read-only into the workspace;
+a symlink into the shared copy is mounted the same way and works too.
 
 ## All variables
 

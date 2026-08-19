@@ -80,11 +80,18 @@ quotes in the prompt inert):
     )"
     medulla --print-run-dir --docker -w .medulla/workflows/spar --var "QUESTION=$QUESTION" >run.log 2>err.log &
     run=$(head -1 run.log)                        # run dir, no grep; race-safe
-    cat "$run/artifacts/synthesized.md"           # after the job finishes
+    ls "$run/artifacts"/*.md                      # after the job finishes
+    cat "$run/artifacts"/*.md                     # EVERY panelist, not just the synthesis
 
-The cat'd output is the panel's combined takes, separated by headers.
-A `WARNING: only N/4 panelists delivered` line means partial delivery —
-weigh the takes accordingly.
+**Read every panelist's own file, not only `synthesized.md`.** The artifacts
+directory holds one `<slug>.md` per panelist plus the combined
+`synthesized.md`. Read them ALL. Skimming the synthesis is how a finding that
+exactly one panelist made — usually the sharpest one, since only one of them
+saw it — gets dropped.
+
+A `WARNING: only N/M panelists delivered` line means partial delivery: someone
+died or their provider refused. Say so when you report; do not present a
+partial panel as a full one.
 
 # Use the result
 
@@ -96,6 +103,15 @@ takes from outside your context. Read them, then:
    matters for the specific decision you're working through.
 3. Notice what the panel collectively missed because they didn't
    see your conversation, your codebase, or your actual constraints.
+
+**Carry EVERY concrete finding forward — never average the panel.** The value
+is in the union of what they found, not the consensus. A point made by one
+panelist out of five is not a weak point; it is the one nobody else saw. When
+you report back, keep each distinct finding as its own item, attributed to who
+raised it, with its file:line or concrete scenario intact. Merge two items only
+when they are literally the same claim — not when they merely "feel similar".
+Dropping a lone finding because the others did not repeat it is the single
+failure mode of this whole tool.
 
 Do not soften their verdicts when integrating into your reasoning.
 Do not flatten dissent into consensus through restatement. The

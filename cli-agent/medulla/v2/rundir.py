@@ -64,7 +64,7 @@ class RunStore:
     def create(cls, workflow_dir: Path, config_text: str, run_id: str | None = None) -> RunStore:
         run_id = run_id or os.environ.get("MEDULLA_RUN_ID", "").strip() or uuid.uuid4().hex[:8]
         ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        run_dir = workflow_dir / "runs" / f"{ts}-{run_id}"
+        run_dir = runs_root_for(workflow_dir) / "runs" / f"{ts}-{run_id}"
         run_dir.mkdir(parents=True, exist_ok=False)
         (run_dir / "steps").mkdir()
         (run_dir / "workflow.yaml").write_text(config_text, encoding="utf-8")  # immutable snapshot
@@ -170,11 +170,35 @@ def _read_jsonl_tolerant(path: Path, what: str) -> list[dict]:
     return rows
 
 
+def runs_root_for(workflow_dir: Path) -> Path:
+    """Where this workflow's runs/ live.
+
+    Normally: right beside the workflow, unchanged — that is its home and resume,
+    prune and artifacts have always looked there.
+
+    The exception is a SHARED definition (~/.medulla/workflows/<name>): one copy per
+    machine serving many repos. Its history must NOT pool there — every project would
+    dump runs into one directory, prune would evict other repos' history, and under
+    --docker that path is mounted read-only anyway. So a shared workflow writes into
+    the directory medulla was LAUNCHED from, which is the project root and exactly
+    what --docker mounts as /workspace.
+    """
+    wdir = workflow_dir.resolve()
+    shared_root = (Path.home() / ".medulla" / "workflows").resolve()
+    if shared_root == wdir or shared_root in wdir.parents:
+        cwd = Path(os.environ.get("PWD") or Path.cwd()).resolve()
+        # The same path the container uses: --docker mounts the shared yaml at
+        # /workspace/.medulla/workflows/<name>/workflow.yaml, so history lands in one
+        # place either way and --resume works across host and container runs.
+        return cwd / ".medulla" / "workflows" / wdir.name
+    return wdir
+
+
 def prune_runs(workflow_dir: Path, keep_runs: int, workflow_timeout: int | None) -> None:
     """On boot, after the new run dir exists. Finished (has outcome.json): keep the
     newest keep_runs. Unfinished: never touch while younger than the workflow
     timeout (the active-run shield); timeout 0/None = never auto-prune unfinished."""
-    runs_dir = workflow_dir / "runs"
+    runs_dir = runs_root_for(workflow_dir) / "runs"
     if not runs_dir.is_dir():
         return
     finished: list[Path] = []

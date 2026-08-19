@@ -1004,7 +1004,8 @@ RESUMABLE_OUTCOMES = {"interrupted", "crashed"}   # + no outcome.json at all.
 
 
 def find_resumable(workflow_dir: Path) -> Path | None:
-    runs_dir = workflow_dir / "runs"
+    from .rundir import runs_root_for
+    runs_dir = runs_root_for(workflow_dir) / "runs"
     if not runs_dir.is_dir():
         return None
     for run in sorted((p for p in runs_dir.iterdir() if p.is_dir()),

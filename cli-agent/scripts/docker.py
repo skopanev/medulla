@@ -215,6 +215,14 @@ def _config_yaml(d: Path) -> Path:
     """
     if d.is_file():
         return d
+    local = d / "workflow.yaml"
+    if not local.is_file() and not (d / "pipeline.yaml").is_file():
+        # Shared definition (see v2/cli.py::_resolve_workflow_yaml): one copy per machine
+        # in ~/.medulla/workflows/<name>. LOCAL WINS — this branch is only reached when
+        # the project has no workflow of its own.
+        shared = Path.home() / ".medulla" / "workflows" / d.name / "workflow.yaml"
+        if shared.is_file():
+            return shared
     w = d / "workflow.yaml"
     if w.is_file():
         return w
@@ -615,6 +623,26 @@ def main():
         # belt for exits that never reach run_docker (bad mount → return 1)
         atexit.register(_unlink_env_file)
     volumes = build_volumes(claude_home, mount_agy=workflow_uses_agy(workflow))
+
+    # A SHARED definition lives outside the workspace (~/.medulla/workflows/<name>), and
+    # only cwd is mounted — so the container would not find it. Mount the resolved yaml
+    # read-only at the path the project would have used. The surrounding directory stays
+    # repo-local, so runs/ still land in /workspace (rundir.runs_root_for).
+    if workflow:
+        resolved = _config_yaml(Path(workflow))
+        try:
+            resolved.relative_to(Path.cwd())
+        except ValueError:
+            if resolved.is_file():
+                dest = Path(workflow)
+                if dest.is_file():
+                    dest = dest.parent
+                volumes.extend(["-v", f"{resolved}:/workspace/{dest}/workflow.yaml:ro"])
+                shared_dir = resolved.parent
+                for extra in ("prompts",):
+                    src = shared_dir / extra
+                    if src.is_dir():
+                        volumes.extend(["-v", f"{src}:/workspace/{dest}/{extra}:ro"])
 
     # Mount extra folders into /workspace/<name> (nested mount inside workspace)
     for mount_path, ro in extra_mounts:
