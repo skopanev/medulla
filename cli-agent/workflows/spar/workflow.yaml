@@ -15,6 +15,12 @@
 # --resume: delivered panelists are skipped via the manifest done-mask.
 version: "2"
 start: prepare
+
+# Run codex through the broker wrapper when the machine has one; plain codex
+# otherwise. The wrapper picks a live account, so a panel never stalls on an
+# exhausted one.
+harness_bin:
+  codex: cx
 timeout: 3600
 
 
