@@ -71,7 +71,9 @@ Cover:
   not workflow config. The panelists only obey what your prompt says, so spell
   out: depth, dissent, the strongest counter, the blind spot you're least likely
   to see, no sycophancy, mark each cited fact `(R)` for confirmed or `(G)` for
-  guess, ~700 words each (they need room for both the argument and the FINDINGS list).
+  guess. Aim ~700 words — but a REPRODUCTION BEATS BREVITY: never truncate the
+  steps that show HOW a defect happens. The `## FINDINGS` list is the compression;
+  the argument above it may run long when it is carrying evidence.
 
 # Run the panel
 
