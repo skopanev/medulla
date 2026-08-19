@@ -528,3 +528,57 @@ nodes:
 """
     path, work = setup(tmp_path, text)
     assert run_workflow(path, workdir=work) == 0
+
+
+def test_pool_pre_sees_the_rendered_harness_not_the_template(tmp_path):
+    # In a pool `harness:` is itself a template. MEDULLA_HARNESS used to carry the raw
+    # "{{input.harness}}", so a pre hook gating on the harness matched nothing and the
+    # guard silently never fired. It must arrive rendered, per input.
+    text = """
+version: "2"
+start: a
+nodes:
+  a:
+    inputs:
+      - {slug: one, harness: fake}
+    pre: 'echo "SAW=$MEDULLA_HARNESS"'
+    agent:
+      harness: "{{input.harness}}"
+    prompt: "hi"
+    on_signal: {__done__: __exit_ok__, __failed__: __exit_fail__}
+"""
+    path, work = setup(tmp_path, text)
+    run_workflow(path, workdir=work)
+    pre_log = next((path.parent / "runs").glob("*/steps/001-a/input-0001/pre.txt"))
+    assert "SAW=fake" in pre_log.read_text()
+    assert "{{input.harness}}" not in pre_log.read_text()
+
+
+def test_pool_pre_failure_drops_only_that_input(tmp_path):
+    # The panel contract: a panelist whose provider is dead sits the round out while the
+    # others still deliver. A pre failure must stay a SOFT fail (attempts=0), never a crash.
+    import json
+    script = fake_script(tmp_path, "worker.sh", 'exit 0\n')
+    text = f"""
+version: "2"
+start: a
+nodes:
+  a:
+    inputs:
+      - {{slug: alive}}
+      - {{slug: dead}}
+    max_parallel: all
+    min_success: 1
+    pre: '[ "$MEDULLA_INPUT_SLUG" = dead ] && {{ echo "dead sits out" >&2; exit 1; }} || exit 0'
+    agent: {{harness: fake, model: "{script}"}}
+    prompt: "hi"
+    on_signal: {{__done__: __exit_ok__, __failed__: __exit_fail__}}
+"""
+    path, work = setup(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0          # the pool still concludes
+    manifest = next((path.parent / "runs").glob("*/steps/001-a/manifest.jsonl"))
+    rows = [json.loads(l) for l in manifest.read_text().splitlines()]
+    dead = [r for r in rows if not r["ok"]]
+    assert len(dead) == 1
+    assert dead[0]["reason"] == "pre" and dead[0]["attempts"] == 0
+    assert any(r["ok"] for r in rows)                     # the healthy one delivered

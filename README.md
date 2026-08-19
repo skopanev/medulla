@@ -145,7 +145,7 @@ Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-fil
 | *all `.env` entries* | always | secrets merge: `~/.medulla/.env` < `<project>/.medulla/.env` < `<workflow>/.env` |
 | `MEDULLA_TIMEOUT_S` | always | resolved, deadline-clamped timeout of the current step (CLIs size their own limits from it) |
 | `MEDULLA_ATTEMPT_ID` | body | unique attempt id: `<step>[.i<input>].<p|f><attempt>` — `003.p1` (decision, primary, 1st try), `003.i2.f1` (pool input 2, fallback, 1st try) |
-| `MEDULLA_HARNESS` | body + hooks | `shell` or the harness name |
+| `MEDULLA_HARNESS` | body + hooks | `shell` or the harness name (rendered — in a pool it is the input's harness, not the template) |
 | `MEDULLA_LAST_NODE` / `_SIGNAL` / `_MESSAGE` / `_RC` | after the first transition | outcome of the previous node (after a pool `_RC` is empty — a join has no single rc). Timeout is recognizable as rc 124 |
 | `MEDULLA_LAST_EVENT_JSON` | after the first transition | the same as one JSON object |
 | `MEDULLA_MANIFEST_<NODE>` | after a pool completes | path to its manifest.jsonl (dashes → underscores, uppercased) |

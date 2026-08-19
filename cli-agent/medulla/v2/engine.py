@@ -373,7 +373,17 @@ class Engine:
 
         pre_updates: list[str] = []
         pre_events: list[dict] = []
+        # Render the harness before it becomes a tag: in a pool `harness:` is itself a
+        # template ("{{input.harness}}"), and an unrendered one leaked into the pre hook
+        # as MEDULLA_HARNESS and into the attempt log name. A hook keying off it (skip
+        # unless opencode) silently matched nothing. Render failures keep the raw value —
+        # this is a label, never a reason to crash a step.
         primary_tag = "shell" if action.kind == "shell" else action.agent.harness
+        if action.kind != "shell":
+            try:
+                primary_tag = render_fn(action.agent.harness, "harness") or primary_tag
+            except EngineCrash:
+                pass
         if node.pre is not None:
             pre_rendered = render_fn(node.pre, "pre")
             hook_timeout = self._clamp(HOOK_TIMEOUT_S)
