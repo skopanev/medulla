@@ -92,17 +92,6 @@ def test_opencode_and_agy_use_the_heuristic_filter():
         assert "<signal:x>" in a.filter_stdout("<signal:x>real</signal:x>")
 
 
-def test_codex_accepts_cx_only_install(monkeypatch):
-    H.reset_registry()
-    monkeypatch.setattr(H.shutil, "which",
-                        lambda name: "/usr/local/bin/cx" if name == "cx" else None)
-    from medulla.v2.model import AgentSpec
-    adapter = H.resolve(AgentSpec(harness="codex"))    # must NOT crash E_HARNESS
-    inv = adapter.build(AgentSpec(harness="codex"), None, "P", 60)
-    assert inv.argv[0] == "/usr/local/bin/cx"
-    H.reset_registry()
-
-
 def test_journal_message_tail_8k(tmp_path):
     # audit G8: an 8k payload survives the journal round-trip for resume
     from medulla.v2.engine import run_workflow

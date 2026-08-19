@@ -11,31 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # AI panel tools
 RUN npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai
 
-# cx: optional codex wrapper for the hltm token-broker. When a broker config is
-# present (~/.config/hltm-broker, auto-mounted by docker.py build_volumes) cx
-# fetches a fresh token and overwrites ~/.codex/auth.json before exec'ing codex,
-# so the broker stays the sole auth authority (no rotation race). The account is
-# read from the same config; $CX_ACCOUNT remains an explicit override. With NO
-# broker config cx is a transparent pass-through to plain codex, so non-broker
-# installs are unaffected
-# (the codex harness prefers cx on PATH — see v2/harness.py).
-RUN printf '%s\n' \
-    '#!/bin/sh' \
-    'set -e' \
-    'CFG=""' \
-    'for c in "$HOME/.config/hltm-broker/config.json" /workspace/hltm-broker/config.json; do' \
-    '  [ -f "$c" ] && CFG="$c" && break' \
-    'done' \
-    '[ -n "$CFG" ] || exec codex "$@"' \
-    'URL=$(jq -r .url "$CFG")' \
-    'KEY=$(jq -r .key "$CFG")' \
-    'ACCOUNT="${CX_ACCOUNT:-}"' \
-    'if [ -z "$ACCOUNT" ]; then ACCOUNT=$(jq -r '\''.account // empty'\'' "$CFG"); fi' \
-    'ACCOUNT="${ACCOUNT:-default}"' \
-    'mkdir -p "$HOME/.codex"' \
-    'curl -fsS -H "x-broker-key: $KEY" "$URL/getToken?provider=codex&format=authjson&account=$ACCOUNT" -o "$HOME/.codex/auth.json"' \
-    'exec codex "$@"' \
-    > /usr/local/bin/cx && chmod +x /usr/local/bin/cx
+# NOTE: no vendored wrapper for any CLI here. A private wrapper — a token broker,
+# a corporate proxy, a credential helper — cannot live in a public image, and the
+# hand-rolled stand-in that used to sit here was worse than nothing: it silently
+# shadowed the real one and pinned a single account, so a container kept using an
+# exhausted account while the host's wrapper would have moved on. Supply it from
+# the host instead: ~/.medulla/container/bin/<name> mounts at /usr/local/bin/<name>.
 
 # Non-root user
 ARG USER_UID=501

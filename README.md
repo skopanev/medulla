@@ -125,11 +125,6 @@ For Docker runs, Claude OAuth needs no duplicate `.env` entry when the standard
 `~/.claude/token-home` profile token exists. Resolution is explicit
 `CLAUDE_CODE_OAUTH_TOKEN` environment → nearest `.env` tier → `token-home`.
 
-The in-image `cx` wrapper reads the optional broker account directly from
-`~/.config/hltm-broker/config.json`; no duplicate Medulla `.env` entry is needed.
-An explicit `CX_ACCOUNT` remains an override, and `default` is used only when the
-config has no account.
-
 Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-file` (never `-e`: values would leak into `ps`/`docker inspect`). All tiers forward whole — what lives in your .env files is your call.
 
 `init` seeds a `.gitignore` (`.env`, `runs/`) into every workflow it creates.
@@ -481,7 +476,7 @@ Shell bodies and hooks run via `bash -lc` — **not** your login shell. A workfl
 
 Signal filtering: claude-code/codex scan **assistant text** mined from their JSON streams (tool output can never route); opencode/agy have no structured output — signals must start a line, and never quote signal syntax in prompts. opencode's output is merged from stderr (that's where it talks) and ANSI-stripped. `effort` maps to: claude `--effort`, codex `model_reasoning_effort`, opencode `reasoningEffort` (config), agy model-name suffix. agy refuses to run in a workspace it doesn't trust (fail-fast instead of hanging; skipped in Docker). An unauthenticated claude-code ("Not logged in") crashes the run immediately as `E_HARNESS` instead of burning retries. Docker resolves Claude OAuth from an explicit token, the `.env` tiers, or the standard `~/.claude/token-home` profile token, in that order.
 
-Adapters also configure the CLIs themselves (not your API — listed for debugging): claude gets `API_TIMEOUT_MS` and a stripped `ANTHROPIC_API_KEY` (the OAuth account must win); codex gets `-c stream_idle_timeout_ms` and prefers the `cx` token-refreshing wrapper; opencode gets its config via `OPENCODE_CONFIG_CONTENT` (permission allow, provider timeout, per-model reasoningEffort — no opencode.json is written); agy gets `--print-timeout`. All inner timeouts are sized from the step timeout + 300s slack so the engine always kills first.
+Adapters also configure the CLIs themselves (not your API — listed for debugging): claude gets `API_TIMEOUT_MS` and a stripped `ANTHROPIC_API_KEY` (the OAuth account must win); codex gets `-c stream_idle_timeout_ms`; opencode gets its config via `OPENCODE_CONFIG_CONTENT` (permission allow, provider timeout, per-model reasoningEffort — no opencode.json is written); agy gets `--print-timeout`. All inner timeouts are sized from the step timeout + 300s slack so the engine always kills first.
 
 Development: `live-tests/` in the repo holds 20 battle workflows that run the real CLIs (adapters, pools, fallback, interrupt, resume) — `live-tests/run-all.sh` before release pushes. Unit suite: `cd cli-agent && pytest`.
 

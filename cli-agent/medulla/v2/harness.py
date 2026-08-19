@@ -9,8 +9,7 @@ implementations — medulla v1 (cli-agent/medulla/executor.py) and pilot
   flag; an untrusted workspace makes `--dangerously-skip-permissions` hang
   forever, so trust is preflighted (outside Docker).
 - codex: `--full-auto` is deprecated AND sandboxed — never use it; prompt goes
-  via stdin (no ARG_MAX, no @file coupling); prefer the `cx` token-refreshing
-  wrapper when present.
+  via stdin (no ARG_MAX, no @file coupling).
 - claude: ANTHROPIC_API_KEY is stripped (OAuth account must win); prompt is
   delivered as a system-prompt FILE, `-p "Execute."` stays tiny.
 - opencode: permissions/effort/timeout live in opencode.json, bootstrapped
@@ -248,15 +247,11 @@ class CodexAdapter(HarnessAdapter):
     name = "codex"
     binary = "codex"
 
-    def __init__(self):
-        # cx (the token-refreshing wrapper) alone is a valid install (audit G9):
-        # a slim image with only cx must not crash E_HARNESS at boot
-        if not (shutil.which("cx") or shutil.which("codex")):
-            raise EngineCrash(E_HARNESS,
-                              "harness 'codex': neither 'cx' nor 'codex' on PATH")
-
     def build(self, spec, prompt_file, prompt_text, timeout_s):
-        bin_ = shutil.which("cx") or "codex"    # cx refreshes the token via the broker
+        # Plain `codex`. Wrapping it — a token broker, a proxy, a credential helper —
+        # is the operator's business, not the engine's: put the wrapper on PATH as
+        # `codex` (see ~/.medulla/container/bin in README) and this stays unaware.
+        bin_ = "codex"
         inner_ms = (int(timeout_s) + INNER_SLACK_S) * 1000
         # sandbox: codex has native modes, so this maps exactly. The historical
         # default stays `danger` — the container IS the sandbox for most workflows,

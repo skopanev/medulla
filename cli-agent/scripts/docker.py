@@ -426,12 +426,6 @@ def build_volumes(claude_home, mount_agy=True):
     if ntk_dir.is_dir():
         add(ntk_dir.resolve(), "/home/medulla/.config/ntk", ro=True)
 
-    # hltm token-broker config for the in-image `cx` codex wrapper (optional):
-    # mounted only when present, so non-broker installs are unaffected.
-    broker_dir = home / ".config" / "hltm-broker"
-    if broker_dir.is_dir():
-        add(broker_dir.resolve(), "/home/medulla/.config/hltm-broker", ro=True)
-
     # Container overlay — the escape hatch for anything the IMAGE cannot carry:
     # private tooling, a site-specific wrapper, credentials medulla knows nothing
     # about. Whatever sits in ~/.medulla/container/ is mounted read-only at the
