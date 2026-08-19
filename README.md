@@ -134,6 +134,20 @@ Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-fil
 
 `init` seeds a `.gitignore` (`.env`, `runs/`) into every workflow it creates.
 
+### Container overlay: things the image cannot carry
+
+Private tooling, a site-specific wrapper, a credential helper — anything medulla should
+not know about — goes in `~/.medulla/container/` and is mounted read-only into the run:
+
+| host | container |
+|---|---|
+| `~/.medulla/container/bin/<name>` | `/usr/local/bin/<name>` (on PATH, shadows the image's) |
+| `~/.medulla/container/home/<path>` | `/home/medulla/<path>` |
+
+Entries mount one by one, never as a directory over `/usr/local/bin` — covering it would
+hide the CLIs the image installs. Broken symlinks are skipped, never fatal. Medulla does
+not read these files; two people can put different things there and share one image.
+
 ### One shared workflow, many repos
 
 Put a definition in `~/.medulla/workflows/<name>/` and every repo uses it — no copy, no

@@ -432,6 +432,29 @@ def build_volumes(claude_home, mount_agy=True):
     if broker_dir.is_dir():
         add(broker_dir.resolve(), "/home/medulla/.config/hltm-broker", ro=True)
 
+    # Container overlay — the escape hatch for anything the IMAGE cannot carry:
+    # private tooling, a site-specific wrapper, credentials medulla knows nothing
+    # about. Whatever sits in ~/.medulla/container/ is mounted read-only at the
+    # matching place inside, and medulla neither reads it nor cares what it is.
+    #   ~/.medulla/container/bin/<name>   -> /usr/local/bin/<name>   (on PATH)
+    #   ~/.medulla/container/home/<path>  -> /home/medulla/<path>
+    # Entries are mounted ONE BY ONE, never as a directory over /usr/local/bin:
+    # covering that would hide the CLIs the image installs.
+    overlay = home / ".medulla" / "container"
+    for sub, dest_root in (("bin", "/usr/local/bin"), ("home", "/home/medulla")):
+        root = overlay / sub
+        if not root.is_dir():
+            continue
+        for entry in sorted(root.rglob("*")):
+            if entry.is_dir():
+                continue
+            try:
+                rel = entry.relative_to(root)
+                target = entry.resolve(strict=True)
+            except (OSError, ValueError):
+                continue                  # broken link: skip, never fail the run
+            add(target, f"{dest_root}/{rel}", ro=True)
+
     opencode_auth = home / ".local" / "share" / "opencode" / "auth.json"
     if opencode_auth.exists():
         add(opencode_auth.resolve(), "/mnt/opencode-auth.json", ro=True)
