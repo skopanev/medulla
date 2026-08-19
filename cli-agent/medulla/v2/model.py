@@ -44,6 +44,8 @@ class AgentSpec:
     effort: str | None = None
     sandbox: str | None = None          # "read-only"; None/"danger" -> today's behavior
     args: list[str] = field(default_factory=list)
+    bin: str | None = None              # executable to run instead of the harness default
+                                        # (workflow `harness_bin:`; resolved by the engine)
 
 
 @dataclass
@@ -108,6 +110,7 @@ class Workflow:
     timeout: int | None = DEFAULT_WORKFLOW_TIMEOUT  # whole-run deadline; None = unlimited (yaml: 0)
     keep_runs: int = DEFAULT_KEEP_RUNS
     defaults: Defaults = field(default_factory=Defaults)
+    harness_bin: dict[str, str] = field(default_factory=dict)  # harness -> executable
     path: Path | None = None            # source file
     dir: Path | None = None             # workflow dir (parent of workflow.yaml)
 

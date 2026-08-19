@@ -340,3 +340,34 @@ def test_sandbox_templated_value_deferred(tmp_path):
     # defers to the build-time _read_only check, like harness/model/effort)
     p = load_workflow(write(tmp_path, AGENT % ', sandbox: "{{var:SB}}"'))
     assert p.nodes["a"].action.agent.sandbox == "{{var:SB}}"
+
+
+def test_harness_bin_block(tmp_path):
+    from medulla.v2.contract import load_workflow
+    p = tmp_path / "workflow.yaml"
+    p.write_text("""version: "2"
+start: a
+harness_bin: {codex: cx}
+nodes:
+  a: {shell: "true", on_signal: {ok: __exit_ok__}}
+""", encoding="utf-8")
+    assert load_workflow(p).harness_bin == {"codex": "cx"}
+
+
+def test_harness_bin_rejects_unknown_harness_and_paths(tmp_path):
+    from medulla.v2.contract import load_workflow
+    from medulla.v2.errors import EngineCrash
+    base = """version: "2"
+start: a
+harness_bin: {%s}
+nodes:
+  a: {shell: "true", on_signal: {ok: __exit_ok__}}
+"""
+    for bad in ("nonsense: cx", "codex: /usr/local/bin/cx", "codex: ''"):
+        p = tmp_path / "w.yaml"
+        p.write_text(base % bad, encoding="utf-8")
+        try:
+            load_workflow(p)
+        except EngineCrash:
+            continue
+        raise AssertionError(f"accepted bad harness_bin: {bad}")

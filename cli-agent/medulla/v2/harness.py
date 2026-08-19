@@ -165,7 +165,7 @@ class ClaudeAdapter(HarnessAdapter):
         # edits outright, so it is what read-only means here.
         ro = _read_only(spec)
         perm = ["--permission-mode", "plan"] if ro else ["--dangerously-skip-permissions"]
-        argv = ["claude", *perm,
+        argv = [spec.bin or "claude", *perm,
                 "--output-format", "stream-json", "--verbose"]
         if spec.model:
             argv += ["--model", spec.model]
@@ -248,10 +248,7 @@ class CodexAdapter(HarnessAdapter):
     binary = "codex"
 
     def build(self, spec, prompt_file, prompt_text, timeout_s):
-        # Plain `codex`. Wrapping it — a token broker, a proxy, a credential helper —
-        # is the operator's business, not the engine's: put the wrapper on PATH as
-        # `codex` (see ~/.medulla/container/bin in README) and this stays unaware.
-        bin_ = "codex"
+        bin_ = spec.bin or "codex"
         inner_ms = (int(timeout_s) + INNER_SLACK_S) * 1000
         # sandbox: codex has native modes, so this maps exactly. The historical
         # default stays `danger` — the container IS the sandbox for most workflows,
@@ -332,7 +329,7 @@ class OpenCodeAdapter(HarnessAdapter):
     binary = "opencode"
 
     def build(self, spec, prompt_file, prompt_text, timeout_s):
-        argv = ["opencode", "run", "--agent", "build"]
+        argv = [spec.bin or "opencode", "run", "--agent", "build"]
         if spec.model:
             argv += ["-m", spec.model]
         argv += spec.args
@@ -437,7 +434,7 @@ class AgyAdapter(HarnessAdapter):
                 "harness 'agy': sandbox: read-only is not expressible — agy offers only a "
                 "boolean --sandbox (terminal restrictions), which does not stop file writes. "
                 "Use codex, claude-code or opencode for a read-only step.")
-        argv = ["agy", "--dangerously-skip-permissions",
+        argv = [spec.bin or "agy", "--dangerously-skip-permissions",
                 "--print-timeout", f"{int(timeout_s) + INNER_SLACK_S}s"]
         if spec.model:
             argv += ["--model", AGY_MODEL_ALIASES.get(spec.model, spec.model)]

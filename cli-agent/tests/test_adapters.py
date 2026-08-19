@@ -440,3 +440,20 @@ def test_medulla_shell_overrides_the_default(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError):
         P.run("echo hi", cwd=tmp_path, timeout_s=5)
     assert captured["argv"][0] == "/bin/sh"
+
+
+def test_harness_bin_replaces_the_executable(tmp_path):
+    # `harness_bin: {codex: cx}` in the workflow — the engine passes the resolved name
+    # down and the adapter runs THAT, with every other flag untouched.
+    a = H.CodexAdapter.__new__(H.CodexAdapter)
+    inv = a.build(AgentSpec(harness="codex", model="gpt-5.6-sol", bin="cx"),
+                  tmp_path / "p.md", "PROMPT", 600)
+    assert inv.argv[0] == "cx"
+    assert inv.argv[1] == "exec" and 'model="gpt-5.6-sol"' in inv.argv
+    assert inv.stdin == "PROMPT"
+
+
+def test_without_harness_bin_the_default_executable_runs(tmp_path):
+    a = H.CodexAdapter.__new__(H.CodexAdapter)
+    inv = a.build(AgentSpec(harness="codex"), tmp_path / "p.md", "P", 60)
+    assert inv.argv[0] == "codex"
