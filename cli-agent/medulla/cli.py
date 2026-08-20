@@ -78,12 +78,18 @@ def entry() -> int:
             rc = install_skill_md(name, wdir, local=local)
         return rc
     if argv and argv[0] == "upgrade":
-        # `medulla upgrade` was removed: self-upgrade guessed the install method
-        # (install.sh venv vs pipx) and could touch the wrong copy. Reinstall
-        # explicitly via the method you used instead.
-        print("medulla upgrade removed — reinstall via pipx/install.sh",
-              file=sys.stderr)
-        return 1
+        # two install methods exist: install.sh (venv at ~/.medulla/engine;
+        # pre-4.0.4 installs used ~/.medulla-engine — the installer migrates)
+        # and pipx. `pipx upgrade` on a venv install either errors or touches
+        # a different copy — match the method.
+        home = Path.home()
+        installer_venvs = (home / ".medulla" / "engine" / "venv" / "bin" / "medulla",
+                           home / ".medulla-engine" / "venv" / "bin" / "medulla")
+        if any(p.exists() for p in installer_venvs):
+            return subprocess.call(
+                ["bash", "-c",
+                 "curl -sSL https://raw.githubusercontent.com/skopanev/medulla/main/install.sh | bash"])
+        return subprocess.call(["pipx", "upgrade", "medulla"])
 
     if "--docker" in argv:
         argv = [a for a in argv if a != "--docker"]
