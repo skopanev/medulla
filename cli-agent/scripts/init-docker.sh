@@ -120,15 +120,15 @@ mkdir -p "$HOME/.gemini/config"
 export PATH="/workspace/.medulla/scripts:$PATH"
 grep -q '/workspace/.medulla/scripts' ~/.bashrc 2>/dev/null || echo 'export PATH="/workspace/.medulla/scripts:$PATH"' >> ~/.bashrc
 
-# Self-heal: the image bakes medulla via pipx and goes stale; upgrade to the
-# latest published version before running so engine fixes (e.g. max_parallel)
-# apply without an image rebuild. Best-effort — offline/registry errors are
-# non-fatal. Set MEDULLA_NO_UPGRADE=1 to skip (pinned/offline runs).
-if [ -z "${MEDULLA_NO_UPGRADE:-}" ]; then
-    # upgrade, not reinstall: reinstall removes-then-fetches, so a network
-    # hiccup leaves the container with NO medulla at all (exit 127). upgrade
-    # is non-destructive on failure and detects new versions because every
-    # behavioral change bumps the version (AGENTS.md discipline).
+# NO self-upgrade here. It used to run `pipx upgrade medulla` on every start, which
+# cost ~7.5s of the ~15s a short run takes — and paid it EVERY time, because the
+# container is --rm: whatever it installs dies with the container, so the next run
+# fetches the same thing again. The image carries the version it was built with;
+# rebuild the image to move it. MEDULLA_UPGRADE_ON_START=1 restores the old
+# behaviour for a pinned image you cannot rebuild.
+if [ -n "${MEDULLA_UPGRADE_ON_START:-}" ]; then
+    # upgrade, not reinstall: reinstall removes-then-fetches, so a network hiccup
+    # leaves the container with NO medulla at all (exit 127).
     pipx upgrade medulla >&2 || echo "⚠ medulla upgrade skipped (offline?) — using baked version" >&2
 fi
 
