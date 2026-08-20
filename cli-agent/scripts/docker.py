@@ -168,7 +168,8 @@ def read_shadow_paths(workflow: str | None) -> list[str]:
 shadow_paths_for_run: list[str] = []
 
 
-def build_run_command(image, volumes, args, container_name: str) -> list[str]:
+def build_run_command(image, volumes, args, container_name: str,
+                      runs_under: str | None = None) -> list[str]:
     cmd = ["docker", "run", "--init", "--rm", "--name", container_name]
     if sys.stdin.isatty():
         cmd.append("-i")
@@ -198,6 +199,8 @@ def build_run_command(image, volumes, args, container_name: str) -> list[str]:
     # inside the container the sandbox IS the isolation: adapters (agy trust
     # preflight) key off this
     cmd.extend(["-e", "MEDULLA_DOCKER=1"])
+    if runs_under:
+        cmd.extend(["-e", f"MEDULLA_RUNS_UNDER={runs_under}"])
     cmd.extend([image, "medulla"])
     cmd.extend(args)
     return cmd
@@ -516,9 +519,10 @@ def _mount_agy_keys(vols: list) -> None:
     _mount(_keychain_get("Antigravity Safe Storage", "Antigravity Key"), "/mnt/agy-safe-key")
 
 
-def run_docker(image, volumes, args):
+def run_docker(image, volumes, args, runs_under: str | None = None):
     container_name = f"medulla-{uuid.uuid4().hex[:8]}"
-    cmd = build_run_command(image, volumes, args, container_name)
+    cmd = build_run_command(image, volumes, args, container_name,
+                            runs_under=runs_under)
 
     # single subprocess path (no execvp): the temp env-file must outlive the
     # docker client's startup read; stdio inheritance keeps -it interactive
@@ -646,9 +650,16 @@ def main():
     volumes = build_volumes(claude_home, mount_agy=workflow_uses_agy(workflow))
 
     # A SHARED definition lives outside the workspace (~/.medulla/workflows/<name>), and
-    # only cwd is mounted — so the container would not find it. Mount the resolved yaml
-    # read-only at the path the project would have used. The surrounding directory stays
-    # repo-local, so runs/ still land in /workspace (rundir.runs_root_for).
+    # only cwd is mounted — so the container would not find it. Mount it OUTSIDE
+    # /workspace, never into it (fback-yimerxmy0y): a mount target inside a bind mount
+    # is created by the daemon when missing, and for a file that means an EMPTY FILE
+    # appearing in the user's repo. That debris then outranked the shared definition and
+    # broke every run, and the symptom read as panelists failing to deliver — a day went
+    # into chasing provider quotas. Whether the daemon creates it varies by driver
+    # (colima did not here, Docker Desktop does), which is exactly why the workspace must
+    # not be the target at all. runs/ still land in the project: MEDULLA_RUNS_UNDER tells
+    # the engine where, since the yaml now sits on a read-only path.
+    shared_runs_under = None
     if workflow:
         resolved = _config_yaml(Path(workflow))
         try:
@@ -658,12 +669,15 @@ def main():
                 dest = Path(workflow)
                 if dest.is_file():
                     dest = dest.parent
-                volumes.extend(["-v", f"{resolved}:/workspace/{dest}/workflow.yaml:ro"])
-                shared_dir = resolved.parent
+                name = resolved.parent.name
+                mnt = f"/mnt/medulla-workflows/{name}"
+                volumes.extend(["-v", f"{resolved}:{mnt}/workflow.yaml:ro"])
                 for extra in ("prompts",):
-                    src = shared_dir / extra
+                    src = resolved.parent / extra
                     if src.is_dir():
-                        volumes.extend(["-v", f"{src}:/workspace/{dest}/{extra}:ro"])
+                        volumes.extend(["-v", f"{src}:{mnt}/{extra}:ro"])
+                args = [f"{mnt}/workflow.yaml" if a == str(workflow) else a for a in args]
+                shared_runs_under = f"/workspace/{dest}"
 
     # Mount extra folders into /workspace/<name> (nested mount inside workspace)
     for mount_path, ro in extra_mounts:
@@ -674,7 +688,7 @@ def main():
         suffix = ":ro" if ro else ""
         volumes.extend(["-v", f"{p}:/workspace/{p.name}{suffix}"])
 
-    return run_docker(image, volumes, args)
+    return run_docker(image, volumes, args, runs_under=shared_runs_under)
 
 
 if __name__ == "__main__":

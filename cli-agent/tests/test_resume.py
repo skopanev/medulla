@@ -564,3 +564,13 @@ def test_empty_local_workflow_does_not_shadow_the_shared_one(tmp_path, monkeypat
     # the host while the run happened inside a container
     assert got == Path(".medulla/workflows/spar/workflow.yaml")
     assert got.resolve() == (local / "workflow.yaml").resolve()
+
+
+def test_runs_under_env_overrides_the_runs_root(tmp_path, monkeypatch):
+    # Under --docker a shared definition is mounted OUTSIDE /workspace on a read-only
+    # path, so history cannot live beside it; docker.py points the engine at the project.
+    from medulla.v2.rundir import runs_root_for
+    monkeypatch.setenv("MEDULLA_RUNS_UNDER", "/workspace/.medulla/workflows/spar")
+    assert runs_root_for(tmp_path / "anywhere") == Path("/workspace/.medulla/workflows/spar")
+    monkeypatch.delenv("MEDULLA_RUNS_UNDER")
+    assert runs_root_for(tmp_path / "anywhere") == tmp_path / "anywhere"

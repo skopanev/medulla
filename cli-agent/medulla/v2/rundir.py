@@ -183,6 +183,11 @@ def runs_root_for(workflow_dir: Path) -> Path:
     the directory medulla was LAUNCHED from, which is the project root and exactly
     what --docker mounts as /workspace.
     """
+    # Set by scripts/docker.py when the definition is mounted from OUTSIDE the workspace:
+    # the yaml then sits on a read-only path, so history must be told where to go.
+    under = os.environ.get("MEDULLA_RUNS_UNDER")
+    if under:
+        return Path(under)
     resolved = workflow_dir.resolve()          # resolve only to CLASSIFY, never to return:
     shared_root = (Path.home() / ".medulla" / "workflows").resolve()
     if not (shared_root == resolved or shared_root in resolved.parents):
