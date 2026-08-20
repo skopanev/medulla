@@ -423,8 +423,21 @@ class Engine:
         # own max_attempts inherits the primary's effective budget
         phase_budget = self.p.action_max_attempts(action)
 
-        invoke, prompt_text, agent_spec = self._prepare_body(
-            current, node, step_dir, render_fn, phase)
+        try:
+            invoke, prompt_text, agent_spec = self._prepare_body(
+                current, node, step_dir, render_fn, phase)
+        except EngineCrash as exc:
+            # Harness preflight failed (missing binary, agy trust preflight, unreadable
+            # auth.json). In a POOL this input sits the round out and the other harnesses
+            # still deliver — crashing here would abort every panelist for one broken
+            # model, which min_success exists precisely to tolerate. A single-agent node
+            # keeps the fatal (fail loud).
+            if pool_mode and exc.code == E_HARNESS:
+                return AttemptsOutcome(
+                    signal=SIG_FAILED, message=exc.message, attempts=0,
+                    failure_class="harness",
+                )
+            raise
         harness_name = agent_spec.harness if agent_spec else None
 
         attempt = 0
@@ -462,7 +475,19 @@ class Engine:
                     # deterministic environment failure (not logged in / bad key):
                     # retry and fallback are pointless — the razor call, same as
                     # agy's trust preflight. Found live: an unauthenticated claude
-                    # burned attempts x inputs across a whole pool.
+                    # burned attempts x inputs across a whole pool. In a POOL fail
+                    # only THIS input (attempts spent, no retry) so the other
+                    # harnesses still deliver; a single-agent node stays fatal.
+                    if pool_mode:
+                        return AttemptsOutcome(
+                            signal=SIG_FAILED, message=fatal, attempts=total,
+                            attempts_primary=n_primary, attempts_fallback=n_fallback,
+                            rc=result.rc, timed_out=result.timed_out,
+                            fallback_used=fallback_used, concluding_phase=phase,
+                            harness=harness_name,
+                            model=agent_spec.model if agent_spec else None,
+                            failure_class="harness",
+                        )
                     raise EngineCrash(E_HARNESS, fatal, node=node.name)
                 raw_text = adapter.filter_stdout(raw_text)
             body_scan = scan_stdout(raw_text, known)
