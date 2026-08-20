@@ -132,6 +132,14 @@ class HarnessAdapter:
             return None
         return line
 
+    def retry_pointless(self, stdout: str) -> str | None:
+        """A failure that WILL repeat until something outside the run changes — a plan
+        limit, an exhausted quota. Distinct from fatal_error: that one crashes the whole
+        run, which is wrong for a pool where the other inputs are fine. This one just
+        stops burning attempts on this input and names the reason; a fallback agent, if
+        declared, still gets its turn. Default: none."""
+        return None
+
     def fatal_error(self, stdout: str) -> str | None:
         """A DETERMINISTIC environment failure (not logged in, invalid key):
         retrying is pointless, the whole run must crash E_HARNESS with a clear
@@ -206,6 +214,27 @@ class ClaudeAdapter(HarnessAdapter):
                     parts.append(raw.get("output", ""))  # dropping it = permanent __default__
             # user messages (tool_result), tool_use blocks, system events: SKIP
         return "\n".join(p for p in parts if p)
+
+    def retry_pointless(self, stdout: str) -> str | None:
+        # "You've hit your weekly limit · resets Aug 21, 3pm (UTC)" arrives as a normal
+        # error result with api_error_status 429, so the engine saw only "body died:
+        # rc=1" and spent a second attempt on something that cannot change until the reset.
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") == "rate_limit_event":
+                info = event.get("rate_limit_info") or {}
+                if info.get("status") == "rejected":
+                    kind = str(info.get("rateLimitType") or "rate").replace("_", "-")
+                    return f"claude-code: {kind} plan limit reached — retrying cannot help"
+            if event.get("type") == "result" and event.get("api_error_status") == 429:
+                return f"claude-code: {str(event.get('result', 'rate limited')).strip()}"
+        return None
 
     def fatal_error(self, stdout: str) -> str | None:
         for line in stdout.splitlines():

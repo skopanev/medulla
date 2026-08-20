@@ -442,6 +442,7 @@ class Engine:
 
         attempt = 0
         total = 0
+        limit_reason: str | None = None
         n_primary = 0
         n_fallback = 0
         last_failure_class: str | None = None
@@ -470,6 +471,16 @@ class Engine:
             raw_text = result.stdout
             if current.kind == "agent":
                 adapter = resolve_harness(agent_spec)
+                # A plan/quota limit will not clear inside this run: stop retrying THIS
+                # agent (a second attempt only burns time and looks like a mystery
+                # "body died: rc=1"), but let a declared fallback take its turn — that
+                # is exactly the case fallback exists for. Not fatal_error: crashing the
+                # whole run would take the healthy panelists with it.
+                pointless = adapter.retry_pointless(result.stdout)
+                if pointless:
+                    log(f"attempt {attempt_id}: {pointless}")
+                    phase_budget = attempt          # no further attempts in this phase
+                    limit_reason = pointless
                 fatal = adapter.fatal_error(result.stdout)
                 if fatal:
                     # deterministic environment failure (not logged in / bad key):
@@ -558,9 +569,15 @@ class Engine:
 
             signal = move.signal
             if signal == SIG_FAILED:
-                message = (f"body died: rc={result.rc}, {total} attempt(s)"
-                           f"{' (fallback tried)' if fallback_used else ''}; "
-                           f"stderr: {_tail(result.stderr)}")
+                if limit_reason:
+                    # Name the wall. "body died: rc=1" for an exhausted plan sent a
+                    # panel round down the wrong path more than once.
+                    message = (f"{limit_reason} ({total} attempt(s)"
+                               f"{', fallback tried' if fallback_used else ''})")
+                else:
+                    message = (f"body died: rc={result.rc}, {total} attempt(s)"
+                               f"{' (fallback tried)' if fallback_used else ''}; "
+                               f"stderr: {_tail(result.stderr)}")
                 if current.kind == "agent":
                     # harness-mined failure detail (codex error/turn.failed lives in
                     # stdout JSON the signal filter rightly drops)

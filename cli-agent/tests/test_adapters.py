@@ -457,3 +457,26 @@ def test_without_harness_bin_the_default_executable_runs(tmp_path):
     a = H.CodexAdapter.__new__(H.CodexAdapter)
     inv = a.build(AgentSpec(harness="codex"), tmp_path / "p.md", "P", 60)
     assert inv.argv[0] == "codex"
+
+
+def test_claude_reports_a_plan_limit_instead_of_a_bare_rc(tmp_path):
+    # Live capture: the weekly limit arrives as an ordinary error result plus a
+    # rate_limit_event, so the engine only saw "body died: rc=1" and spent a second
+    # attempt on something that cannot clear until the reset.
+    a = H.ClaudeAdapter.__new__(H.ClaudeAdapter)
+    stream = "\n".join([
+        json.dumps({"type": "rate_limit_event", "rate_limit_info": {
+            "status": "rejected", "rateLimitType": "seven_day"}}),
+        json.dumps({"type": "result", "is_error": True, "api_error_status": 429,
+                    "result": "You've hit your weekly limit · resets Aug 21, 3pm (UTC)"}),
+    ])
+    msg = a.retry_pointless(stream)
+    assert msg and "plan limit" in msg and "seven-day" in msg
+    # and it must NOT be escalated to a run-killing error: other panelists are fine
+    assert a.fatal_error(stream) is None
+
+
+def test_healthy_output_is_not_mistaken_for_a_limit(tmp_path):
+    a = H.ClaudeAdapter.__new__(H.ClaudeAdapter)
+    stream = json.dumps({"type": "result", "is_error": False, "result": "done"})
+    assert a.retry_pointless(stream) is None
