@@ -20,10 +20,14 @@ DEFAULT_IMAGE = "medulla:latest"
 # Home directory of the NON-ROOT user INSIDE the container. Credentials that a
 # CLI reads from $HOME (broker config, opencode/ntk config, .gitconfig, the
 # container overlay's home/ tree) must be mounted here — NOT at a guessed path.
-# The pbl/docker image (Dockerfile.workflows) runs as user `hltm` with
-# HOME=/home/hltm; a stale hardcode of /home/medulla dropped every home-cred
-# outside where the CLI looks (e.g. cx reads $HOME/.config/hltm-broker/config.json).
-# One knob so it is trivial to retarget when the image's user changes.
+# The images in play disagree on the user: the packaged default image runs as
+# `medulla` (HOME=/home/medulla), the pbl/docker image (Dockerfile.workflows) as
+# `hltm` (HOME=/home/hltm). A single hardcode drops every home-cred outside where
+# the CLI looks for whichever image it is wrong about (e.g. cx reads
+# $HOME/.config/hltm-broker/config.json → broker "not configured", gpt panelist
+# fails). So this is only the FALLBACK: the real home is read from the resolved
+# image at runtime (image_home) and assigned to CONTAINER_HOME before the mounts
+# are built.
 CONTAINER_HOME = "/home/hltm"
 SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
 # When installed: .medulla/scripts/docker.py → context is .medulla/
@@ -309,6 +313,26 @@ def image_tag_for(workflow: str, dockerfile: Path) -> str:
     wf_name = p.stem if p.is_file() else p.name
     name = "default" if dockerfile == SCRIPT_DIR / "Dockerfile.default" else wf_name
     return f"medulla-{name}:{digest}"
+
+
+def image_home(image, fallback):
+    """The non-root user's $HOME inside the resolved image, read from the image
+    itself. The two images in play run as different users (hltm vs medulla), so a
+    hardcode is wrong for one of them and silently drops every $HOME-based cred —
+    most visibly the broker config cx needs, failing the gpt panelist. Docker sets
+    HOME from the image's USER at run time, so a one-shot probe is authoritative;
+    fall back to the default only if the probe cannot answer."""
+    try:
+        out = subprocess.run(
+            ["docker", "run", "--rm", "--entrypoint", "sh", image,
+             "-c", 'printf %s "$HOME"'],
+            capture_output=True, text=True, timeout=30)
+        home = out.stdout.strip()
+        if out.returncode == 0 and home.startswith("/") and home != "/":
+            return home
+    except Exception:
+        pass
+    return fallback
 
 
 def ensure_image(image, build, workflow, cli_vars, dockerfile=None, ready_image=False):
@@ -635,6 +659,12 @@ def main():
                       ready_image=dockerfile is None and workflow is not None)
     if rc != 0:
         return rc
+
+    # The image exists now — read its real $HOME so home-based creds (broker
+    # config, opencode/ntk, .gitconfig, the overlay home/ tree) mount where the
+    # container's user actually looks. hltm and medulla images differ here.
+    global CONTAINER_HOME
+    CONTAINER_HOME = image_home(image, CONTAINER_HOME)
 
     claude_config = os.environ.get("CLAUDE_CONFIG_DIR")
     claude_home = Path(claude_config).expanduser().resolve() if claude_config else Path.home() / ".claude"
