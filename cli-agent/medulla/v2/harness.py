@@ -247,6 +247,17 @@ class CodexAdapter(HarnessAdapter):
     name = "codex"
     binary = "codex"
 
+    def __init__(self):
+        # cx (the token-refreshing wrapper) alone is a valid codex install: a slim
+        # image with only cx must not crash E_HARNESS at construction, before the
+        # workflow's harness_bin:{codex:cx} override can take effect. Availability
+        # accepts either binary; the actual bin is still chosen in build() via
+        # spec.bin (harness_bin remains the single source of override).
+        if not (shutil.which("cx") or shutil.which("codex")):
+            raise EngineCrash(
+                E_HARNESS,
+                f"harness '{self.name}': neither 'cx' nor 'codex' on PATH")
+
     def build(self, spec, prompt_file, prompt_text, timeout_s):
         bin_ = spec.bin or "codex"
         inner_ms = (int(timeout_s) + INNER_SLACK_S) * 1000

@@ -17,6 +17,14 @@ import uuid
 from pathlib import Path
 
 DEFAULT_IMAGE = "medulla:latest"
+# Home directory of the NON-ROOT user INSIDE the container. Credentials that a
+# CLI reads from $HOME (broker config, opencode/ntk config, .gitconfig, the
+# container overlay's home/ tree) must be mounted here — NOT at a guessed path.
+# The pbl/docker image (Dockerfile.workflows) runs as user `hltm` with
+# HOME=/home/hltm; a stale hardcode of /home/medulla dropped every home-cred
+# outside where the CLI looks (e.g. cx reads $HOME/.config/hltm-broker/config.json).
+# One knob so it is trivial to retarget when the image's user changes.
+CONTAINER_HOME = "/home/hltm"
 SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
 # When installed: .medulla/scripts/docker.py → context is .medulla/
 # When running from source: cli-agent/scripts/docker.py → context is cli-agent/
@@ -427,22 +435,22 @@ def build_volumes(claude_home, mount_agy=True):
 
     opencode_dir = home / ".config" / "opencode"
     if opencode_dir.is_dir():
-        add(opencode_dir.resolve(), "/home/medulla/.config/opencode", ro=True)
+        add(opencode_dir.resolve(), f"{CONTAINER_HOME}/.config/opencode", ro=True)
 
     ntk_dir = home / ".config" / "ntk"
     if ntk_dir.is_dir():
-        add(ntk_dir.resolve(), "/home/medulla/.config/ntk", ro=True)
+        add(ntk_dir.resolve(), f"{CONTAINER_HOME}/.config/ntk", ro=True)
 
     # Container overlay — the escape hatch for anything the IMAGE cannot carry:
     # private tooling, a site-specific wrapper, credentials medulla knows nothing
     # about. Whatever sits in ~/.medulla/container/ is mounted read-only at the
     # matching place inside, and medulla neither reads it nor cares what it is.
-    #   ~/.medulla/container/bin/<name>   -> /usr/local/bin/<name>   (on PATH)
-    #   ~/.medulla/container/home/<path>  -> /home/medulla/<path>
+    #   ~/.medulla/container/bin/<name>   -> /usr/local/bin/<name>     (on PATH)
+    #   ~/.medulla/container/home/<path>  -> {CONTAINER_HOME}/<path>   (container $HOME)
     # Entries are mounted ONE BY ONE, never as a directory over /usr/local/bin:
     # covering that would hide the CLIs the image installs.
     overlay = home / ".medulla" / "container"
-    for sub, dest_root in (("bin", "/usr/local/bin"), ("home", "/home/medulla")):
+    for sub, dest_root in (("bin", "/usr/local/bin"), ("home", CONTAINER_HOME)):
         root = overlay / sub
         if not root.is_dir():
             continue
@@ -462,7 +470,7 @@ def build_volumes(claude_home, mount_agy=True):
 
     gitconfig = home / ".gitconfig"
     if gitconfig.exists():
-        add(gitconfig.resolve(), "/home/medulla/.gitconfig", ro=True)
+        add(gitconfig.resolve(), f"{CONTAINER_HOME}/.gitconfig", ro=True)
 
     # init-docker.sh from package → /mnt/init-docker.sh (outside /workspace, virtiofs-safe)
     _mount_init_docker(vols)
