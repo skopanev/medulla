@@ -59,8 +59,15 @@ _StrictLoader.add_constructor(
 )
 
 
+_ERR_PATH: Path | None = None      # file being validated; set by load_workflow
+
+
 def _err(msg: str) -> EngineCrash:
-    return EngineCrash(E_VALIDATION, msg)
+    # Always name the file. "workflow must be a YAML mapping" sent a whole day
+    # chasing provider quotas: the offending file was a zero-byte workflow.yaml
+    # nobody wrote by hand, and the message pointed at nothing.
+    where = f" [{_ERR_PATH}]" if _ERR_PATH else ""
+    return EngineCrash(E_VALIDATION, f"{msg}{where}")
 
 
 def _parse_agent(raw, where: str) -> AgentSpec:
@@ -277,7 +284,9 @@ def _validate_docker_block(raw) -> None:
 
 
 def load_workflow(path: Path) -> Workflow:
+    global _ERR_PATH
     path = Path(path)
+    _ERR_PATH = path
     if not path.is_file():
         raise _err(f"workflow not found: {path}")
     try:
@@ -287,7 +296,10 @@ def load_workflow(path: Path) -> Workflow:
     except yaml.YAMLError as exc:
         raise _err(f"YAML parse error: {exc}")
     if not isinstance(data, dict):
-        raise _err("workflow must be a YAML mapping")
+        if data is None:
+            raise _err("workflow file is EMPTY (0 bytes) — delete it and the "
+                       "machine-wide definition applies again")
+        raise _err(f"workflow must be a YAML mapping, got {type(data).__name__}")
 
     version = data.get("version")
     if version != "2":

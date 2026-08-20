@@ -24,7 +24,12 @@ class _Parser(argparse.ArgumentParser):
         raise SystemExit(1)
 
 
-SHARED_WORKFLOWS = Path.home() / ".medulla" / "workflows"
+def shared_workflows() -> Path:
+    """Machine-wide workflow definitions. Resolved on CALL: a module-level
+    Path.home() freezes at import and ignores a later HOME — the same trap that
+    made the suite write into a real home directory."""
+    return Path.home() / ".medulla" / "workflows"
+
 
 
 def _resolve_workflow_yaml(w: Path) -> Path:
@@ -39,9 +44,19 @@ def _resolve_workflow_yaml(w: Path) -> Path:
     from .rundir import config_yaml
     local = config_yaml(w) if w.is_dir() else w
     if local.is_file():
-        return local
+        # A ZERO-BYTE local file carries no intent — it is debris (an interrupted
+        # write, a stray shell redirect), yet it outranked the machine-wide config
+        # and crashed every run. The failure reads as "panelists did not deliver",
+        # so it was chased as provider quota for a day. Debris does not get to win;
+        # a file with actual content still does, however broken, because that IS
+        # someone's intent and silently ignoring it would be worse.
+        if local.stat().st_size == 0:
+            print(f"warning: ignoring empty {local} — using the machine-wide "
+                  f"definition; delete the file to silence this", file=sys.stderr)
+        else:
+            return local
     name = w.name if w.is_dir() or not w.suffix else w.parent.name
-    shared = SHARED_WORKFLOWS / name
+    shared = shared_workflows() / name
     shared_yaml = config_yaml(shared) if shared.is_dir() else shared
     return shared_yaml if shared_yaml.is_file() else local
 

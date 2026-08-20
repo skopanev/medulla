@@ -371,3 +371,30 @@ nodes:
         except EngineCrash:
             continue
         raise AssertionError(f"accepted bad harness_bin: {bad}")
+
+
+def test_validation_errors_name_the_file(tmp_path):
+    from medulla.v2.contract import load_workflow
+    from medulla.v2.errors import EngineCrash
+    p = tmp_path / "workflow.yaml"
+    p.write_text("just a string, not a mapping\n", encoding="utf-8")
+    try:
+        load_workflow(p)
+    except EngineCrash as e:
+        assert str(p) in e.message, "the error must name the offending file"
+        return
+    raise AssertionError("expected a validation crash")
+
+
+def test_empty_workflow_says_so(tmp_path):
+    # The message that cost a day: "workflow must be a YAML mapping" pointed nowhere.
+    from medulla.v2.contract import load_workflow
+    from medulla.v2.errors import EngineCrash
+    p = tmp_path / "workflow.yaml"
+    p.write_text("", encoding="utf-8")
+    try:
+        load_workflow(p)
+    except EngineCrash as e:
+        assert "EMPTY" in e.message and str(p) in e.message
+        return
+    raise AssertionError("expected a validation crash")

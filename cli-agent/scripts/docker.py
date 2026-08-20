@@ -216,7 +216,11 @@ def _config_yaml(d: Path) -> Path:
     if d.is_file():
         return d
     local = d / "workflow.yaml"
-    if not local.is_file() and not (d / "pipeline.yaml").is_file():
+    # Zero-byte debris does not shadow the shared definition (mirrors
+    # v2/cli.py::_resolve_workflow_yaml — the two resolvers must agree, or the same
+    # command behaves differently bare and under --docker).
+    local_usable = local.is_file() and local.stat().st_size > 0
+    if not local_usable and not (d / "pipeline.yaml").is_file():
         # Shared definition (see v2/cli.py::_resolve_workflow_yaml): one copy per machine
         # in ~/.medulla/workflows/<name>. LOCAL WINS — this branch is only reached when
         # the project has no workflow of its own.

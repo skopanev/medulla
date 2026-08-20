@@ -540,3 +540,27 @@ def test_refresh_never_clobbers_through_symlink(tmp_path):
     assert refresh_skill("spar", str(tmp_path)) == 0
     assert victim.read_text() == "SECRET"            # NOT clobbered
     assert (wf / "workflow.yaml").is_symlink()        # symlink left untouched
+
+
+def test_empty_local_workflow_does_not_shadow_the_shared_one(tmp_path, monkeypatch):
+    # A zero-byte file appeared repeatedly and outranked ~/.medulla/workflows/<name>,
+    # crashing every run in a way that looked like panelists failing to deliver.
+    from medulla.v2.cli import _resolve_workflow_yaml
+    home = tmp_path / "home"
+    shared = home / ".medulla" / "workflows" / "spar"
+    shared.mkdir(parents=True)
+    (shared / "workflow.yaml").write_text('version: "2"\n', encoding="utf-8")
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.chdir(tmp_path)
+
+    local = tmp_path / ".medulla" / "workflows" / "spar"
+    local.mkdir(parents=True)
+    (local / "workflow.yaml").write_text("", encoding="utf-8")        # debris
+    assert _resolve_workflow_yaml(Path(".medulla/workflows/spar")) == shared / "workflow.yaml"
+
+    (local / "workflow.yaml").write_text('version: "2"\n', encoding="utf-8")  # real intent
+    got = _resolve_workflow_yaml(Path(".medulla/workflows/spar"))
+    # returned as GIVEN (relative), so --print-run-dir stays valid for a caller on
+    # the host while the run happened inside a container
+    assert got == Path(".medulla/workflows/spar/workflow.yaml")
+    assert got.resolve() == (local / "workflow.yaml").resolve()
