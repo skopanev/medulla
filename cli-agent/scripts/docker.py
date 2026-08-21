@@ -107,7 +107,8 @@ def _collect_dotenv(workflow: str | None) -> dict:
     global < project < workflow — THE NEAREST TIER WINS on key conflict."""
     merged = _parse_env_file(Path.home() / ".medulla" / ".env")
     if workflow:
-        wdir = Path(workflow).resolve()
+        _w = Path(workflow)
+        wdir = (_w.parent if _w.is_file() else _w).resolve()
         for parent in reversed(list(wdir.parents)):
             merged.update(_parse_env_file(parent / ".medulla" / ".env"))
         merged.update(_parse_env_file(wdir / ".env"))
@@ -395,16 +396,43 @@ def ensure_image(image, build, workflow, cli_vars, dockerfile=None, ready_image=
 
 
 def workflow_uses_agy(workflow: str | None) -> bool:
-    """Only workflows that actually mention the agy harness get the
-    Keychain-extracted agy keys — a Keychain prompt on every --docker run
-    for workflows that never touch agy is noise (and scary noise)."""
+    """Does this workflow actually use the agy harness?
+
+    Only then are the Keychain-extracted agy keys mounted: a Keychain prompt on every
+    --docker run for workflows that never touch agy is noise, and scary noise.
+
+    Reads the HARNESS FIELDS, not the file text. The previous check was
+    `"agy" in yaml_path.read_text()` — a substring match, so the word appearing in a
+    prompt, a comment or a model name sent the runner into the macOS Keychain for
+    credentials the run never needed. Anything unreadable or unparseable keeps the old
+    permissive answer: missing credentials fail confusingly, a spurious prompt is merely
+    annoying.
+    """
     if not workflow:
-        return True                    # no yaml to inspect: keep old behavior
+        return True
     yaml_path = _config_yaml(Path(workflow))
     try:
-        return "agy" in yaml_path.read_text(encoding="utf-8")
-    except OSError:
+        import yaml
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+    except Exception:
         return True
+
+    def mentions_agy(node) -> bool:
+        if isinstance(node, dict):
+            agent = node.get("agent")
+            if isinstance(agent, str) and agent.strip() == "agy":
+                return True
+            if isinstance(agent, dict) and str(agent.get("harness", "")).strip() == "agy":
+                return True
+            # pool inputs carry the harness as data: {slug: gemini, harness: agy, ...}
+            if str(node.get("harness", "")).strip() == "agy":
+                return True
+            return any(mentions_agy(v) for v in node.values())
+        if isinstance(node, list):
+            return any(mentions_agy(v) for v in node)
+        return False
+
+    return mentions_agy(data)
 
 
 def build_volumes(claude_home, mount_agy=True):

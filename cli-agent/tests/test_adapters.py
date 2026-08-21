@@ -389,13 +389,22 @@ def test_opencode_sandbox_read_only_denies_writes(tmp_path):
     assert perm == {"edit": "deny", "write": "deny", "patch": "deny", "bash": "deny"}
 
 
-def test_agy_sandbox_read_only_is_e_harness(tmp_path):
-    # agy has only a boolean --sandbox (terminal restrictions), which cannot
-    # stop writes — asking for read-only must fail loudly, not downgrade
+def test_agy_sandbox_read_only_maps_to_plan_mode(tmp_path):
+    # Used to raise "not expressible" — true when agy had only the boolean --sandbox
+    # (terminal restrictions, no write protection), stale since --mode (accept-edits,
+    # plan) landed. Plan mode rejects the write RPC at the permission layer, so it is
+    # the same kind of lock claude gets from --permission-mode plan.
     a = H.AgyAdapter.__new__(H.AgyAdapter)
-    with pytest.raises(EngineCrash) as exc:
-        a.build(AgentSpec(harness="agy", sandbox="read-only"), tmp_path / "p.md", "P", 60)
-    assert exc.value.code == "E_HARNESS" and "not expressible" in exc.value.message
+    inv = a.build(AgentSpec(harness="agy", sandbox="read-only"), tmp_path / "p.md", "P", 60)
+    assert "--mode" in inv.argv and inv.argv[inv.argv.index("--mode") + 1] == "plan"
+    assert "--dangerously-skip-permissions" not in inv.argv
+    assert inv.argv[-2] == "--print"          # still last: it eats the next token
+
+
+def test_agy_without_sandbox_keeps_full_permissions(tmp_path):
+    a = H.AgyAdapter.__new__(H.AgyAdapter)
+    inv = a.build(AgentSpec(harness="agy"), tmp_path / "p.md", "P", 60)
+    assert "--dangerously-skip-permissions" in inv.argv and "--mode" not in inv.argv
 
 
 def test_sandbox_unknown_value_is_e_harness(tmp_path):

@@ -87,7 +87,7 @@ In agent prompts, naming the signal is enough — "emit the signal named done" �
 
 Harnesses: `claude-code`, `codex`, `opencode`, `agy`. `effort` maps to each CLI's native knob. `max_attempts` retries flaky attempts (non-zero exit, timeout, agent silence); `fallback` is a second agent tried after the primary's attempts are exhausted. While an agent works, its text streams live to your terminal (`MEDULLA_STREAM=0` to silence).
 
-`sandbox` restricts a step's power. Default is `danger` — under `--docker` the container *is* the sandbox and every workflow written before this field relies on that. Set `sandbox: read-only` when a step feeds the model **untrusted** text (mail, chat logs, scraped pages) while the workspace is mounted read-write: it maps to the harness's native lock — claude `--permission-mode plan`, codex `-s read-only`, opencode denies `edit`/`write`/`patch`/`bash` (a shell is a write primitive). `agy` cannot express read-only and raises rather than silently downgrade.
+`sandbox` restricts a step's power. Default is `danger` — under `--docker` the container *is* the sandbox and every workflow written before this field relies on that. Set `sandbox: read-only` when a step feeds the model **untrusted** text (mail, chat logs, scraped pages) while the workspace is mounted read-write: it maps to the harness's native lock — claude `--permission-mode plan`, codex `-s read-only`, opencode denies `edit`/`write`/`patch`/`bash` (a shell is a write primitive). `agy` maps it to `--mode plan` (its permission layer rejects the write RPC, same class of lock as claude's).
 
 ### Hooks: pre and post
 

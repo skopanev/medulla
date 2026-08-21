@@ -211,3 +211,53 @@ def test_runs_under_is_relative_not_a_container_path(dockerpy, tmp_path, monkeyp
     # the value handed to the engine must be repo-relative
     dest = Path(".medulla/workflows/spar")
     assert not str(dest).startswith("/")
+
+
+def test_agy_keychain_is_not_triggered_by_the_word_agy(dockerpy, tmp_path):
+    # It used to be `"agy" in yaml.read_text()`: the word in a PROMPT or a comment sent
+    # the runner into the macOS Keychain for credentials the run never needed.
+    w = tmp_path / "workflow.yaml"
+    w.write_text("""version: "2"
+start: a
+# we used to run agy here, not any more
+nodes:
+  a:
+    agent: {harness: claude-code, model: sonnet}
+    prompt: "compare this with agy output"
+    on_signal: {ok: __exit_ok__}
+""", encoding="utf-8")
+    assert dockerpy.workflow_uses_agy(str(w)) is False
+
+
+def test_agy_is_detected_where_it_is_actually_declared(dockerpy, tmp_path):
+    for decl in ('agent: {harness: agy}', 'agent: agy'):
+        w = tmp_path / "workflow.yaml"
+        w.write_text(f"""version: "2"
+start: a
+nodes:
+  a:
+    {decl}
+    prompt: "hi"
+    on_signal: {{ok: __exit_ok__}}
+""", encoding="utf-8")
+        assert dockerpy.workflow_uses_agy(str(w)) is True, decl
+
+
+def test_agy_detected_when_a_pool_input_carries_the_harness(dockerpy, tmp_path):
+    # spar declares harnesses as pool DATA, not on the agent node
+    w = tmp_path / "workflow.yaml"
+    w.write_text("""version: "2"
+start: p
+nodes:
+  p:
+    inputs:
+      - {slug: gemini, harness: agy, model: "Gemini 3.1 Pro (High)"}
+    agent: {harness: "{{input.harness}}"}
+    prompt: "hi"
+    on_signal: {__done__: __exit_ok__}
+""", encoding="utf-8")
+    assert dockerpy.workflow_uses_agy(str(w)) is True
+
+
+def test_unreadable_workflow_keeps_the_permissive_answer(dockerpy, tmp_path):
+    assert dockerpy.workflow_uses_agy(str(tmp_path / "nope.yaml")) is True

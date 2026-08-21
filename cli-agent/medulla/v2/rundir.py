@@ -201,7 +201,6 @@ def runs_root_for(workflow_dir: Path) -> Path:
     # them. Relative to the launch dir it is valid in both places, and it is the same
     # location --docker mounts, so --resume works across host and container runs.
     return Path(".medulla") / "workflows" / resolved.name
-    return wdir
 
 
 def prune_runs(workflow_dir: Path, keep_runs: int, workflow_timeout: int | None) -> None:

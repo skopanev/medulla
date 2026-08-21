@@ -465,16 +465,17 @@ class AgyAdapter(HarnessAdapter):
                 f"\"trustedWorkspaces\" in {_AGY_SETTINGS}).")
 
     def build(self, spec, prompt_file, prompt_text, timeout_s):
-        # sandbox → agy. It offers one boolean (`--sandbox`, terminal restrictions)
-        # and cannot express read-only, so asking for it here is an error rather
-        # than a silent downgrade to something looser than requested.
-        if _read_only(spec):
-            raise EngineCrash(
-                E_HARNESS,
-                "harness 'agy': sandbox: read-only is not expressible — agy offers only a "
-                "boolean --sandbox (terminal restrictions), which does not stop file writes. "
-                "Use codex, claude-code or opencode for a read-only step.")
-        argv = [spec.bin or "agy", "--dangerously-skip-permissions",
+        # sandbox → agy `--mode plan`, exactly as claude maps it to `--permission-mode
+        # plan`. This used to raise "not expressible": true when agy offered only the
+        # boolean `--sandbox` (terminal restrictions, no write protection), stale since
+        # `--mode (accept-edits, plan)` landed. Plan mode refuses writes at the CLI's
+        # permission layer — the write RPC is rejected, not merely discouraged — so it is
+        # a real lock, not a polite request (verified on agy 1.1.17: the file was never
+        # created). Refusing a read-only step on a harness that supports it pushed panels
+        # onto other models for no reason.
+        ro = _read_only(spec)
+        argv = [spec.bin or "agy",
+                *(["--mode", "plan"] if ro else ["--dangerously-skip-permissions"]),
                 "--print-timeout", f"{int(timeout_s) + INNER_SLACK_S}s"]
         if spec.model:
             argv += ["--model", AGY_MODEL_ALIASES.get(spec.model, spec.model)]
