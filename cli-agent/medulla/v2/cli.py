@@ -13,6 +13,8 @@ from pathlib import Path
 from .contract import load_workflow
 from .engine import find_resumable, run_workflow
 from .errors import EngineCrash
+from .workflow_path import resolve_workflow_yaml as _resolve_workflow_yaml
+from .workflow_path import shared_workflows  # noqa: F401 (public: init.py)
 
 
 class _Parser(argparse.ArgumentParser):
@@ -22,43 +24,6 @@ class _Parser(argparse.ArgumentParser):
         self.print_usage(sys.stderr)
         print(f"error: {message}", file=sys.stderr)
         raise SystemExit(1)
-
-
-def shared_workflows() -> Path:
-    """Machine-wide workflow definitions. Resolved on CALL: a module-level
-    Path.home() freezes at import and ignores a later HOME — the same trap that
-    made the suite write into a real home directory."""
-    return Path.home() / ".medulla" / "workflows"
-
-
-
-def _resolve_workflow_yaml(w: Path) -> Path:
-    """Local first, then the machine-wide copy — LOCAL ALWAYS WINS.
-
-    A definition can live once in ~/.medulla/workflows/<name>/ and serve every repo, so
-    fixing it fixes all of them. A project that needs its own version just puts a real
-    workflow.yaml in .medulla/workflows/<name>/ and nothing else changes. runs/ are rooted
-    at the LAUNCH directory (rundir.runs_root_for), so a shared definition never collects
-    other projects' history.
-    """
-    from .rundir import config_yaml
-    local = config_yaml(w) if w.is_dir() else w
-    if local.is_file():
-        # A ZERO-BYTE local file carries no intent — it is debris (an interrupted
-        # write, a stray shell redirect), yet it outranked the machine-wide config
-        # and crashed every run. The failure reads as "panelists did not deliver",
-        # so it was chased as provider quota for a day. Debris does not get to win;
-        # a file with actual content still does, however broken, because that IS
-        # someone's intent and silently ignoring it would be worse.
-        if local.stat().st_size == 0:
-            print(f"warning: ignoring empty {local} — using the machine-wide "
-                  f"definition; delete the file to silence this", file=sys.stderr)
-        else:
-            return local
-    name = w.name if w.is_dir() or not w.suffix else w.parent.name
-    shared = shared_workflows() / name
-    shared_yaml = config_yaml(shared) if shared.is_dir() else shared
-    return shared_yaml if shared_yaml.is_file() else local
 
 
 ENV_HELP = """\

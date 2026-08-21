@@ -117,10 +117,12 @@ Adding `inputs:` turns the action into a pool: the body runs once per input, `ma
 | File | Scope |
 |---|---|
 | `~/.medulla/.env` | global — machine-wide provider tokens (claude, openai, …) |
-| `<project>/.medulla/.env` | every workflow in the project |
-| `<workflow>/.env` | one workflow |
+| `<project>/.medulla/.env` | every workflow in the project you run from |
+| `<workflow>/.env` | one workflow, beside the definition that resolved |
 
 Nearest wins per key: a workflow declaring `CLAUDE_CODE_OAUTH_TOKEN` overrides the global one **for that workflow only**; keys not overridden still flow down from the wider tiers.
+
+The project tier is the repo you **launch from** — the same one `runs/` land in — so a machine-wide definition picks up the secrets of whichever project invoked it. The workflow tier travels with the definition: for a shared workflow that is `~/.medulla/workflows/<name>/.env`, not a file in your repo.
 
 For Docker runs, Claude OAuth needs no duplicate `.env` entry when the standard
 `~/.claude/token-home` profile token exists. Resolution is explicit

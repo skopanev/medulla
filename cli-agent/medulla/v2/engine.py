@@ -214,7 +214,7 @@ def _parse_dotenv(path: Path) -> dict[str, str]:
     return out
 
 
-def load_dotenv(workflow_dir: Path) -> dict[str, str]:
+def load_dotenv(workflow_dir: Path, launch_dir: Path | None = None) -> dict[str, str]:
     """Secrets channel for bodies/hooks: NOT vars — never templated, never
     persisted. Three tiers, nearest wins:
       ~/.medulla/.env            global (machine-wide provider tokens)
@@ -223,8 +223,19 @@ def load_dotenv(workflow_dir: Path) -> dict[str, str]:
     """
     merged: dict[str, str] = {}
     merged.update(_parse_dotenv(Path.home() / ".medulla" / ".env"))
-    for parent in reversed(workflow_dir.resolve().parents):
-        candidate = parent / ".medulla" / ".env"
+    # BOTH chains, never one: walking up only from the definition skipped the project
+    # entirely for a machine-wide workflow (it lives under $HOME), and walking up only
+    # from the launch dir dropped the .medulla/.env of a workflow nested BELOW the launch
+    # dir — a directory that is a descendant of cwd, not an ancestor. Launch first, the
+    # definition's own ancestors last: nearest to the workflow wins.
+    launch = (launch_dir or Path.cwd()).resolve()
+    wdir = workflow_dir.resolve()
+    seen: set[Path] = set()
+    for base in list(reversed(launch.parents)) + [launch] + list(reversed(wdir.parents)):
+        candidate = base / ".medulla" / ".env"
+        if candidate in seen:
+            continue
+        seen.add(candidate)
         if candidate.is_file() and candidate != Path.home() / ".medulla" / ".env":
             merged.update(_parse_dotenv(candidate))
     merged.update(_parse_dotenv(workflow_dir / ".env"))
@@ -232,11 +243,13 @@ def load_dotenv(workflow_dir: Path) -> dict[str, str]:
 
 
 class Engine:
-    def __init__(self, workflow: Workflow, store: RunStore, workdir: Path):
+    def __init__(self, workflow: Workflow, store: RunStore, workdir: Path,
+                 launch_dir: Path | None = None):
         self.p = workflow
         self.store = store
         self.workdir = workdir
-        self.dotenv = load_dotenv(workflow.dir) if workflow.dir else {}
+        self.dotenv = load_dotenv(workflow.dir, launch_dir or workdir) \
+            if workflow.dir else {}
         self.vars: dict[str, str] = dict(workflow.vars)
         self.last: dict = {}
         self.deadline: float | None = (
@@ -270,6 +283,12 @@ class Engine:
         env = {**self.dotenv, **(self.vars if vars_map is None else vars_map)}
         env["MEDULLA_RUN_ID"] = self.store.run_id
         env["MEDULLA_RUN_DIR"] = str(self.store.dir)
+        # Stops HERE. It is an internal compensator (scripts/docker.py sets it when the
+        # definition is mounted read-only), and bodies inherit os.environ wholesale — so
+        # a `medulla` invoked from inside a body would root ITS history in OUR run
+        # directory, and that workflow's keep_runs would then evict our history.
+        # Observed live: a panelist's shell inherited it and 96 unrelated tests failed.
+        env["MEDULLA_RUNS_UNDER"] = ""
         for node_name, path in self.manifests.items():
             env[f"MEDULLA_MANIFEST_{node_name.upper().replace('-', '_')}"] = str(path)
         if self.last:
@@ -1085,7 +1104,7 @@ def run_workflow(
     import threading as _threading
 
     from .procrun import kill_live_processes
-    from .rundir import RunLocked, prune_runs
+    from .rundir import RunLocked, launch_dir_of, prune_runs
     workdir = workdir or Path.cwd()
     store = None
     engine = None
@@ -1124,7 +1143,8 @@ def run_workflow(
             if print_run_dir:
                 print(store.dir, flush=True)   # stdout, line 1: caller captures it now
             log(f"resume {store.run_id} -> {store.dir}")
-            engine = Engine(workflow, store, workdir)
+            engine = Engine(workflow, store, workdir,
+                            launch_dir=launch_dir_of(store.dir))
             current = engine.replay()
             outcome = (engine.synthesize_terminal(current) if current in TERMINALS
                        else engine.run(start_override=current))

@@ -222,6 +222,11 @@ def test_dotenv_three_tiers_nearest_wins(tmp_path, monkeypatch):
     (project / ".medulla" / ".env").write_text(
         "TOKEN=project\nPROJECT_ONLY=p\n", encoding="utf-8")
     (pdir / ".env").write_text("TOKEN=workflow\n", encoding="utf-8")
+    # The project tier is the repo you LAUNCH from — the same project runs/ land in.
+    # It used to be derived from the workflow's own path, which for a machine-wide
+    # definition (living under $HOME) found no project at all, and made --docker and
+    # bare runs of one command forward different secrets.
+    monkeypatch.chdir(project)
     env = load_dotenv(pdir)
     assert env["TOKEN"] == "workflow"          # nearest wins
     assert env["GLOBAL_ONLY"] == "g" and env["PROJECT_ONLY"] == "p"

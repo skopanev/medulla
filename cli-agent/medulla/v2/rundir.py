@@ -17,20 +17,14 @@ from pathlib import Path
 
 import yaml
 
+# Re-exported: config_yaml has always been imported from here (run dirs read
+# their snapshot through it). The lookup itself now lives with the rest of the
+# workflow-path logic, in ONE module both the engine and docker.py import.
+from .workflow_path import config_yaml  # noqa: F401
+
 
 class RunLocked(Exception):
     """Another process holds this run's lock."""
-
-
-def config_yaml(d: Path) -> Path:
-    """Read-side config lookup: workflow.yaml, else the pre-4.1 name
-    pipeline.yaml — old projects and old run dirs keep working untouched.
-    Writes always use the new name."""
-    w = d / "workflow.yaml"
-    if w.is_file():
-        return w
-    legacy = d / "pipeline.yaml"
-    return legacy if legacy.is_file() else w
 
 
 class RunStore:
@@ -68,6 +62,11 @@ class RunStore:
         run_dir.mkdir(parents=True, exist_ok=False)
         (run_dir / "steps").mkdir()
         (run_dir / "workflow.yaml").write_text(config_text, encoding="utf-8")  # immutable snapshot
+        # WHERE this run was launched from. The project .env tier is rooted here, so a
+        # --resume from a different directory (a CI runner with a fresh checkout path,
+        # or just another shell) would otherwise recompute a different set of secrets
+        # for the very same run.
+        (run_dir / "launch.txt").write_text(str(Path.cwd().resolve()), encoding="utf-8")
         store = cls(run_dir, run_id)
         store._acquire_flock()
         return store
@@ -201,6 +200,15 @@ def runs_root_for(workflow_dir: Path) -> Path:
     # them. Relative to the launch dir it is valid in both places, and it is the same
     # location --docker mounts, so --resume works across host and container runs.
     return Path(".medulla") / "workflows" / resolved.name
+
+
+def launch_dir_of(run_dir: Path) -> Path | None:
+    """The directory a run was started in, or None for runs from before this was
+    recorded (they fall back to the current one — the old behaviour)."""
+    try:
+        return Path((run_dir / "launch.txt").read_text(encoding="utf-8").strip())
+    except OSError:
+        return None
 
 
 def prune_runs(workflow_dir: Path, keep_runs: int, workflow_timeout: int | None) -> None:

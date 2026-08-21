@@ -34,6 +34,18 @@ SCRIPT_DIR = Path(os.path.realpath(__file__)).parent
 # When running from source: cli-agent/scripts/docker.py → context is cli-agent/
 PROJECT_ROOT = SCRIPT_DIR.parent
 
+# ONE resolver, shared with the engine (v2/workflow_path.py). This process answers
+# "which yaml does -w mean?" BEFORE the engine starts, and its answer picks the image
+# and the tmpfs isolation policy — so a second hand-written copy meant the right
+# workflow could run under another one's image, or without the isolation it declared.
+# Import works in both layouts: installed, docker.py runs on the venv interpreter that
+# already has medulla importable; from source, PROJECT_ROOT is cli-agent/.
+try:
+    from medulla.v2.workflow_path import resolve_workflow_yaml, shared_name_for, workflow_dir_for
+except ImportError:                                   # running from a source checkout
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from medulla.v2.workflow_path import resolve_workflow_yaml, shared_name_for, workflow_dir_for
+
 
 def terminate_process_group(proc: subprocess.Popen, force: bool = False) -> None:
     try:
@@ -107,10 +119,21 @@ def _collect_dotenv(workflow: str | None) -> dict:
     global < project < workflow — THE NEAREST TIER WINS on key conflict."""
     merged = _parse_env_file(Path.home() / ".medulla" / ".env")
     if workflow:
-        _w = Path(workflow)
-        wdir = (_w.parent if _w.is_file() else _w).resolve()
-        for parent in reversed(list(wdir.parents)):
-            merged.update(_parse_env_file(parent / ".medulla" / ".env"))
+        # The PROJECT tier belongs to the repo you launch from — which for a shared
+        # definition is not an ancestor of the yaml at all (it lives under $HOME).
+        launch = Path.cwd().resolve()
+        wdir = workflow_dir_for(Path(workflow)).resolve()
+        seen = set()
+        for base in list(reversed(launch.parents)) + [launch] + list(reversed(wdir.parents)):
+            candidate = base / ".medulla" / ".env"
+            if candidate in seen or candidate == Path.home() / ".medulla" / ".env":
+                continue                                  # already the global tier
+            seen.add(candidate)
+            merged.update(_parse_env_file(candidate))
+        # The WORKFLOW tier belongs to the definition, wherever it resolved to. Taking
+        # it from the raw -w argument meant the flagship shared layout (no local file
+        # at all) read this documented tier from a path that does not exist, and the
+        # real ~/.medulla/workflows/<name>/.env was silently never forwarded.
         merged.update(_parse_env_file(wdir / ".env"))
     return merged
 
@@ -219,35 +242,42 @@ def build_run_command(image, volumes, args, container_name: str,
     return cmd
 
 
-def _config_yaml(d: Path) -> Path:
-    """workflow.yaml, else the pre-4.1 name pipeline.yaml (read-side only).
+def runs_under_for(workflow: Path) -> Path:
+    """Where this run's history goes, RELATIVE to the launch dir.
 
-    A PATH TO A YAML IS ALREADY THE ANSWER. `-w dir/other.yaml` is valid on the CLI side
-    (v2/cli.py::_resolve_workflow_yaml honours a file), so it has to be valid here too —
-    otherwise the identical command works bare and dies under --docker, looking for
-    "other.yaml/workflow.yaml". A workflow that lives as one file among several in a
-    directory (brain/resolve.yaml beside brain/workflow.yaml) could not be containerised
-    at all: found live, it forced that stage to run on the host instead.
+    Must match what the bare engine would pick (rundir.runs_root_for): a shared
+    workflow's history is rooted at .medulla/workflows/<name> in the launching
+    project. Handing the raw -w over instead made `-w spar --docker` write into
+    spar/runs/ at the repo ROOT — same command, different place, and litter outside
+    .medulla/. Relative on purpose: --print-run-dir hands this path to a caller who
+    is on the host while the run happened inside the container.
     """
-    if d.is_file():
-        return d
-    local = d / "workflow.yaml"
-    # Zero-byte debris does not shadow the shared definition (mirrors
-    # v2/cli.py::_resolve_workflow_yaml — the two resolvers must agree, or the same
-    # command behaves differently bare and under --docker).
-    local_usable = local.is_file() and local.stat().st_size > 0
-    if not local_usable and not (d / "pipeline.yaml").is_file():
-        # Shared definition (see v2/cli.py::_resolve_workflow_yaml): one copy per machine
-        # in ~/.medulla/workflows/<name>. LOCAL WINS — this branch is only reached when
-        # the project has no workflow of its own.
-        shared = Path.home() / ".medulla" / "workflows" / d.name / "workflow.yaml"
-        if shared.is_file():
-            return shared
-    w = d / "workflow.yaml"
-    if w.is_file():
-        return w
-    legacy = d / "pipeline.yaml"
-    return legacy if legacy.is_file() else w
+    name = shared_name_for(workflow)
+    if name:
+        return Path(".medulla") / "workflows" / name
+    return workflow.parent if workflow.is_file() else workflow
+
+
+def definition_is_outside_workspace(resolved_yaml: Path) -> bool:
+    """Does the definition need mounting in, or is it already under /workspace?
+
+    ABSOLUTE on both sides: the resolver hands paths back as they were given, so a
+    relative spelling of a repo-local definition used to compare false here and take
+    the shared branch — building a bind mount whose SOURCE was a relative path, which
+    Docker reads as a NAMED VOLUME and hands the container an empty directory instead
+    of the workflow.
+    """
+    try:
+        resolved_yaml.resolve().relative_to(Path.cwd().resolve())
+        return False
+    except ValueError:
+        return True
+
+
+def _config_yaml(d: Path) -> Path:
+    """Which yaml `-w` means. Delegates to the engine's resolver so both processes
+    cannot drift; kept as a name because the rest of this file reads better with it."""
+    return resolve_workflow_yaml(d)
 
 
 def read_workflow_vars(workflow: str | None) -> dict:
@@ -274,7 +304,7 @@ def resolve_dockerfile(workflow: str | None, cli_vars: dict) -> Path:
     # the workflow's DIRECTORY either way — without this, `-w brain/resolve.yaml` resolved
     # to "brain/resolve.yaml/Dockerfile" and the build died on a path that cannot exist.
     _w = Path(workflow)
-    workflow_dir = _w.parent if _w.is_file() else _w
+    workflow_dir = workflow_dir_for(_w)
 
     cli_df = cli_vars.get("DOCKERFILE")
     if cli_df:
@@ -310,8 +340,11 @@ def image_tag_for(workflow: str, dockerfile: Path) -> str:
     # A yaml path drops its extension (`-w brain/resolve.yaml` must not tag the image
     # "medulla-resolve.yaml:<sha>"); a DIRECTORY keeps its full name, or a dir called
     # "my.workflows" would silently tag as "my".
-    p = Path(workflow)
-    wf_name = p.stem if p.is_file() else p.name
+    resolved = resolve_workflow_yaml(Path(workflow))
+    # From the RESOLVED definition, not the raw -w: `-w .medulla/workflows/spar/workflow.yaml`
+    # tagged the image "medulla-workflow.yaml". A generic file name means the workflow is
+    # its DIRECTORY; any other name is a workflow living as one file among several.
+    wf_name = resolved.parent.name if resolved.stem in ("workflow", "pipeline") else resolved.stem
     name = "default" if dockerfile == SCRIPT_DIR / "Dockerfile.default" else wf_name
     return f"medulla-{name}:{digest}"
 
@@ -499,16 +532,20 @@ def build_volumes(claude_home, mount_agy=True):
     # matching place inside, and medulla neither reads it nor cares what it is.
     #   ~/.medulla/container/bin/<name>   -> /usr/local/bin/<name>     (on PATH)
     #   ~/.medulla/container/home/<path>  -> {CONTAINER_HOME}/<path>   (container $HOME)
-    # Entries are mounted ONE BY ONE, never as a directory over /usr/local/bin:
-    # covering that would hide the CLIs the image installs.
+    # Real directories are walked and mounted ONE FILE AT A TIME, never as a directory
+    # over /usr/local/bin: covering that would hide the CLIs the image installs. A
+    # SYMLINK to a directory is the exception — it travels whole, to its own nested
+    # path. Without that a wrapper could be placed on PATH but the package it imports
+    # could not follow it in, and the tool died inside the container on an import it
+    # resolved fine on the host.
     overlay = home / ".medulla" / "container"
     for sub, dest_root in (("bin", "/usr/local/bin"), ("home", CONTAINER_HOME)):
         root = overlay / sub
         if not root.is_dir():
             continue
         for entry in sorted(root.rglob("*")):
-            if entry.is_dir():
-                continue
+            if entry.is_dir() and not entry.is_symlink():
+                continue                  # walked into; its files are mounted below
             try:
                 rel = entry.relative_to(root)
                 target = entry.resolve(strict=True)
@@ -728,13 +765,9 @@ def main():
     shared_runs_under = None
     if workflow:
         resolved = _config_yaml(Path(workflow))
-        try:
-            resolved.relative_to(Path.cwd())
-        except ValueError:
+        if definition_is_outside_workspace(resolved):
             if resolved.is_file():
-                dest = Path(workflow)
-                if dest.is_file():
-                    dest = dest.parent
+                dest = runs_under_for(Path(workflow))
                 name = resolved.parent.name
                 mnt = f"/mnt/medulla-workflows/{name}"
                 volumes.extend(["-v", f"{resolved}:{mnt}/workflow.yaml:ro"])

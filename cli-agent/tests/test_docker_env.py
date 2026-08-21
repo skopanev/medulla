@@ -26,6 +26,7 @@ def test_tier_merge_nearest_wins_all_tiers_whole(dockerpy, tmp_path, monkeypatch
     pdir.mkdir(parents=True)
     (project / ".medulla" / ".env").write_text("OPENAI_API_KEY=proj\n", encoding="utf-8")
     (pdir / ".env").write_text("CLAUDE_CODE_OAUTH_TOKEN=workflow-wins\n", encoding="utf-8")
+    monkeypatch.chdir(project)          # project tier = the repo you launch from
 
     env = dockerpy._collect_dotenv(str(pdir))
     assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "workflow-wins"  # nearest wins
@@ -261,3 +262,29 @@ nodes:
 
 def test_unreadable_workflow_keeps_the_permissive_answer(dockerpy, tmp_path):
     assert dockerpy.workflow_uses_agy(str(tmp_path / "nope.yaml")) is True
+
+
+def test_overlay_carries_a_symlinked_package_directory_whole(dockerpy, tmp_path, monkeypatch):
+    """A wrapper on PATH is useless if the package it imports cannot follow it in.
+
+    Real directories under the overlay are still walked file-by-file (never mounted
+    as a directory over /usr/local/bin, which would hide the image's own CLIs), but a
+    symlink to a directory travels whole to its own nested path — it covers nothing
+    but itself.
+    """
+    home = tmp_path / "home"
+    (home / ".medulla" / "container" / "bin").mkdir(parents=True)
+    lib = tmp_path / "real-lib" / "pkg"
+    lib.mkdir(parents=True)
+    (lib / "__init__.py").write_text("", encoding="utf-8")
+    wrapper = home / ".medulla" / "container" / "bin" / "wrap"
+    wrapper.write_text("#!/bin/sh\n", encoding="utf-8")
+    nested = home / ".medulla" / "container" / "home" / ".local" / "lib"
+    nested.mkdir(parents=True)
+    (nested / "pkg").symlink_to(lib)
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+
+    vols = dockerpy.build_volumes(tmp_path / "claude-home", mount_agy=False)
+    mounts = " ".join(vols)
+    assert f"{wrapper}:/usr/local/bin/wrap:ro" in mounts          # the file, as before
+    assert f"{lib}:{dockerpy.CONTAINER_HOME}/.local/lib/pkg:ro" in mounts   # the package
