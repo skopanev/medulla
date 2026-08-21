@@ -715,7 +715,11 @@ def main():
                     if src.is_dir():
                         volumes.extend(["-v", f"{src}:{mnt}/{extra}:ro"])
                 args = [f"{mnt}/workflow.yaml" if a == str(workflow) else a for a in args]
-                shared_runs_under = f"/workspace/{dest}"
+                # RELATIVE, not /workspace/...: --print-run-dir hands this path back to
+                # the caller, who is on the HOST while the run happened inside the
+                # container. An absolute container path does not exist for them (found
+                # live: the panel printed a run dir that could not be listed).
+                shared_runs_under = str(dest)
 
     # Mount extra folders into /workspace/<name> (nested mount inside workspace)
     for mount_path, ro in extra_mounts:

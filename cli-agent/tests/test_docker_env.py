@@ -191,3 +191,23 @@ def test_broken_workflow_symlink_does_not_break_the_run(dockerpy, tmp_path, monk
     monkeypatch.chdir(cwd)
     vols = dockerpy.build_volumes(tmp_path / "no-claude", mount_agy=False)   # must not raise
     assert not any("gone.yaml" in v for v in vols)
+
+
+def test_runs_under_is_relative_not_a_container_path(dockerpy, tmp_path, monkeypatch):
+    # --print-run-dir hands the run dir to a caller on the HOST while the run happened
+    # inside the container, so an absolute /workspace/... path is useless to them —
+    # caught live when a panel printed a run dir that could not be listed.
+    home = tmp_path / "home"
+    shared = home / ".medulla" / "workflows" / "spar"
+    shared.mkdir(parents=True)
+    (shared / "workflow.yaml").write_text("version: '2'\n", encoding="utf-8")
+    cwd = tmp_path / "repo"; cwd.mkdir()
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    monkeypatch.setenv("PWD", str(cwd))
+    monkeypatch.chdir(cwd)
+
+    resolved = dockerpy._config_yaml(Path(".medulla/workflows/spar"))
+    assert resolved == shared / "workflow.yaml"       # cascade found the shared copy
+    # the value handed to the engine must be repo-relative
+    dest = Path(".medulla/workflows/spar")
+    assert not str(dest).startswith("/")
