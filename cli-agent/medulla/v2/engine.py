@@ -1064,9 +1064,9 @@ RESUMABLE_OUTCOMES = {"interrupted", "crashed"}   # + no outcome.json at all.
 # crash again identically (same immutable snapshot) — no harm, no data loss.
 
 
-def find_resumable(workflow_dir: Path) -> Path | None:
+def find_resumable(workflow_dir: Path, runs_root: Path | None = None) -> Path | None:
     from .rundir import runs_root_for
-    runs_dir = runs_root_for(workflow_dir) / "runs"
+    runs_dir = runs_root_for(workflow_dir, runs_root) / "runs"
     if not runs_dir.is_dir():
         return None
     for run in sorted((p for p in runs_dir.iterdir() if p.is_dir()),
@@ -1092,6 +1092,7 @@ def run_workflow(
     workdir: Path | None = None,
     resume_dir: Path | None = None,
     print_run_dir: bool = False,
+    runs_root: Path | None = None,
 ) -> int:
     """Load, run, write outcome.json, return the process exit code (0/1/2/130)."""
     import signal as _signal
@@ -1153,12 +1154,13 @@ def run_workflow(
             for k in cli_vars:
                 _validate_var_name(k, "--var")
             workflow.vars.update({k: str(v) for k, v in cli_vars.items()})
-        store = RunStore.create(workflow.dir, workflow.path.read_text(encoding="utf-8"))
+        store = RunStore.create(workflow.dir, workflow.path.read_text(encoding="utf-8"),
+                                runs_root=runs_root)
         if print_run_dir:
             print(store.dir, flush=True)   # stdout, line 1 (before the 10-20min engine
                                            # work): a backgrounded caller reads it now,
                                            # relative so it resolves on host under docker
-        prune_runs(workflow.dir, workflow.keep_runs, workflow.timeout)
+        prune_runs(workflow.dir, workflow.keep_runs, workflow.timeout, runs_root)
         log(f"run {store.run_id} -> {store.dir}")
         engine = Engine(workflow, store, workdir)
         outcome = engine.run(start_override)

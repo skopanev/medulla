@@ -93,12 +93,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--validate", action="store_true", help="load + validate, no run")
     parser.add_argument("--dry-run", action="store_true", help="validate + print the plan, no run")
     parser.add_argument("--version", action="store_true", help="print version + installed commit")
+    parser.add_argument("--runs-folder", type=Path, metavar="DIR",
+                        help="write this run's history under DIR instead of beside the "
+                             "workflow (pairs with --cwd-ro: a panel that must not write "
+                             "into the tree it reviews)")
+    parser.add_argument("--cwd-ro", action="store_true",
+                        help="mount the working directory read-only (--docker only; "
+                             "requires --runs-folder)")
     parser.add_argument("--print-run-dir", action="store_true",
                         help="print the run directory to stdout at start (scripting/backgrounded runs)")
     if argv and "--version" in argv:
         _print_version()
         return 0
     ns = parser.parse_args(argv)
+
+    # scripts/docker.py consumes --cwd-ro before the engine starts, so seeing it here
+    # means there is no container — and nothing to mount read-only.
+    if ns.cwd_ro:
+        parser.error("--cwd-ro only applies to --docker runs")
 
     yaml_path = _resolve_workflow_yaml(ns.workflow)
 
@@ -138,13 +150,15 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     elif ns.resume:
         pdir = yaml_path.parent
-        resume_dir = find_resumable(pdir)
+        resume_dir = find_resumable(pdir, ns.runs_folder)
         if resume_dir is None:
-            print(f"error: no resumable run in {pdir / 'runs'}", file=sys.stderr)
+            root = ns.runs_folder or pdir
+            print(f"error: no resumable run in {root / 'runs'}", file=sys.stderr)
             return 1
 
     return run_workflow(yaml_path, cli_vars=cli_vars, start_override=ns.node,
-                        resume_dir=resume_dir, print_run_dir=ns.print_run_dir)
+                        resume_dir=resume_dir, print_run_dir=ns.print_run_dir,
+                        runs_root=ns.runs_folder)
 
 
 def _print_version() -> None:

@@ -55,10 +55,11 @@ class RunStore:
             self._lock_fd = None
 
     @classmethod
-    def create(cls, workflow_dir: Path, config_text: str, run_id: str | None = None) -> RunStore:
+    def create(cls, workflow_dir: Path, config_text: str, run_id: str | None = None,
+               runs_root: Path | None = None) -> RunStore:
         run_id = run_id or os.environ.get("MEDULLA_RUN_ID", "").strip() or uuid.uuid4().hex[:8]
         ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        run_dir = runs_root_for(workflow_dir) / "runs" / f"{ts}-{run_id}"
+        run_dir = runs_root_for(workflow_dir, runs_root) / "runs" / f"{ts}-{run_id}"
         run_dir.mkdir(parents=True, exist_ok=False)
         (run_dir / "steps").mkdir()
         (run_dir / "workflow.yaml").write_text(config_text, encoding="utf-8")  # immutable snapshot
@@ -169,8 +170,14 @@ def _read_jsonl_tolerant(path: Path, what: str) -> list[dict]:
     return rows
 
 
-def runs_root_for(workflow_dir: Path) -> Path:
+def runs_root_for(workflow_dir: Path, runs_root: Path | None = None) -> Path:
     """Where this workflow's runs/ live.
+
+    runs_root (--runs-folder) wins over everything: the caller NAMED the place, and
+    naming it is the whole point — a panel that must not write into the tree it
+    reviews sends its history somewhere else entirely. There is no default for it
+    and no environment variable to set it from; it arrives as an argument or not at
+    all.
 
     Normally: right beside the workflow, unchanged — that is its home and resume,
     prune and artifacts have always looked there.
@@ -182,6 +189,8 @@ def runs_root_for(workflow_dir: Path) -> Path:
     the directory medulla was LAUNCHED from, which is the project root and exactly
     what --docker mounts as /workspace.
     """
+    if runs_root is not None:
+        return Path(runs_root)
     # Set by scripts/docker.py when the definition is mounted from OUTSIDE the workspace:
     # the yaml then sits on a read-only path, so history must be told where to go.
     under = os.environ.get("MEDULLA_RUNS_UNDER")
@@ -211,11 +220,12 @@ def launch_dir_of(run_dir: Path) -> Path | None:
         return None
 
 
-def prune_runs(workflow_dir: Path, keep_runs: int, workflow_timeout: int | None) -> None:
+def prune_runs(workflow_dir: Path, keep_runs: int, workflow_timeout: int | None,
+               runs_root: Path | None = None) -> None:
     """On boot, after the new run dir exists. Finished (has outcome.json): keep the
     newest keep_runs. Unfinished: never touch while younger than the workflow
     timeout (the active-run shield); timeout 0/None = never auto-prune unfinished."""
-    runs_dir = runs_root_for(workflow_dir) / "runs"
+    runs_dir = runs_root_for(workflow_dir, runs_root) / "runs"
     if not runs_dir.is_dir():
         return
     finished: list[Path] = []

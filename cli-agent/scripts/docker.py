@@ -468,7 +468,8 @@ def workflow_uses_agy(workflow: str | None) -> bool:
     return mentions_agy(data)
 
 
-def build_volumes(claude_home, mount_agy=True):
+def build_volumes(claude_home, mount_agy=True, *,
+                  cwd_ro: bool = False, runs_folder: Path | None = None):
     home = Path.home()
     pwd_env = os.environ.get("PWD")
     cwd = Path(pwd_env) if pwd_env else Path(os.getcwd())
@@ -489,7 +490,14 @@ def build_volumes(claude_home, mount_agy=True):
                 if resolved.is_file():
                     add(resolved, f"/mnt/claude/{fname}", ro=True)
 
-    add(cwd, "/workspace")
+    # The reviewed tree. Read-only when asked: a panel must be able to read a repo
+    # without leaving anything in it — two rounds left a dangling symlink and a staged
+    # file behind, and at review time neither is distinguishable from real work. It can
+    # only be read-only because the run's history goes elsewhere (--runs-folder).
+    add(cwd, "/workspace", ro=cwd_ro)
+    if runs_folder is not None:
+        # At its OWN host path, so the run dir printed inside is openable outside.
+        add(runs_folder, str(runs_folder), ro=False)
 
     # Shared workflow definitions: a symlink under .medulla/workflows/ points OUT of the
     # workspace (e.g. ~/.medulla/workflows/spar/workflow.yaml, one copy per machine), and
@@ -669,6 +677,30 @@ def main():
     if build:
         args = [a for a in args if a != "--build"]
 
+    # --cwd-ro is OURS: the engine has no container to mount anything into, so it is
+    # consumed here. --runs-folder is NOT — it travels on, because the engine is what
+    # actually roots the history there.
+    cwd_ro = "--cwd-ro" in args
+    if cwd_ro:
+        args = [a for a in args if a != "--cwd-ro"]
+    runs_folder = None
+    for j, a in enumerate(args):
+        if a == "--runs-folder" and j + 1 < len(args):
+            runs_folder = Path(args[j + 1]).expanduser().resolve()
+            # Rewrite it to the ABSOLUTE path, deliberately, and mount the folder at
+            # that same path inside (below). --print-run-dir hands its answer to a
+            # caller standing on the HOST while the run happened in the container, so
+            # a container-only path would be unusable there — this file already carries
+            # scars from exactly that. One absolute string, valid in both namespaces.
+            args[j + 1] = str(runs_folder)
+            break
+    if cwd_ro and runs_folder is None:
+        print("error: --cwd-ro requires --runs-folder (a read-only workspace leaves the "
+              "run nowhere to write)", file=sys.stderr)
+        return 1
+    if runs_folder is not None:
+        runs_folder.mkdir(parents=True, exist_ok=True)
+
     # Extract --mount / --mount-rw; also peek --var for Dockerfile resolution
     extra_mounts = []  # list of (path, ro:bool)
     cli_vars: dict[str, str] = {}
@@ -750,7 +782,8 @@ def main():
                 f.write(f"{k}={v}\n")
         # belt for exits that never reach run_docker (bad mount → return 1)
         atexit.register(_unlink_env_file)
-    volumes = build_volumes(claude_home, mount_agy=workflow_uses_agy(workflow))
+    volumes = build_volumes(claude_home, mount_agy=workflow_uses_agy(workflow),
+                            cwd_ro=cwd_ro, runs_folder=runs_folder)
 
     # A SHARED definition lives outside the workspace (~/.medulla/workflows/<name>), and
     # only cwd is mounted — so the container would not find it. Mount it OUTSIDE

@@ -53,6 +53,7 @@ def world(tmp_path, monkeypatch):
     project = tmp_path / "proj"
     (project / ".medulla" / "workflows").mkdir(parents=True)
     monkeypatch.chdir(project)
+    monkeypatch.setenv("PWD", str(project))   # docker.py reads $PWD, not just getcwd()
 
     class World:
         def __init__(self):
@@ -419,3 +420,75 @@ def test_a_typo_inside_the_canonical_form_still_fails(world):
     assert not resolve_or_raise("/other/repo/.medulla/workflows/spar-typo/missing.yaml").exists()
     assert same_file(resolve_or_raise("/other/repo/.medulla/workflows/spar/workflow.yaml"),
                      world.shared("spar") / "workflow.yaml")
+
+
+# --------------------------------------------------------------------------
+# --runs-folder / --cwd-ro: a panel reads the tree it reviews, never writes it
+# --------------------------------------------------------------------------
+
+def test_a_named_runs_folder_beats_every_other_rule(world, tmp_path):
+    """The caller NAMED the place, so nothing else gets a say — not the shared-workflow
+    classifier, not MEDULLA_RUNS_UNDER. That variable stays sealed (docker.py sets it,
+    the engine blanks it for children); the flag is threaded through instead."""
+    import os
+
+    from medulla.v2.rundir import runs_root_for
+
+    elsewhere = tmp_path / "outside"
+    world.shared("spar")
+    world.anchor("spar")
+    w = Path(".medulla/workflows/spar")
+
+    assert runs_root_for(w) == Path(".medulla/workflows/spar")      # shared classifier
+    assert runs_root_for(w, elsewhere) == elsewhere                 # the flag wins
+    os.environ["MEDULLA_RUNS_UNDER"] = "/should/be/ignored"
+    try:
+        assert runs_root_for(w, elsewhere) == elsewhere             # over the env too
+    finally:
+        del os.environ["MEDULLA_RUNS_UNDER"]
+
+
+def test_the_run_and_its_history_land_in_the_named_folder(world, tmp_path):
+    from medulla.v2.rundir import RunStore, prune_runs
+
+    elsewhere = tmp_path / "outside"
+    world.shared("spar")
+    world.anchor("spar")
+    store = RunStore.create(Path(".medulla/workflows/spar"), WORKFLOW_BODY,
+                            runs_root=elsewhere)
+
+    assert store.dir.is_relative_to(elsewhere)                      # history moved out
+    assert not (world.project / ".medulla" / "workflows" / "spar" / "runs").exists()
+    prune_runs(Path(".medulla/workflows/spar"), 5, None, elsewhere)  # looks there too
+
+
+def test_resume_finds_a_run_under_the_named_folder(world, tmp_path):
+    """Without this, --resume silently starts fresh instead of continuing."""
+    from medulla.v2.engine import find_resumable
+    from medulla.v2.rundir import RunStore
+
+    elsewhere = tmp_path / "outside"
+    world.shared("spar")
+    world.anchor("spar")
+    store = RunStore.create(Path(".medulla/workflows/spar"), WORKFLOW_BODY,
+                            runs_root=elsewhere)
+    w = Path(".medulla/workflows/spar")
+
+    assert find_resumable(w) is None                                 # not where it used to be
+    assert find_resumable(w, elsewhere) == store.dir                 # found where told
+
+
+def test_cwd_ro_mounts_the_workspace_read_only_and_the_runs_folder_writable(dockerpy,
+                                                                           world, tmp_path):
+    """The pair. The tree is read-only, and the one place the run must write is not —
+    mounted at its OWN host path so the dir printed inside is openable outside."""
+    elsewhere = tmp_path / "outside"
+    elsewhere.mkdir()
+
+    plain = dockerpy.build_volumes(tmp_path / "no-claude", mount_agy=False)
+    assert f"{world.project}:/workspace" in plain                    # writable by default
+
+    guarded = dockerpy.build_volumes(tmp_path / "no-claude", mount_agy=False,
+                                     cwd_ro=True, runs_folder=elsewhere)
+    assert f"{world.project}:/workspace:ro" in guarded
+    assert f"{elsewhere}:{elsewhere}" in guarded                     # same path, writable
