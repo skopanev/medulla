@@ -349,6 +349,40 @@ def image_tag_for(workflow: str, dockerfile: Path) -> str:
     return f"medulla-{name}:{digest}"
 
 
+def assert_runs_folder_reaches_the_container(runs_folder: Path, image: str) -> None:
+    """Can the container actually WRITE here? Ask it, do not guess.
+
+    A bind mount whose source the VM cannot see is not an error: the daemon creates an
+    empty directory owned by root and mounts THAT, so the run dies later, deep inside
+    mkdir, with a bare PermissionError naming neither the flag nor the reason. Under
+    colima only the home directory is shared with the VM, Docker Desktop shares a
+    different set, and a remote daemon shares none of it — so the honest test is a
+    marker written here and looked for in there. Costs one container start, and only
+    when --runs-folder was passed.
+    """
+    marker = runs_folder / ".medulla-reachable"
+    try:
+        marker.write_text("probe\n", encoding="utf-8")
+    except OSError as exc:
+        raise SystemExit(f"error: --runs-folder {runs_folder} is not writable here: {exc}")
+    try:
+        probe = subprocess.run(
+            ["docker", "run", "--rm", "-v", f"{runs_folder}:{runs_folder}",
+             "--entrypoint", "sh", image, "-c",
+             f"test -f '{marker}' && test -w '{runs_folder}'"],
+            capture_output=True)
+    finally:
+        marker.unlink(missing_ok=True)
+    if probe.returncode != 0:
+        raise SystemExit(
+            f"error: --runs-folder {runs_folder} is invisible to the container.\n"
+            f"    The daemon mounted an empty directory over it, so the run would fail\n"
+            f"    later with a bare 'Permission denied' from mkdir.\n"
+            f"    Your VM only shares part of the filesystem: with colima that is your\n"
+            f"    home directory. Put the folder under {Path.home()} — or add the path\n"
+            f"    to the VM's mounts and restart it.")
+
+
 def image_home(image, fallback):
     """The non-root user's $HOME inside the resolved image, read from the image
     itself. The two images in play run as different users (hltm vs medulla), so a
@@ -762,6 +796,11 @@ def main():
     # container's user actually looks. hltm and medulla images differ here.
     global CONTAINER_HOME
     CONTAINER_HOME = image_home(image, CONTAINER_HOME)
+
+    # Before anything is mounted: a runs folder the container cannot see fails much
+    # later and says nothing useful about why.
+    if runs_folder is not None:
+        assert_runs_folder_reaches_the_container(runs_folder, image)
 
     claude_config = os.environ.get("CLAUDE_CONFIG_DIR")
     claude_home = Path(claude_config).expanduser().resolve() if claude_config else Path.home() / ".claude"
