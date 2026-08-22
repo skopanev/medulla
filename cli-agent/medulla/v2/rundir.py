@@ -57,9 +57,18 @@ class RunStore:
     @classmethod
     def create(cls, workflow_dir: Path, config_text: str, run_id: str | None = None,
                runs_root: Path | None = None) -> RunStore:
-        run_id = run_id or os.environ.get("MEDULLA_RUN_ID", "").strip() or uuid.uuid4().hex[:8]
-        ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        run_dir = runs_dir_for(workflow_dir, runs_root) / f"{ts}-{run_id}"
+        # The NAME may be decided outside: scripts/docker.py picks it before the
+        # container starts so --print-run-dir can answer immediately instead of after
+        # the ~20s bootstrap, and so the timestamp is the caller's clock rather than
+        # the container's (they disagree — a run started at 11:08 was named 09:08).
+        given = os.environ.get("MEDULLA_RUN_DIR_NAME", "").strip()
+        if given:
+            run_id = run_id or given.rsplit("-", 1)[-1]
+            run_dir = runs_dir_for(workflow_dir, runs_root) / given
+        else:
+            run_id = run_id or os.environ.get("MEDULLA_RUN_ID", "").strip() or uuid.uuid4().hex[:8]
+            ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            run_dir = runs_dir_for(workflow_dir, runs_root) / f"{ts}-{run_id}"
         run_dir.mkdir(parents=True, exist_ok=False)
         (run_dir / "steps").mkdir()
         (run_dir / "workflow.yaml").write_text(config_text, encoding="utf-8")  # immutable snapshot

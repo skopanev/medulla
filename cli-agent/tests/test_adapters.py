@@ -92,7 +92,8 @@ def test_opencode_prompt_rides_stdin(tmp_path):
     a = H.OpenCodeAdapter.__new__(H.OpenCodeAdapter)
     inv = a.build(AgentSpec(harness="opencode", model="zai/glm-5.3"),
                   tmp_path / "p.md", "PROMPT TEXT", 60)
-    assert inv.argv[:3] == ["opencode", "run", "--agent"]
+    assert inv.argv[:2] == ["opencode", "run"]
+    assert "--agent" in inv.argv                    # order is free, presence is not
     assert inv.stdin == "PROMPT TEXT"
     assert "PROMPT TEXT" not in inv.argv
     assert "-m" in inv.argv and "zai/glm-5.3" in inv.argv

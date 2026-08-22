@@ -367,7 +367,12 @@ class OpenCodeAdapter(HarnessAdapter):
     binary = "opencode"
 
     def build(self, spec, prompt_file, prompt_text, timeout_s):
-        argv = ["opencode", "run", "--agent", "build"]
+        # --format json for the same reason as agy: the default buffers the answer and
+        # hands it over at the end, so a working panelist looks like a hung one
+        # (measured on opencode 1.18.19: events at +2s/+3s versus one block at the
+        # close). It also ends the guessing — the answer arrives as `text` parts, so
+        # tool output can no longer be mistaken for a signal.
+        argv = ["opencode", "run", "--format", "json", "--agent", "build"]
         if spec.model:
             argv += ["-m", spec.model]
         argv += spec.args
@@ -404,14 +409,42 @@ class OpenCodeAdapter(HarnessAdapter):
         return Invoke(argv=argv, stdin=prompt_text, merge_stderr=True,
                       env={"OPENCODE_CONFIG_CONTENT": json.dumps(data)})
 
+    def stream_line(self, line: str) -> str | None:
+        """One JSON event -> what a watcher should see, or nothing."""
+        try:
+            ev = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if ev.get("type") == "text":
+            return ((ev.get("part") or {}).get("text") or "").rstrip("\n") or None
+        return None
+
     def filter_stdout(self, stdout: str) -> str:
-        # merged stream with ANSI decoration: strip escapes, then the
-        # line-start heuristic gates routing (--format json probed half-alive
-        # on 1.15.5 — a single step_start event; revisit on a newer opencode)
-        return plain_text_signal_filter(_ANSI_RE.sub("", stdout))
+        """Signals come from what opencode SAID, never from what it printed.
 
+        With --format json the answer arrives as `text` parts, so the line-start
+        heuristic — the ceiling while opencode had no structured output — is no longer
+        the best available. Anything that is not JSON at all still falls back to it,
+        for an older opencode or for plain text on stderr.
+        """
+        answer, saw_json = [], False
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            saw_json = True
+            if ev.get("type") == "text":
+                text = (ev.get("part") or {}).get("text")
+                if text:
+                    answer.append(text)
+        if answer:
+            return "".join(answer)
+        return "" if saw_json else plain_text_signal_filter(stdout)
 
-# ── agy (Antigravity) ────────────────────────────────────────────────────────
 
 _AGY_SETTINGS = "~/.gemini/antigravity-cli/settings.json"
 
@@ -472,8 +505,15 @@ class AgyAdapter(HarnessAdapter):
         # created). Refusing a read-only step on a harness that supports it pushed panels
         # onto other models for no reason.
         ro = _read_only(spec)
+        # stream-json, not the default text: `text` buffers the whole answer and hands
+        # it over at the very end, so a live run is indistinguishable from a hung one —
+        # measured on agy 1.1.18, every line landed at +15s together, while stream-json
+        # emitted at +4s, +5s, +13s, +16s. It also gives agy the structured output this
+        # file elsewhere says it lacks: the final text arrives as result.response
+        # instead of being guessed out of console prose.
         argv = ["agy",
                 *(["--mode", "plan"] if ro else ["--dangerously-skip-permissions"]),
+                "--output-format", "stream-json",
                 "--print-timeout", f"{int(timeout_s) + INNER_SLACK_S}s"]
         if spec.model:
             argv += ["--model", AGY_MODEL_ALIASES.get(spec.model, spec.model)]
@@ -483,10 +523,54 @@ class AgyAdapter(HarnessAdapter):
         argv += ["--print", prompt_text]
         return Invoke(argv=argv)
 
+    def stream_line(self, line: str) -> str | None:
+        """One NDJSON event -> what a watcher should see, or nothing."""
+        try:
+            ev = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        kind = ev.get("event")
+        if kind == "step_update":
+            step = ev.get("step_update") or {}
+            if step.get("step_type") == "agent_response":
+                return (step.get("text_delta") or "").rstrip("\n") or None
+            return None
+        if kind == "result":
+            status = (ev.get("result") or {}).get("status")
+            return None if status == "SUCCESS" else f"agy: {status}"
+        return None
+
     def filter_stdout(self, stdout: str) -> str:
-        # agy has no structured output mode at all — the line-start heuristic
-        # is the ceiling of what an adapter can do here.
-        return plain_text_signal_filter(stdout)
+        """Signals come from what agy SAID, never from what it printed.
+
+        With --output-format stream-json the answer arrives as result.response, so the
+        old line-start heuristic — the ceiling while agy had no structured output — is
+        no longer the best available: tool output and console prose can no longer be
+        mistaken for a signal, exactly as with claude-code and codex.
+        """
+        answer, saw_json = [], False
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            saw_json = True
+            if ev.get("event") == "result":
+                text = (ev.get("result") or {}).get("response")
+                if text:
+                    return text
+            elif ev.get("event") == "step_update":
+                step = ev.get("step_update") or {}
+                if step.get("step_type") == "agent_response" and step.get("text_delta"):
+                    answer.append(step["text_delta"])
+        if answer:
+            return "".join(answer)        # no result event (killed mid-turn): use the deltas
+        # Not stream-json at all — an older agy, or plain text on stderr. Fall back to
+        # the heuristic rather than returning nothing.
+        return "" if saw_json else plain_text_signal_filter(stdout)
 
 
 # ── registry ─────────────────────────────────────────────────────────────────

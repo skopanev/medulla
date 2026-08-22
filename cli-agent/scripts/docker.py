@@ -205,6 +205,7 @@ shadow_paths_for_run: list[str] = []
 
 
 def build_run_command(image, volumes, args, container_name: str,
+                      run_dir_name: str | None = None,
                       runs_under: str | None = None) -> list[str]:
     cmd = ["docker", "run", "--init", "--rm", "--name", container_name]
     if sys.stdin.isatty():
@@ -237,6 +238,8 @@ def build_run_command(image, volumes, args, container_name: str,
     cmd.extend(["-e", "MEDULLA_DOCKER=1"])
     if runs_under:
         cmd.extend(["-e", f"MEDULLA_RUNS_UNDER={runs_under}"])
+    if run_dir_name:
+        cmd.extend(["-e", f"MEDULLA_RUN_DIR_NAME={run_dir_name}"])
     cmd.extend([image, "medulla"])
     cmd.extend(args)
     return cmd
@@ -679,9 +682,11 @@ def _mount_agy_keys(vols: list) -> None:
     _mount(_keychain_get("Antigravity Safe Storage", "Antigravity Key"), "/mnt/agy-safe-key")
 
 
-def run_docker(image, volumes, args, runs_under: str | None = None):
+def run_docker(image, volumes, args, runs_under: str | None = None,
+               run_dir_name: str | None = None):
     container_name = f"medulla-{uuid.uuid4().hex[:8]}"
     cmd = build_run_command(image, volumes, args, container_name,
+                            run_dir_name=run_dir_name,
                             runs_under=runs_under)
 
     # single subprocess path (no execvp): the temp env-file must outlive the
@@ -932,8 +937,35 @@ def main():
         suffix = ":ro" if ro else ""
         volumes.extend(["-v", f"{p}:/workspace/{p.name}{suffix}"])
 
+    # --print-run-dir, answered NOW. The engine used to print it, which meant waiting
+    # out the container bootstrap and its medulla upgrade — ~20s during which an
+    # orchestrator has nothing to attach to, and every caller grew the same polling
+    # loop. The name is decided here instead and handed in, so the path is known before
+    # the container exists. It also fixes whose clock names the run: the container's
+    # differs from the host's (a run started at 11:08 was named 09:08).
+    run_dir_name = None
+    if "--print-run-dir" in args or "--print-run-json" in args:
+        import datetime
+        import uuid
+        run_dir_name = (datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                        + "-" + uuid.uuid4().hex[:8])
+        base = runs_folder or (runs_under_for(Path(workflow)) / "runs" if workflow
+                               else Path("runs"))
+        host_run_dir = Path(base) / run_dir_name
+        if "--print-run-json" in args:
+            import json as _json
+            args = [a for a in args if a != "--print-run-json"]
+            print(_json.dumps(
+                {"run_dir": str(host_run_dir), "runs_folder": str(base), "image": image,
+                 "started_at": datetime.datetime.now().isoformat(timespec="seconds")},
+                ensure_ascii=False), flush=True)
+        if "--print-run-dir" in args:
+            args = [a for a in args if a != "--print-run-dir"]
+            print(host_run_dir, flush=True)
+
     try:
-        return run_docker(image, volumes, args, runs_under=shared_runs_under)
+        return run_docker(image, volumes, args, runs_under=shared_runs_under,
+                          run_dir_name=run_dir_name)
     finally:
         # rmdir, never rmtree: it removes only what is still EMPTY, so a directory that
         # turned out to hold something is left exactly where it is. The tree ends the
