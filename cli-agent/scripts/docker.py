@@ -768,6 +768,7 @@ def main():
 
     # Extract --mount / --mount-rw; also peek --var for Dockerfile resolution
     extra_mounts = []  # list of (path, ro:bool)
+    var_files: list[Path] = []          # --var-file sources, mounted at their own paths
     cli_vars: dict[str, str] = {}
     clean_args = []
     i = 0
@@ -777,6 +778,21 @@ def main():
             i += 2
         elif args[i] == "--mount-rw" and i + 1 < len(args):
             extra_mounts.append((args[i + 1], False))
+            i += 2
+        elif args[i] == "--var-file" and i + 1 < len(args):
+            # The file has to exist INSIDE too, and its host path is what the engine
+            # will open. Mount it at that same absolute path (the trick --runs-folder
+            # already uses) and hand the absolute form on, so a relative one — or a
+            # file outside the workspace — still resolves in there.
+            key, _, raw = args[i + 1].partition("=")
+            src = Path(raw).expanduser()
+            if raw and not src.is_file():
+                print(f"[docker.py] --var-file {key}: no such file: {src}", file=sys.stderr)
+                return 1
+            src = src.resolve()
+            var_files.append(src)
+            clean_args.append(args[i])
+            clean_args.append(f"{key}={src}")
             i += 2
         elif args[i] == "--var" and i + 1 < len(args):
             kv = args[i + 1]
@@ -893,6 +909,9 @@ def main():
     # hits the one case the flag exists for — a panel launched from an empty box that
     # brings every repository in with --mount. So the point is made HERE, on the host,
     # where the directory is still writable, and removed again below.
+    for src in var_files:
+        volumes.extend(["-v", f"{src}:{src}:ro"])
+
     workspace_root = Path(os.environ.get("PWD") or os.getcwd())
     made_mountpoints: list[Path] = []
     for mount_path, ro in extra_mounts:

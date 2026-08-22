@@ -86,6 +86,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-w", "--workflow", required=True, type=Path,
                         help="workflow directory (or workflow.yaml path)")
     parser.add_argument("--var", action="append", default=[], metavar="KEY=VALUE")
+    parser.add_argument("--var-file", action="append", default=[], metavar="KEY=PATH",
+                        help="set a var from a FILE — for prompts too long or too "
+                             "multiline to survive a shell argument")
     parser.add_argument("--node", default=None, help="start from a specific node (dev, fresh runs)")
     parser.add_argument("--resume", action="store_true", help="continue the latest resumable run")
     parser.add_argument("--run", type=Path, default=None, metavar="DIR",
@@ -135,6 +138,25 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--node is for fresh runs only (resume continues from the journal)")
 
     cli_vars: dict[str, str] = {}
+    # --var-file first, so an explicit --var can still override it.
+    for item in ns.var_file:
+        if "=" not in item:
+            parser.error(f"--var-file expects KEY=PATH, got {item!r}")
+        key, _, raw = item.partition("=")
+        key = key.strip()
+        path = Path(raw).expanduser()
+        if not key:
+            parser.error(f"--var-file has no key: {item!r}")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            parser.error(f"--var-file {key}: cannot read {path}: {exc}")
+        # An EMPTY file is an empty question, and a panel answers it for ten minutes
+        # before anyone notices. A shell variable that lost its content fails silently;
+        # a file can be checked, so it is.
+        if not text.strip():
+            parser.error(f"--var-file {key}: {path} is empty")
+        cli_vars[key] = text
     for item in ns.var:
         if "=" not in item:
             parser.error(f"--var expects KEY=VALUE, got {item!r}")

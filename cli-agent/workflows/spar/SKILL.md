@@ -87,13 +87,12 @@ every sibling repo the panel must be able to read:
 
     BOX="$PWD/.medulla/panel-runs"        # in the project, beside it, never in /tmp
     mkdir -p "$BOX"
-    QUESTION="$(cat <<'EOF'
+    cat > "$BOX/question.md" <<'EOF'
     <your prompt>
     EOF
-    )"
     medulla --print-run-dir --docker --cwd-ro --runs-folder "$BOX" \
       -w .medulla/workflows/spar [--mount ../repo] \
-      --var "QUESTION=$QUESTION" >"$BOX/run.log" 2>"$BOX/err.log" &
+      --var-file "QUESTION=$BOX/question.md" >"$BOX/run.log" 2>"$BOX/err.log" &
     PID=$!
     # The run dir is printed at startup, but under --docker that is ~20s away (the
     # container upgrades medulla first). Watch the PROCESS too: if medulla dies before
@@ -118,6 +117,12 @@ work. `--cwd-ro` mounts the workspace read-only; `--runs-folder` gives the run
 somewhere else to write, and it is required — read-only alone would leave the run
 nowhere to go. The shell redirects go to `$BOX` for the same reason: they are written
 by the HOST shell, so `--cwd-ro` cannot stop them landing in the repo.
+
+**The question travels as a FILE.** `--var-file QUESTION=…` reads it straight off
+disk, so nothing about it passes through a shell argument: no quoting to get wrong, no
+length limit to hit, and every newline arrives as written. A shell variable that lost
+its content sets an EMPTY question and the panel spends ten minutes answering nothing —
+an empty file is refused outright instead.
 
 `$BOX` lives **in the project**, at `.medulla/panel-runs/`. It is mounted writable at
 its own path, so it stays writable while everything around it is read-only, and the

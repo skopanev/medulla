@@ -537,3 +537,43 @@ def test_cwd_ro_makes_the_mount_points_it_needs(dockerpy, world, tmp_path, monke
 
     assert dockerpy.main() == 0                                  # the point existed
     assert not point.exists()                                    # and was taken away again
+
+
+def test_a_var_can_come_from_a_file_whole(world, tmp_path):
+    """A prompt that goes through a shell argument is at the mercy of quoting, of
+    MAX_ARG_STRLEN, and of a variable that quietly lost its content — the last one sets
+    an EMPTY question and the panel answers nothing for ten minutes. --var-file reads
+    the file, so the text arrives exactly as written and empty is refused."""
+    import medulla.v2.cli as cli_mod
+
+    world.shared("spar")
+    world.anchor("spar")
+    q = tmp_path / "question.md"
+    q.write_text('Первая строка\n\nВторая, с "кавычками" и $переменной\n', encoding="utf-8")
+
+    seen = {}
+
+    def fake_run(*a, **k):
+        seen.update(k.get("cli_vars") or {})
+        return 0
+
+    old = cli_mod.run_workflow
+    cli_mod.run_workflow = fake_run
+    try:
+        rc = cli_mod.main(["-w", ".medulla/workflows/spar", "--var-file", f"QUESTION={q}"])
+    finally:
+        cli_mod.run_workflow = old
+    assert rc == 0
+    assert seen["QUESTION"] == q.read_text(encoding="utf-8")     # byte for byte
+
+
+def test_an_empty_var_file_is_refused(world, tmp_path):
+    import medulla.v2.cli as cli_mod
+
+    world.shared("spar")
+    world.anchor("spar")
+    empty = tmp_path / "empty.md"
+    empty.write_text("   \n", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        cli_mod.main(["-w", ".medulla/workflows/spar", "--var-file", f"QUESTION={empty}"])
