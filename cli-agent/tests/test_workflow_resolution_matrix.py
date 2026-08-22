@@ -653,3 +653,40 @@ def test_a_json_line_in_plain_output_does_not_disarm_the_signal_filter(tmp_path)
     for cls in (H.OpenCodeAdapter, H.AgyAdapter):
         a = cls.__new__(cls)
         assert "<signal:done>" in a.filter_stdout(text), cls.__name__
+
+
+def test_two_flags_setting_one_var_is_a_crash(world, tmp_path):
+    """Silent last-wins hides a real mistake: two flags disagreeing about the same var
+    means somebody expected the other one to win."""
+    import medulla.v2.cli as cli_mod
+
+    world.shared("spar")
+    world.anchor("spar")
+    q = tmp_path / "q.md"
+    q.write_text("question\n", encoding="utf-8")
+    base = ["-w", ".medulla/workflows/spar"]
+
+    with pytest.raises(SystemExit):      # --var-file then --var
+        cli_mod.main([*base, "--var-file", f"Q={q}", "--var", "Q=other"])
+    with pytest.raises(SystemExit):      # --var-file twice
+        cli_mod.main([*base, "--var-file", f"Q={q}", "--var-file", f"Q={q}"])
+    with pytest.raises(SystemExit):      # --var twice
+        cli_mod.main([*base, "--var", "Q=a", "--var", "Q=b"])
+
+
+def test_a_failed_agy_turn_yields_no_signal():
+    """A FAILED turn can still carry a response, and a signal mined out of it would
+    route the graph as though the turn had succeeded."""
+    import json as _json
+
+    from medulla.v2 import harness as H
+
+    a = H.AgyAdapter.__new__(H.AgyAdapter)
+    ok = _json.dumps({"event": "result",
+                      "result": {"status": "SUCCESS",
+                                 "response": "<signal:done>ok</signal:done>"}})
+    bad = _json.dumps({"event": "result",
+                       "result": {"status": "FAILED",
+                                  "response": "<signal:done>ok</signal:done>"}})
+    assert "<signal:done>" in a.filter_stdout(ok)
+    assert a.filter_stdout(bad) == ""

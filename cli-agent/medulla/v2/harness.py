@@ -574,7 +574,12 @@ class AgyAdapter(HarnessAdapter):
             if ev.get("event") in ("init", "step_update", "result"):
                 saw_json = True     # OUR events only — see OpenCodeAdapter.filter_stdout
             if ev.get("event") == "result":
-                text = (ev.get("result") or {}).get("response")
+                res = ev.get("result") or {}
+                # A FAILED turn can still carry a response, and a signal mined out of it
+                # would route the graph as though the turn had succeeded.
+                if res.get("status") not in (None, "SUCCESS"):
+                    return ""
+                text = res.get("response")
                 if text:
                     return text
             elif ev.get("event") == "step_update":

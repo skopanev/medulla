@@ -261,6 +261,20 @@ def runs_under_for(workflow: Path) -> Path:
     return workflow.parent if workflow.is_file() else workflow
 
 
+def _remove_made_mountpoints(points: list[Path]) -> None:
+    """Take back exactly what we made, deepest first.
+
+    rmdir, never rmtree: it removes only what is still EMPTY, so a directory that turned
+    out to hold something is left exactly where it is. The tree ends the run as it
+    started it, which is the whole promise of --cwd-ro.
+    """
+    for point in sorted(points, key=lambda q: len(q.parts), reverse=True):
+        try:
+            point.rmdir()
+        except OSError:
+            pass
+
+
 def definition_is_outside_workspace(resolved_yaml: Path) -> bool:
     """Does the definition need mounting in, or is it already under /workspace?
 
@@ -926,6 +940,7 @@ def main():
         p = Path(mount_path).resolve()
         if not p.is_dir():
             print(f"[docker.py] mount path not found: {p}", file=sys.stderr)
+            _remove_made_mountpoints(made_mountpoints)
             return 1
         if cwd_ro and not ro:
             # A writable mount of the reviewed tree (or any part of it) hands back the
@@ -938,17 +953,24 @@ def main():
             if inside:
                 print(f"[docker.py] --mount-rw {p} is inside the read-only workspace — "
                       f"that would undo --cwd-ro", file=sys.stderr)
+                _remove_made_mountpoints(made_mountpoints)
                 return 1
         if cwd_ro:
             point = workspace_root / p.name
             if not point.exists():
+                # Remember EVERY level created, not just the leaf: mkdir(parents=True)
+                # can make several, and rmdir on the leaf alone leaves the rest behind
+                # in a tree we promised not to touch.
+                missing = [q for q in [point, *point.parents]
+                           if not q.exists() and workspace_root in q.parents]
                 try:
                     point.mkdir(parents=True)
                 except OSError as exc:
                     print(f"[docker.py] cannot make mount point {point}: {exc}",
                           file=sys.stderr)
+                    _remove_made_mountpoints(made_mountpoints)
                     return 1
-                made_mountpoints.append(point)
+                made_mountpoints.extend(missing)
         suffix = ":ro" if ro else ""
         volumes.extend(["-v", f"{p}:/workspace/{p.name}{suffix}"])
 
@@ -988,14 +1010,7 @@ def main():
         return run_docker(image, volumes, args, runs_under=shared_runs_under,
                           run_dir_name=run_dir_name)
     finally:
-        # rmdir, never rmtree: it removes only what is still EMPTY, so a directory that
-        # turned out to hold something is left exactly where it is. The tree ends the
-        # run as it started it, which is the whole promise of --cwd-ro.
-        for point in reversed(made_mountpoints):
-            try:
-                point.rmdir()
-            except OSError:
-                pass
+        _remove_made_mountpoints(made_mountpoints)
 
 
 if __name__ == "__main__":

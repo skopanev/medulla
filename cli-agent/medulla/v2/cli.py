@@ -101,8 +101,12 @@ def main(argv: list[str] | None = None) -> int:
                              "workflow (pairs with --cwd-ro: a panel that must not write "
                              "into the tree it reviews)")
     parser.add_argument("--cwd-ro", action="store_true",
-                        help="mount the working directory read-only (--docker only; "
-                             "requires --runs-folder)")
+                        help="mount the WORKING DIRECTORY read-only (--docker only; "
+                             "requires --runs-folder). The rest of the container stays "
+                             "writable — the entrypoint copies credentials into $HOME "
+                             "and agents write sessions there — so anything a body "
+                             "writes outside the workspace or the runs folder is lost "
+                             "when the container goes")
     parser.add_argument("--print-run-dir", action="store_true",
                         help="print the run directory to stdout at start (scripting/backgrounded runs)")
     if argv and "--version" in argv:
@@ -138,7 +142,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--node is for fresh runs only (resume continues from the journal)")
 
     cli_vars: dict[str, str] = {}
-    # --var-file first, so an explicit --var can still override it.
+    # One key, one source. Silent last-wins hides a real mistake: two flags disagreeing
+    # about the same var means somebody expected the other one to win.
     for item in ns.var_file:
         if "=" not in item:
             parser.error(f"--var-file expects KEY=PATH, got {item!r}")
@@ -164,11 +169,15 @@ def main(argv: list[str] | None = None) -> int:
         # a file can be checked, so it is.
         if not text.strip():
             parser.error(f"--var-file {key}: {path} is empty")
+        if key in cli_vars:
+            parser.error(f"--var-file {key}: given twice")
         cli_vars[key] = text
     for item in ns.var:
         if "=" not in item:
             parser.error(f"--var expects KEY=VALUE, got {item!r}")
         k, v = item.split("=", 1)
+        if k in cli_vars:
+            parser.error(f"--var {k}: already set by another --var or --var-file")
         cli_vars[k] = v
 
     resume_dir = None
