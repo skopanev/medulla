@@ -288,3 +288,18 @@ def test_overlay_carries_a_symlinked_package_directory_whole(dockerpy, tmp_path,
     mounts = " ".join(vols)
     assert f"{wrapper}:/usr/local/bin/wrap:ro" in mounts          # the file, as before
     assert f"{lib}:{dockerpy.CONTAINER_HOME}/.local/lib/pkg:ro" in mounts   # the package
+
+
+def test_sighup_does_not_kill_a_backgrounded_run(dockerpy):
+    """`medulla ... &` exists so a 10-20 minute panel outlives the shell that started
+    it. SIGHUP arrives when that shell goes away, and unhandled it killed the run
+    mid-flight — a panel that had already written 105KB of one answer vanished without
+    a manifest, which read as medulla dying on its own. Deliberate interruption is
+    untouched: SIGINT and SIGTERM still stop the run and the container with it.
+    """
+    import inspect
+    import signal
+
+    src = inspect.getsource(dockerpy.main)
+    assert "SIGHUP" in src and "SIG_IGN" in src
+    assert signal.getsignal(signal.SIGINT) is not signal.SIG_IGN   # still interruptible

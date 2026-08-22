@@ -533,6 +533,27 @@ def build_volumes(claude_home, mount_agy=True, *,
         # At its OWN host path, so the run dir printed inside is openable outside.
         add(runs_folder, str(runs_folder), ro=False)
 
+    # A git WORKTREE keeps its metadata in ANOTHER repository: .git here is a file
+    # reading `gitdir: <main>/.git/worktrees/<name>`, a host path the container does
+    # not have. Every git command then fails inside — `git rev-parse` first — and the
+    # agents spend their turn working around it instead of reviewing. Mount the common
+    # .git at its own host path so the pointer resolves; read-only exactly when the
+    # workspace is, since git writes its index and reflog in there.
+    git_pointer = cwd / ".git"
+    if git_pointer.is_file():
+        try:
+            line = git_pointer.read_text(encoding="utf-8").strip()
+        except OSError:
+            line = ""
+        if line.startswith("gitdir:"):
+            gitdir = Path(line.split(":", 1)[1].strip())
+            if not gitdir.is_absolute():
+                gitdir = (cwd / gitdir).resolve()
+            # the worktree's own dir holds no objects or refs — the COMMON .git does
+            common = gitdir.parent.parent if gitdir.parent.name == "worktrees" else gitdir
+            if common.is_dir():
+                add(common, str(common), ro=cwd_ro)
+
     # Shared workflow definitions: a symlink under .medulla/workflows/ points OUT of the
     # workspace (e.g. ~/.medulla/workflows/spar/workflow.yaml, one copy per machine), and
     # only cwd is mounted — so inside the container the link dangles and the workflow is
@@ -706,6 +727,16 @@ def run_docker(image, volumes, args, runs_under: str | None = None):
 
 def main():
     args = sys.argv[1:]
+
+    # Outliving the shell that started it is the whole point of `medulla ... &`: a panel
+    # runs for 10-20 minutes and nobody sits on it. SIGHUP arrives when that shell goes
+    # away — and unhandled, it kills us mid-run, which looked like medulla dying on its
+    # own: a panel that had already written 105KB of one answer vanished without a
+    # manifest. Deliberate interruption still works; SIGINT and SIGTERM are untouched.
+    try:
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    except (AttributeError, ValueError, OSError):
+        pass                    # no SIGHUP (Windows) or not the main thread
 
     build = "--build" in args
     if build:

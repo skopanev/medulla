@@ -85,12 +85,15 @@ for the heredoc body (quoted 'EOF' keeps `$(...)`, backticks and
 quotes in the prompt inert). Add `--mount ../repo` (repeatable, read-only) for
 every sibling repo the panel must be able to read:
 
+    BOX="$HOME/.medulla/panels/$(basename "$PWD")"   # outside the tree under review
+    mkdir -p "$BOX"
     QUESTION="$(cat <<'EOF'
     <your prompt>
     EOF
     )"
-    medulla --print-run-dir --docker -w .medulla/workflows/spar [--mount ../repo] \
-      --var "QUESTION=$QUESTION" >run.log 2>err.log &
+    medulla --print-run-dir --docker --cwd-ro --runs-folder "$BOX" \
+      -w .medulla/workflows/spar [--mount ../repo] \
+      --var "QUESTION=$QUESTION" >"$BOX/run.log" 2>"$BOX/err.log" &
     PID=$!
     # The run dir is printed at startup, but under --docker that is ~20s away (the
     # container upgrades medulla first). Watch the PROCESS too: if medulla dies before
@@ -101,6 +104,16 @@ every sibling repo the panel must be able to read:
     fi
     run=$(head -1 run.log)
     echo "panel running in background (pid $PID), run dir: $run"
+
+**Why the flags, and why $BOX.** A panel reads the tree and must not write it —
+three rounds left something behind (a dangling symlink, a file staged in the agent's
+index, a stray `test.sh`), and at review time none of it is distinguishable from real
+work. `--cwd-ro` mounts the workspace read-only; `--runs-folder` gives the run
+somewhere else to write, and it is required — read-only alone would leave the run
+nowhere to go. The shell redirects go to `$BOX` for the same reason: they are written
+by the HOST shell, so `--cwd-ro` cannot stop them landing in the repo. Keep `$BOX`
+under `$HOME`: a VM shares only part of the filesystem, and a path it cannot see is
+mounted as an empty directory instead (medulla checks this and says so).
 
 This script returns in ~20s with the run dir; the panel keeps working in the
 background for its 10-20 minutes. **Do not sit and wait on it** — go do other
