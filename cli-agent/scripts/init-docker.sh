@@ -21,17 +21,16 @@ fi
 # Codex credentials (skip personal config — workflow controls model/prompt via CLI)
 #
 # Token-broker guard: when this container has a broker config
-# ($HOME/.config/hltm-broker/config.json) AND `cx` on PATH, codex runs through
-# the broker wrapper (see spar workflow.yaml: harness_bin.codex = cx). cx mints
-# a token from the broker and writes it into an isolated per-account
-# ~/.codex-<account>, never touching the host's session. If we ALSO copied the
-# host's /mnt/codex/auth.json into a writable $HOME/.codex/auth.json, plain
-# codex would refresh THAT token and OpenAI would invalidate the host's live
-# session (token poisoning). So: broker present -> do NOT copy; let cx own auth.
-# No broker/cx (e.g. default medulla image) -> copy as before so bare codex works.
+# ($HOME/.config/hltm-broker/config.json), codex auth comes from the broker —
+# either because `codex` here is a shim into the broker wrapper, or because the
+# workflow calls the wrapper directly. Copying the host's /mnt/codex/auth.json
+# into a writable $HOME/.codex/auth.json would let a plain codex refresh THAT
+# token, and OpenAI would invalidate the host's live session (token poisoning).
+# So: broker configured -> do NOT copy. No broker -> copy as before so bare
+# codex works in the default image.
 if [ -d /mnt/codex ]; then
-    if [ -f "$HOME/.config/hltm-broker/config.json" ] && command -v cx >/dev/null 2>&1; then
-        : # broker + cx present: skip auth.json copy to avoid poisoning host's codex session
+    if [ -f "$HOME/.config/hltm-broker/config.json" ]; then
+        : # broker configured: its wrapper owns auth, never copy the host token
     else
         mkdir -p "$HOME/.codex"
         [ -f /mnt/codex/auth.json ] && cp -L /mnt/codex/auth.json "$HOME/.codex/auth.json" 2>/dev/null || true

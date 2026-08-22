@@ -132,23 +132,6 @@ Under `--docker`, the merged tiers are forwarded via a transient 0600 `--env-fil
 
 `init` seeds a `.gitignore` (`.env`, `runs/`) into every workflow it creates.
 
-### harness_bin: run a harness through a different executable
-
-```yaml
-version: "2"
-harness_bin:
-  codex: cx          # a wrapper that refreshes credentials, then exec's codex
-  claude-code: cl
-```
-
-The engine knows nothing about the replacement — it is a name the workflow supplies. It is
-used **only when it is on PATH**, so the same file still runs on a machine that has no
-wrapper: absent, and the default executable runs. Must be a bare name (no `/`), and the
-wrapper must not be named after the CLI it wraps — wrappers usually exec the real one by
-name, so `codex` wrapping `codex` recurses forever.
-
-Pair it with the container overlay below to supply the wrapper itself.
-
 ### Container overlay: things the image cannot carry
 
 Private tooling, a site-specific wrapper, a credential helper — anything medulla should

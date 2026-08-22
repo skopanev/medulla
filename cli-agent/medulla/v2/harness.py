@@ -173,7 +173,7 @@ class ClaudeAdapter(HarnessAdapter):
         # edits outright, so it is what read-only means here.
         ro = _read_only(spec)
         perm = ["--permission-mode", "plan"] if ro else ["--dangerously-skip-permissions"]
-        argv = [spec.bin or "claude", *perm,
+        argv = ["claude", *perm,
                 "--output-format", "stream-json", "--verbose"]
         if spec.model:
             argv += ["--model", spec.model]
@@ -277,18 +277,16 @@ class CodexAdapter(HarnessAdapter):
     binary = "codex"
 
     def __init__(self):
-        # cx (the token-refreshing wrapper) alone is a valid codex install: a slim
-        # image with only cx must not crash E_HARNESS at construction, before the
-        # workflow's harness_bin:{codex:cx} override can take effect. Availability
-        # accepts either binary; the actual bin is still chosen in build() via
-        # spec.bin (harness_bin remains the single source of override).
-        if not (shutil.which("cx") or shutil.which("codex")):
+        # A broker wrapper may stand in for codex (the container's `codex` can be
+        # a shim into it), so availability is judged by the name the workflow
+        # actually invokes — nothing here knows or cares about wrapper names.
+        if not shutil.which("codex"):
             raise EngineCrash(
                 E_HARNESS,
-                f"harness '{self.name}': neither 'cx' nor 'codex' on PATH")
+                f"harness '{self.name}': 'codex' not on PATH")
 
     def build(self, spec, prompt_file, prompt_text, timeout_s):
-        bin_ = spec.bin or "codex"
+        bin_ = "codex"
         inner_ms = (int(timeout_s) + INNER_SLACK_S) * 1000
         # sandbox: codex has native modes, so this maps exactly. The historical
         # default stays `danger` — the container IS the sandbox for most workflows,
@@ -369,7 +367,7 @@ class OpenCodeAdapter(HarnessAdapter):
     binary = "opencode"
 
     def build(self, spec, prompt_file, prompt_text, timeout_s):
-        argv = [spec.bin or "opencode", "run", "--agent", "build"]
+        argv = ["opencode", "run", "--agent", "build"]
         if spec.model:
             argv += ["-m", spec.model]
         argv += spec.args
@@ -474,7 +472,7 @@ class AgyAdapter(HarnessAdapter):
         # created). Refusing a read-only step on a harness that supports it pushed panels
         # onto other models for no reason.
         ro = _read_only(spec)
-        argv = [spec.bin or "agy",
+        argv = ["agy",
                 *(["--mode", "plan"] if ro else ["--dangerously-skip-permissions"]),
                 "--print-timeout", f"{int(timeout_s) + INNER_SLACK_S}s"]
         if spec.model:

@@ -10,7 +10,6 @@ from pathlib import Path
 import yaml
 
 from .errors import E_VALIDATION, EngineCrash
-from .harness import REAL_HARNESSES
 from .model import (
     BOOLEAN_TRAP_NAMES,
     CHANNEL_SIGNALS,
@@ -309,7 +308,7 @@ def load_workflow(path: Path) -> Workflow:
         )
 
     top_keys = {"version", "start", "vars", "timeout", "keep_runs", "defaults", "nodes",
-                "docker", "harness_bin"}
+                "docker"}
     unknown = set(data) - top_keys
     if unknown:
         raise _err(f"unknown top-level fields: {sorted(unknown)}")
@@ -318,25 +317,6 @@ def load_workflow(path: Path) -> Workflow:
     # engine only validates the shape). Law of the block: a workflow may only
     # SHRINK its container's exposure here, never enlarge it.
     _validate_docker_block(data.get("docker"))
-
-    # harness_bin: — run a harness through a DIFFERENT executable, e.g. a wrapper that
-    # refreshes credentials before exec'ing the real CLI:
-    #     harness_bin: {codex: cx}
-    # The engine knows nothing about the replacement: it is a name, supplied by the
-    # workflow, used when it is on PATH and ignored when it is not (so the same file
-    # runs on a machine without the wrapper). Keeping this out of the engine is the
-    # point — a vendor-specific binary hardcoded in the adapter is how someone else's
-    # private tooling ends up in everyone's engine.
-    harness_bin = data.get("harness_bin") or {}
-    if not isinstance(harness_bin, dict):
-        raise _err("harness_bin must be a mapping of harness -> executable")
-    for harness, binary in harness_bin.items():
-        if harness not in REAL_HARNESSES:
-            raise _err(f"harness_bin: unknown harness {harness!r} "
-                       f"(one of {list(REAL_HARNESSES)})")
-        if not isinstance(binary, str) or not binary.strip() or "/" in binary:
-            raise _err(f"harness_bin.{harness}: must be a bare executable name, "
-                       f"got {binary!r}")
 
     nodes_raw = data.get("nodes")
     if not isinstance(nodes_raw, dict) or not nodes_raw:
@@ -435,6 +415,5 @@ def load_workflow(path: Path) -> Workflow:
     return Workflow(
         version="2", start=start, nodes=nodes, vars=vars_map,
         timeout=timeout, keep_runs=keep_runs, defaults=defaults,
-        harness_bin={k: v.strip() for k, v in harness_bin.items()},
         path=path, dir=path.parent,
     )

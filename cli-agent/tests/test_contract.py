@@ -342,8 +342,15 @@ def test_sandbox_templated_value_deferred(tmp_path):
     assert p.nodes["a"].action.agent.sandbox == "{{var:SB}}"
 
 
-def test_harness_bin_block(tmp_path):
+def test_harness_bin_is_gone_and_says_so(tmp_path):
+    """`harness_bin:` used to let a workflow name another executable for a harness
+    (a credential-refreshing wrapper). The wrapper belongs to the machine, not to the
+    workflow — the container installs it as the harness's own name — so the block was
+    removed. A yaml still carrying it must FAIL, not be silently ignored: silence
+    would run the plain binary and quietly bypass the broker the block was there for.
+    """
     from medulla.v2.contract import load_workflow
+    from medulla.v2.errors import EngineCrash
     p = tmp_path / "workflow.yaml"
     p.write_text("""version: "2"
 start: a
@@ -351,26 +358,12 @@ harness_bin: {codex: cx}
 nodes:
   a: {shell: "true", on_signal: {ok: __exit_ok__}}
 """, encoding="utf-8")
-    assert load_workflow(p).harness_bin == {"codex": "cx"}
-
-
-def test_harness_bin_rejects_unknown_harness_and_paths(tmp_path):
-    from medulla.v2.contract import load_workflow
-    from medulla.v2.errors import EngineCrash
-    base = """version: "2"
-start: a
-harness_bin: {%s}
-nodes:
-  a: {shell: "true", on_signal: {ok: __exit_ok__}}
-"""
-    for bad in ("nonsense: cx", "codex: /usr/local/bin/cx", "codex: ''"):
-        p = tmp_path / "w.yaml"
-        p.write_text(base % bad, encoding="utf-8")
-        try:
-            load_workflow(p)
-        except EngineCrash:
-            continue
-        raise AssertionError(f"accepted bad harness_bin: {bad}")
+    try:
+        load_workflow(p)
+    except EngineCrash as exc:
+        assert "harness_bin" in str(exc)
+    else:
+        raise AssertionError("harness_bin accepted after removal")
 
 
 def test_validation_errors_name_the_file(tmp_path):

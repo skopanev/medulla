@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import sys
 import time
 from dataclasses import dataclass, field
@@ -652,12 +651,7 @@ class Engine:
         args = [r for a in spec.args
                 if (r := render_fn(a, "agent.args", required=False)).strip()]
         from .model import AgentSpec
-        # harness_bin: the workflow may name a different executable for this harness
-        # (a credential-refreshing wrapper, say). Applied only when it is actually on
-        # PATH, so the same workflow still runs where the wrapper is not installed.
-        wanted = self.p.harness_bin.get(harness)
-        bin_ = wanted if (wanted and shutil.which(wanted)) else None
-        rendered_spec = AgentSpec(harness=harness, model=model or None, bin=bin_,
+        rendered_spec = AgentSpec(harness=harness, model=model or None,
                                   effort=effort or None, sandbox=sandbox or None, args=args)
 
         adapter = resolve_harness(rendered_spec)

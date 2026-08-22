@@ -451,21 +451,16 @@ def test_medulla_shell_overrides_the_default(monkeypatch, tmp_path):
     assert captured["argv"][0] == "/bin/sh"
 
 
-def test_harness_bin_replaces_the_executable(tmp_path):
-    # `harness_bin: {codex: cx}` in the workflow — the engine passes the resolved name
-    # down and the adapter runs THAT, with every other flag untouched.
-    a = H.CodexAdapter.__new__(H.CodexAdapter)
-    inv = a.build(AgentSpec(harness="codex", model="gpt-5.6-sol", bin="cx"),
-                  tmp_path / "p.md", "PROMPT", 600)
-    assert inv.argv[0] == "cx"
-    assert inv.argv[1] == "exec" and 'model="gpt-5.6-sol"' in inv.argv
-    assert inv.stdin == "PROMPT"
-
-
-def test_without_harness_bin_the_default_executable_runs(tmp_path):
-    a = H.CodexAdapter.__new__(H.CodexAdapter)
-    inv = a.build(AgentSpec(harness="codex"), tmp_path / "p.md", "P", 60)
-    assert inv.argv[0] == "codex"
+def test_each_harness_runs_its_own_binary_by_name(tmp_path):
+    # There is no per-workflow executable override any more: `harness_bin:` is gone and
+    # AgentSpec.bin with it. A machine that routes a CLI through a broker installs the
+    # wrapper UNDER THE CLI'S OWN NAME, so the engine keeps calling `codex` and never
+    # learns what stands behind it.
+    for cls, expected in ((H.CodexAdapter, "codex"), (H.ClaudeAdapter, "claude"),
+                          (H.OpenCodeAdapter, "opencode"), (H.AgyAdapter, "agy")):
+        a = cls.__new__(cls)
+        inv = a.build(AgentSpec(harness=expected), tmp_path / "p.md", "P", 60)
+        assert inv.argv[0] == expected
 
 
 def test_claude_reports_a_plan_limit_instead_of_a_bare_rc(tmp_path):
