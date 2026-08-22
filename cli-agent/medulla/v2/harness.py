@@ -538,6 +538,16 @@ class AgyAdapter(HarnessAdapter):
             step = ev.get("step_update") or {}
             if step.get("step_type") == "agent_response":
                 return (step.get("text_delta") or "").rstrip("\n") or None
+            # Tools, because answer text is scarce while real work happens: one panel
+            # run emitted 54 agent_response events carrying only 2 non-empty deltas,
+            # against 104 tool steps. Text alone would leave a working agent looking
+            # idle for minutes — the very thing streaming is here to fix.
+            if step.get("step_type") == "tool" and step.get("state") == "ACTIVE":
+                info = step.get("tool_info") or {}
+                params = info.get("parameters") or {}
+                cmd = params.get("CommandLine") or params.get("command")
+                name = step.get("tool_name") or info.get("name") or "tool"
+                return f"$ {cmd}" if cmd else f"[{name}]"
             return None
         if kind == "result":
             status = (ev.get("result") or {}).get("status")
