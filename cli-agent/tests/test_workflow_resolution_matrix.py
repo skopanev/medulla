@@ -577,3 +577,79 @@ def test_an_empty_var_file_is_refused(world, tmp_path):
 
     with pytest.raises(SystemExit):
         cli_mod.main(["-w", ".medulla/workflows/spar", "--var-file", f"QUESTION={empty}"])
+
+
+# --------------------------------------------------------------------------
+# What the panel found in the change above
+# --------------------------------------------------------------------------
+
+def test_a_var_too_big_for_the_environment_fails_by_name(world, tmp_path):
+    """Linux caps ONE env string at MAX_ARG_STRLEN, so an oversized var kills execve
+    for every body — measured in the container: 130KB passed, 200KB raised 'Argument
+    list too long' from `true`. That error names neither the var nor the cause, so the
+    engine refuses first and says which one."""
+    from medulla.v2.contract import load_workflow
+    from medulla.v2.engine import Engine
+    from medulla.v2.errors import EngineCrash
+    from medulla.v2.rundir import RunStore
+
+    world.shared("spar")
+    world.anchor("spar")
+    store = RunStore.create(Path(".medulla/workflows/spar"), WORKFLOW_BODY)
+    workflow = load_workflow(store.dir / "workflow.yaml")
+    engine = Engine(workflow, store, tmp_path)
+    engine.vars = {"QUESTION": "x" * 200_000}
+
+    with pytest.raises(EngineCrash) as exc:
+        engine._base_env()
+    assert "QUESTION" in str(exc.value) and "200000" in str(exc.value)
+
+
+def test_a_var_file_that_is_not_a_regular_file_is_refused(world, tmp_path):
+    """A FIFO blocks read_text() forever with nothing on stdout — the run simply never
+    starts and never says why."""
+    import os
+
+    import medulla.v2.cli as cli_mod
+
+    world.shared("spar")
+    world.anchor("spar")
+    fifo = tmp_path / "pipe"
+    os.mkfifo(fifo)
+
+    with pytest.raises(SystemExit):
+        cli_mod.main(["-w", ".medulla/workflows/spar", "--var-file", f"Q={fifo}"])
+    with pytest.raises(SystemExit):          # and an empty path is not the CWD
+        cli_mod.main(["-w", ".medulla/workflows/spar", "--var-file", "Q="])
+
+
+def test_the_run_dir_name_cannot_escape_the_runs_directory(world):
+    """It arrives through the environment, which every body inherits, so `..` or an
+    absolute path would move the run somewhere else entirely."""
+    import os
+
+    from medulla.v2.rundir import RunStore
+
+    world.shared("spar")
+    world.anchor("spar")
+    for bad in ("../escaped", "/tmp/absolute", "a/b"):
+        os.environ["MEDULLA_RUN_DIR_NAME"] = bad
+        try:
+            with pytest.raises(RuntimeError):
+                RunStore.create(Path(".medulla/workflows/spar"), WORKFLOW_BODY)
+        finally:
+            del os.environ["MEDULLA_RUN_DIR_NAME"]
+
+
+def test_a_json_line_in_plain_output_does_not_disarm_the_signal_filter(tmp_path):
+    """Any line starting with `{` used to count as "this is our structured output",
+    so an agent that printed a JSON snippet inside a plain-text answer had every
+    signal in that answer dropped."""
+    from medulla.v2 import harness as H
+
+    text = '\n'.join(['Here is the config I found:',
+                      '{"unrelated": "json the agent printed"}',
+                      '<signal:done>ok</signal:done>'])
+    for cls in (H.OpenCodeAdapter, H.AgyAdapter):
+        a = cls.__new__(cls)
+        assert "<signal:done>" in a.filter_stdout(text), cls.__name__

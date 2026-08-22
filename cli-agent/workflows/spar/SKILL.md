@@ -94,9 +94,10 @@ every sibling repo the panel must be able to read:
       -w .medulla/workflows/spar [--mount ../repo] \
       --var-file "QUESTION=$BOX/question.md" >"$BOX/run.log" 2>"$BOX/err.log" &
     PID=$!
-    # The run dir is printed at startup, but under --docker that is ~20s away (the
-    # container upgrades medulla first). Watch the PROCESS too: if medulla dies before
-    # printing — bad yaml, Docker not running — waiting on the file alone hangs forever.
+    # The run dir is printed within a second — the host now names the run rather than
+    # waiting for the container. Watch the PROCESS too: if medulla dies before printing
+    # — bad yaml, Docker not running, an image that must be built first — waiting on
+    # the file alone hangs forever.
     while [ ! -s run.log ] && kill -0 $PID 2>/dev/null; do sleep 1; done
     if [ ! -s run.log ]; then
         echo "ERROR: medulla failed to start:"; cat err.log; exit 1

@@ -278,8 +278,27 @@ class Engine:
         return min(float(timeout_s), rem)
 
     # ── env ──
+    # Linux caps a SINGLE env string at MAX_ARG_STRLEN (131072B) exactly as it caps one
+    # argv string, so a var this big kills execve for EVERY body: measured in the
+    # container, 130KB passed and 200KB raised "Argument list too long" from `true`.
+    # Fail HERE, naming the var, instead of letting the first body die on an OSError
+    # that says nothing about which value caused it.
+    _MAX_ENV_VALUE = 100_000
+
     def _base_env(self, vars_map: dict[str, str] | None = None) -> dict[str, str]:
-        env = {**self.dotenv, **(self.vars if vars_map is None else vars_map)}
+        source = self.vars if vars_map is None else vars_map
+        for key, value in source.items():
+            if isinstance(value, str):
+                size = len(value.encode("utf-8", "surrogatepass"))
+                if size > self._MAX_ENV_VALUE:
+                    raise EngineCrash(
+                        E_RENDER,
+                        f"var '{key}' is {size} bytes — too large for the environment "
+                        f"(limit {self._MAX_ENV_VALUE}). Linux caps one env string at "
+                        f"131072 bytes, so every body would die with 'Argument list too "
+                        f"long'. Pass it to the agent through the prompt "
+                        f"({{{{var:{key}}}}}) and keep it out of shell bodies.")
+        env = {**self.dotenv, **source}
         env["MEDULLA_RUN_ID"] = self.store.run_id
         env["MEDULLA_RUN_DIR"] = str(self.store.dir)
         # Stops HERE. It is an internal compensator (scripts/docker.py sets it when the

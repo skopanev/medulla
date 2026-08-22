@@ -62,6 +62,11 @@ class RunStore:
         # the ~20s bootstrap, and so the timestamp is the caller's clock rather than
         # the container's (they disagree — a run started at 11:08 was named 09:08).
         given = os.environ.get("MEDULLA_RUN_DIR_NAME", "").strip()
+        # A NAME, never a path: `..` or a leading slash would move the run out of the
+        # runs directory entirely, and this arrives through the environment, which any
+        # body inherits.
+        if given and (Path(given).name != given or given in (".", "..")):
+            raise RuntimeError(f"MEDULLA_RUN_DIR_NAME must be a bare name, got {given!r}")
         if given:
             run_id = run_id or given.rsplit("-", 1)[-1]
             run_dir = runs_dir_for(workflow_dir, runs_root) / given

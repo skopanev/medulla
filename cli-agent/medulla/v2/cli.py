@@ -144,9 +144,17 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"--var-file expects KEY=PATH, got {item!r}")
         key, _, raw = item.partition("=")
         key = key.strip()
-        path = Path(raw).expanduser()
         if not key:
             parser.error(f"--var-file has no key: {item!r}")
+        if not raw.strip():
+            # Path("") resolves to the CWD, which then reads as a directory far away
+            # from here — name the real mistake at the point it was made.
+            parser.error(f"--var-file {key}: no path given")
+        path = Path(raw).expanduser()
+        # A FIFO blocks read_text() forever, and a directory raises a puzzle rather than
+        # an answer. Say which it is instead of hanging with nothing on stdout.
+        if not path.is_file():
+            parser.error(f"--var-file {key}: not a regular file: {path}")
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:

@@ -436,7 +436,11 @@ class OpenCodeAdapter(HarnessAdapter):
                 ev = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            saw_json = True
+            # OUR events only. Any line starting with `{` used to count, so an agent
+            # that printed a JSON snippet in its answer disarmed the fallback and every
+            # signal in that answer was dropped.
+            if ev.get("type") in ("text", "step_start", "step_finish", "tool_use"):
+                saw_json = True
             if ev.get("type") == "text":
                 text = (ev.get("part") or {}).get("text")
                 if text:
@@ -557,7 +561,8 @@ class AgyAdapter(HarnessAdapter):
                 ev = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            saw_json = True
+            if ev.get("event") in ("init", "step_update", "result"):
+                saw_json = True     # OUR events only — see OpenCodeAdapter.filter_stdout
             if ev.get("event") == "result":
                 text = (ev.get("result") or {}).get("response")
                 if text:

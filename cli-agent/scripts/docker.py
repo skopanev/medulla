@@ -363,7 +363,10 @@ def assert_runs_folder_reaches_the_container(runs_folder: Path, image: str) -> N
     marker written here and looked for in there. Costs one container start, and only
     when --runs-folder was passed.
     """
-    marker = runs_folder / ".medulla-reachable"
+    # Unique per probe: a fixed name would overwrite a file of that name that was
+    # already there — and delete it afterwards — and two runs probing at once would
+    # each remove the other's marker.
+    marker = runs_folder / f".medulla-reachable-{os.getpid()}-{uuid.uuid4().hex[:8]}"
     try:
         marker.write_text("probe\n", encoding="utf-8")
     except OSError as exc:
@@ -924,6 +927,18 @@ def main():
         if not p.is_dir():
             print(f"[docker.py] mount path not found: {p}", file=sys.stderr)
             return 1
+        if cwd_ro and not ro:
+            # A writable mount of the reviewed tree (or any part of it) hands back the
+            # write access --cwd-ro just took away, through a second door.
+            try:
+                p.relative_to(workspace_root)
+                inside = True
+            except ValueError:
+                inside = workspace_root == p
+            if inside:
+                print(f"[docker.py] --mount-rw {p} is inside the read-only workspace — "
+                      f"that would undo --cwd-ro", file=sys.stderr)
+                return 1
         if cwd_ro:
             point = workspace_root / p.name
             if not point.exists():
@@ -943,8 +958,14 @@ def main():
     # loop. The name is decided here instead and handed in, so the path is known before
     # the container exists. It also fixes whose clock names the run: the container's
     # differs from the host's (a run started at 11:08 was named 09:08).
+    # A RESUMED run already has a directory, and it is not ours to name: the engine
+    # finds it from the journal. Printing a freshly invented path here would answer the
+    # caller with somewhere that will never exist, and the engine would print the real
+    # one seconds later — two lines, the wrong one first. So when resuming, step aside
+    # and let the engine print, exactly as before.
+    resuming = "--resume" in args or "--run" in args
     run_dir_name = None
-    if "--print-run-dir" in args or "--print-run-json" in args:
+    if not resuming and ("--print-run-dir" in args or "--print-run-json" in args):
         import datetime
         import uuid
         run_dir_name = (datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
