@@ -120,16 +120,22 @@ mkdir -p "$HOME/.gemini/config"
 export PATH="/workspace/.medulla/scripts:$PATH"
 grep -q '/workspace/.medulla/scripts' ~/.bashrc 2>/dev/null || echo 'export PATH="/workspace/.medulla/scripts:$PATH"' >> ~/.bashrc
 
-# NO self-upgrade here. It used to run `pipx upgrade medulla` on every start, which
-# cost ~7.5s of the ~15s a short run takes — and paid it EVERY time, because the
-# container is --rm: whatever it installs dies with the container, so the next run
-# fetches the same thing again. The image carries the version it was built with;
-# rebuild the image to move it. MEDULLA_UPGRADE_ON_START=1 restores the old
-# behaviour for a pinned image you cannot rebuild.
-if [ -n "${MEDULLA_UPGRADE_ON_START:-}" ]; then
-    # upgrade, not reinstall: reinstall removes-then-fetches, so a network hiccup
-    # leaves the container with NO medulla at all (exit 127).
-    pipx upgrade medulla >&2 || echo "⚠ medulla upgrade skipped (offline?) — using baked version" >&2
+# Self-upgrade on EVERY start, deliberately. It costs a few seconds and pays them
+# every time (the container is --rm, so what it installs dies with it) — bought on
+# purpose, because the image cannot keep itself current: its tag is a sha of the
+# DOCKERFILE while medulla is pulled from git at build time, so an untouched
+# Dockerfile means a tag Docker considers fresh forever while the engine inside
+# drifts. It reached TWO versions behind the host that way and no test caught it.
+# This script is mounted from the host's medulla package, so `medulla upgrade` on
+# the host is enough to change it — the image needs no rebuild.
+#
+# `medulla upgrade` over `pipx upgrade medulla`: it picks whichever method the
+# install actually used, so this script need not know. Upgrade, never reinstall —
+# reinstall removes-then-fetches, and a network hiccup would leave the container
+# with NO medulla at all (exit 127).
+# MEDULLA_UPGRADE_ON_START=0 opts out: offline boxes, or an image pinned on purpose.
+if [ "${MEDULLA_UPGRADE_ON_START:-1}" != "0" ]; then
+    medulla upgrade >&2 || echo "⚠ medulla upgrade skipped (offline?) — using baked version" >&2
 fi
 
 exec "$@"
