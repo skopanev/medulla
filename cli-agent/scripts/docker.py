@@ -855,15 +855,44 @@ def main():
                 shared_runs_under = str(dest)
 
     # Mount extra folders into /workspace/<name> (nested mount inside workspace)
+    #
+    # A nested mount needs its mount POINT to exist, and the daemon lays /workspace down
+    # first: under --cwd-ro it is read-only by the time the nested mount is applied, so
+    # the daemon cannot create /workspace/<name> and the run dies before it starts. That
+    # hits the one case the flag exists for — a panel launched from an empty box that
+    # brings every repository in with --mount. So the point is made HERE, on the host,
+    # where the directory is still writable, and removed again below.
+    workspace_root = Path(os.environ.get("PWD") or os.getcwd())
+    made_mountpoints: list[Path] = []
     for mount_path, ro in extra_mounts:
         p = Path(mount_path).resolve()
         if not p.is_dir():
             print(f"[docker.py] mount path not found: {p}", file=sys.stderr)
             return 1
+        if cwd_ro:
+            point = workspace_root / p.name
+            if not point.exists():
+                try:
+                    point.mkdir(parents=True)
+                except OSError as exc:
+                    print(f"[docker.py] cannot make mount point {point}: {exc}",
+                          file=sys.stderr)
+                    return 1
+                made_mountpoints.append(point)
         suffix = ":ro" if ro else ""
         volumes.extend(["-v", f"{p}:/workspace/{p.name}{suffix}"])
 
-    return run_docker(image, volumes, args, runs_under=shared_runs_under)
+    try:
+        return run_docker(image, volumes, args, runs_under=shared_runs_under)
+    finally:
+        # rmdir, never rmtree: it removes only what is still EMPTY, so a directory that
+        # turned out to hold something is left exactly where it is. The tree ends the
+        # run as it started it, which is the whole promise of --cwd-ro.
+        for point in reversed(made_mountpoints):
+            try:
+                point.rmdir()
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

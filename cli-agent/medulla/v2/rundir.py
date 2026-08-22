@@ -59,7 +59,7 @@ class RunStore:
                runs_root: Path | None = None) -> RunStore:
         run_id = run_id or os.environ.get("MEDULLA_RUN_ID", "").strip() or uuid.uuid4().hex[:8]
         ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        run_dir = runs_root_for(workflow_dir, runs_root) / "runs" / f"{ts}-{run_id}"
+        run_dir = runs_dir_for(workflow_dir, runs_root) / f"{ts}-{run_id}"
         run_dir.mkdir(parents=True, exist_ok=False)
         (run_dir / "steps").mkdir()
         (run_dir / "workflow.yaml").write_text(config_text, encoding="utf-8")  # immutable snapshot
@@ -220,12 +220,24 @@ def launch_dir_of(run_dir: Path) -> Path | None:
         return None
 
 
+def runs_dir_for(workflow_dir: Path, runs_root: Path | None = None) -> Path:
+    """The directory the run directories sit in.
+
+    With --runs-folder the caller named THAT directory, so nothing is appended: asking
+    for ~/panelbox/p3runs and getting ~/panelbox/p3runs/runs/... is a level nobody
+    asked for. Without it the historic layout stands: <workflow>/runs/.
+    """
+    if runs_root is not None:
+        return Path(runs_root)
+    return runs_root_for(workflow_dir) / "runs"
+
+
 def prune_runs(workflow_dir: Path, keep_runs: int, workflow_timeout: int | None,
                runs_root: Path | None = None) -> None:
     """On boot, after the new run dir exists. Finished (has outcome.json): keep the
     newest keep_runs. Unfinished: never touch while younger than the workflow
     timeout (the active-run shield); timeout 0/None = never auto-prune unfinished."""
-    runs_dir = runs_root_for(workflow_dir, runs_root) / "runs"
+    runs_dir = runs_dir_for(workflow_dir, runs_root)
     if not runs_dir.is_dir():
         return
     finished: list[Path] = []

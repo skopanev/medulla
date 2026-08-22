@@ -20,6 +20,7 @@ all), zero-byte debris, the pre-4.1 pipeline.yaml, a yaml named directly, and a 
 that simply does not exist.
 """
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -492,3 +493,47 @@ def test_cwd_ro_mounts_the_workspace_read_only_and_the_runs_folder_writable(dock
                                      cwd_ro=True, runs_folder=elsewhere)
     assert f"{world.project}:/workspace:ro" in guarded
     assert f"{elsewhere}:{elsewhere}" in guarded                     # same path, writable
+
+
+def test_a_named_runs_folder_holds_the_runs_directly(world, tmp_path):
+    """Asking for ~/panelbox/p3runs and getting ~/panelbox/p3runs/runs/… is a level
+    nobody asked for: the caller named the directory, so the run goes IN it. Without
+    the flag the historic <workflow>/runs/ layout is untouched."""
+    from medulla.v2.rundir import RunStore, runs_dir_for
+
+    named = tmp_path / "p3runs"
+    world.shared("spar")
+    world.anchor("spar")
+    w = Path(".medulla/workflows/spar")
+
+    assert runs_dir_for(w, named) == named                       # no "runs" appended
+    assert runs_dir_for(w) == Path(".medulla/workflows/spar/runs")   # unchanged default
+
+    store = RunStore.create(w, WORKFLOW_BODY, runs_root=named)
+    assert store.dir.parent == named                             # runs/<ts>-<id> -> <ts>-<id>
+
+
+def test_cwd_ro_makes_the_mount_points_it_needs(dockerpy, world, tmp_path, monkeypatch):
+    """A nested mount needs its point to exist, and the daemon lays /workspace down
+    first — read-only under --cwd-ro, so it cannot create /workspace/<name> itself and
+    the run dies before starting. That is exactly the case the flag exists for: a panel
+    launched from an empty box that brings its repositories in with --mount."""
+    world.shared("spar")
+    world.anchor("spar")
+    repo = tmp_path / "some-repo"
+    repo.mkdir()
+    point = world.project / "some-repo"
+    assert not point.exists()                                    # empty box
+
+    monkeypatch.setattr(dockerpy, "run_docker",
+                        lambda *a, **k: 0 if point.is_dir() else 99)
+    monkeypatch.setattr(sys, "argv",
+                        ["docker.py", "--cwd-ro", "--runs-folder", str(tmp_path / "out"),
+                         "--mount", str(repo), "-w", ".medulla/workflows/spar"])
+    monkeypatch.setattr(dockerpy, "assert_runs_folder_reaches_the_container",
+                        lambda *a, **k: None)
+    monkeypatch.setattr(dockerpy, "ensure_image", lambda *a, **k: 0)
+    monkeypatch.setattr(dockerpy, "image_home", lambda image, fallback: fallback)
+
+    assert dockerpy.main() == 0                                  # the point existed
+    assert not point.exists()                                    # and was taken away again
