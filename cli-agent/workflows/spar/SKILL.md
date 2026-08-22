@@ -85,7 +85,7 @@ for the heredoc body (quoted 'EOF' keeps `$(...)`, backticks and
 quotes in the prompt inert). Add `--mount ../repo` (repeatable, read-only) for
 every sibling repo the panel must be able to read:
 
-    BOX="$HOME/.medulla/panels/$(basename "$PWD")"   # outside the tree under review
+    BOX="$PWD/.medulla/panel-runs"        # in the project, beside it, never in /tmp
     mkdir -p "$BOX"
     QUESTION="$(cat <<'EOF'
     <your prompt>
@@ -105,15 +105,27 @@ every sibling repo the panel must be able to read:
     run=$(head -1 run.log)
     echo "panel running in background (pid $PID), run dir: $run"
 
+**Run it from the project ROOT.** That directory is what gets mounted as
+`/workspace`, what `-w .medulla/workflows/spar` is resolved against, and what `$BOX`
+is named after — start from a subdirectory and the panel reviews a slice of the repo
+under a box named after that slice. The root is the launch point even when the
+question is about one file deep inside it.
+
 **Why the flags, and why $BOX.** A panel reads the tree and must not write it —
 three rounds left something behind (a dangling symlink, a file staged in the agent's
 index, a stray `test.sh`), and at review time none of it is distinguishable from real
 work. `--cwd-ro` mounts the workspace read-only; `--runs-folder` gives the run
 somewhere else to write, and it is required — read-only alone would leave the run
 nowhere to go. The shell redirects go to `$BOX` for the same reason: they are written
-by the HOST shell, so `--cwd-ro` cannot stop them landing in the repo. Keep `$BOX`
-under `$HOME`: a VM shares only part of the filesystem, and a path it cannot see is
-mounted as an empty directory instead (medulla checks this and says so).
+by the HOST shell, so `--cwd-ro` cannot stop them landing in the repo.
+
+`$BOX` lives **in the project**, at `.medulla/panel-runs/`. It is mounted writable at
+its own path, so it stays writable while everything around it is read-only, and the
+run directory printed by `--print-run-dir` opens on the host unchanged. Do not put it
+in `/tmp`: the VM shares only part of the filesystem, and a path it cannot see is
+mounted as an empty root-owned directory instead — medulla checks for this and refuses
+to start, but the run you wanted is still not running. Add `.medulla/panel-runs/` to
+`.gitignore` once per repo.
 
 This script returns in ~20s with the run dir; the panel keeps working in the
 background for its 10-20 minutes. **Do not sit and wait on it** — go do other
