@@ -98,11 +98,11 @@ every sibling repo the panel must be able to read:
     # waiting for the container. Watch the PROCESS too: if medulla dies before printing
     # — bad yaml, Docker not running, an image that must be built first — waiting on
     # the file alone hangs forever.
-    while [ ! -s run.log ] && kill -0 $PID 2>/dev/null; do sleep 1; done
-    if [ ! -s run.log ]; then
-        echo "ERROR: medulla failed to start:"; cat err.log; exit 1
+    while [ ! -s "$BOX/run.log" ] && kill -0 "$PID" 2>/dev/null; do sleep 1; done
+    if [ ! -s "$BOX/run.log" ]; then
+        echo "ERROR: medulla failed to start:"; cat "$BOX/err.log"; exit 1
     fi
-    run=$(head -1 run.log)
+    run=$(head -1 "$BOX/run.log")
     echo "panel running in background (pid $PID), run dir: $run"
 
 **Run it from the project ROOT.** That directory is what gets mounted as
