@@ -118,4 +118,8 @@ def test_run_from_home_lists_each_workflow_once(sandbox, monkeypatch):
     _make(home / ".medulla" / "workflows", "spar")
     monkeypatch.chdir(home)
     assert [n for n, _d, _s in mhelp._discover()] == ["spar"]
-    assert "shadowed" not in _page()
+    page = _page()
+    assert "shadowed" not in page
+    # and it is the machine-wide copy — "local" would be true only of where you
+    # are standing, and reads as a repo copy that does not exist
+    assert "(machine-wide)" in page

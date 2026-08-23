@@ -37,6 +37,12 @@ def _discover() -> list[tuple[str, Path, str]]:
         if real in roots_done:
             continue
         roots_done.add(real)
+        # ...and when they are the same directory, it is the MACHINE-WIDE one that
+        # the name resolves to from anywhere else. Calling it "local" is true only
+        # of the directory you happen to be standing in, which is the reading that
+        # sends someone looking for a repo copy that does not exist.
+        if scope == "local" and real == shared_workflows().resolve():
+            scope = "machine-wide"
         for d in sorted(p for p in root.iterdir() if p.is_dir()):
             if not config_yaml(d).is_file():
                 continue
