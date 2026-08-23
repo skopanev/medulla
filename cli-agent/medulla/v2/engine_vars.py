@@ -124,3 +124,34 @@ class VarsMixin:
     # (decision: apply to self.vars so the body render sees them; pool at
     # max_parallel>1: record to manifest + local ctx), and body/post vars come
     # back as pending_vars for the caller to apply per the fold law.
+
+    def vars_the_action_may_set(self, action, produced: dict[str, str],
+                                node_name: str) -> dict[str, str]:
+        """Filter <signal:var> from a BODY by who wrote it.
+
+        A shell body is code the workflow author committed; an agent body is a model's
+        stdout. Only the first may hand a value to a later step. Anything an agent
+        emits is honoured only when the node declared it:
+
+            agent: {harness: codex, sets: [SCOPE, FINDINGS]}
+
+        Default is empty, so a workflow written before this field gains the protection
+        instead of keeping the old behaviour. Routing signals are untouched — a step
+        saying what happened is how the graph works. This is only about a value a
+        LATER, DIFFERENT step will trust: a frozen digest, a push destination, a
+        working-tree fingerprint. One line of agent stdout used to retire all of them.
+
+        An ignored attempt is LOGGED, never silently dropped — otherwise the next
+        person debugging spends an hour on a value that never arrived.
+        """
+        if not produced or action.kind != "agent":
+            return produced
+        allowed = set(action.agent.sets or ())
+        kept = {k: val for k, val in produced.items() if k in allowed}
+        refused = [k for k in produced if k not in allowed]
+        if refused:
+            how = (f"declare them in agent.sets: {sorted(set(refused) | allowed)}"
+                   if allowed else "agent.sets is empty — declare the ones it may set")
+            log(f"  [{node_name}] ignored var(s) from the agent: {', '.join(sorted(refused))}"
+                f" — {how}")
+        return kept

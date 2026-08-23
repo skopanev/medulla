@@ -46,12 +46,19 @@ def _parse_agent(raw, where: str) -> AgentSpec:
         harness = raw.get("harness")
         if not isinstance(harness, str) or not harness.strip():
             raise _err(f"{where}: agent.harness is required and must be a string")
-        unknown = set(raw) - {"harness", "model", "effort", "sandbox", "args"}
+        unknown = set(raw) - {"harness", "model", "effort", "sandbox", "args", "sets"}
         if unknown:
             raise _err(f"{where}: unknown agent fields: {sorted(unknown)}")
         args = raw.get("args", [])
         if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
             raise _err(f"{where}: agent.args must be a list of strings")
+        from .contract import VAR_NAME_RE  # local: contract.py imports this module
+        sets = raw.get("sets", [])
+        if not isinstance(sets, list) or not all(isinstance(k, str) for k in sets):
+            raise _err(f"{where}: agent.sets must be a list of var names")
+        bad = [k for k in sets if not VAR_NAME_RE.match(k)]
+        if bad:
+            raise _err(f"{where}: agent.sets: not var names: {bad}")
         sandbox = _opt_str(raw.get("sandbox"), f"{where}: agent.sandbox")
         # A literal level is checked here so a typo fails --validate, not mid-run.
         # A templated value (harness/model/effort do the same) can only resolve after
@@ -64,6 +71,7 @@ def _parse_agent(raw, where: str) -> AgentSpec:
             effort=_opt_str(raw.get("effort"), f"{where}: agent.effort"),
             sandbox=sandbox,
             args=args,
+            sets=[k.strip() for k in sets],
         )
     raise _err(f"{where}: agent must be a string (harness shortcut) or a mapping")
 

@@ -44,6 +44,13 @@ class AgentSpec:
     effort: str | None = None
     sandbox: str | None = None          # "read-only"; None/"danger" -> today's behavior
     args: list[str] = field(default_factory=list)
+    # Vars this agent is ALLOWED to set from its own stdout. Empty (the default) means
+    # none: an agent's <signal:var> is ignored and logged. Routing signals are
+    # untouched — a step saying what happened is the design. Handing a value to a
+    # LATER, DIFFERENT step that will trust it is a different power, and a workflow
+    # that freezes a digest, a push URL or a tree fingerprint before any agent runs
+    # has no protection at all if one line of agent stdout can retire them.
+    sets: list[str] = field(default_factory=list)
 
 
 @dataclass

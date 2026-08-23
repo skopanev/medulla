@@ -197,7 +197,11 @@ class AttemptsMixin(BodyMixin):
             events = pre_events + body_scan.events + post_scan.events
             silent_ok = pool_mode and decision.verdict is Verdict.SILENT
             if decision.verdict is Verdict.ROUTE or silent_ok:
-                pending = {**body_scan.vars, **post_scan.vars}   # post wins on conflict
+                # The body's vars pass the who-wrote-this gate first; the post hook
+                # is shell the author committed, so its vars are honoured as before.
+                body_vars = self.vars_the_action_may_set(
+                    current, body_scan.vars, node.name)
+                pending = {**body_vars, **post_scan.vars}   # post wins on conflict
 
             signal = move.signal
             if signal == SIG_FAILED:

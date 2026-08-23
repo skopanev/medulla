@@ -70,6 +70,7 @@ A node runs exactly one of `shell:` (a command) or `agent:` (an AI harness). The
 ```
 <signal:NAME>short message</signal:NAME>       route the graph (the message travels with it)
 <signal:var key=K>value</signal:var>           set a workflow var (never routes)
+                                              agents: only what agent.sets declares
 <signal:update>progress line</signal:update>   progress only (never routes)
 ```
 
@@ -219,6 +220,19 @@ Rule of thumb: **data flows to shell via env** (quoting-safe — `"$MEDULLA_INPU
 ### vars vs .env vs docker vars
 
 - `vars:` — workflow **data**: templated, exported to env, persisted in run history, mutable via `<signal:var>`. Reserved names (`PATH`, `HOME`, `LD_*`, `MEDULLA_*`, …) are rejected.
+
+  A **shell** body may set any var — it is code the workflow author committed. An
+  **agent** body may set only what its node declares, and nothing by default:
+
+  ```yaml
+  agent: {harness: codex, sandbox: read-only, sets: [SCOPE, FINDINGS]}
+  ```
+
+  Anything else it emits as `<signal:var>` is ignored and logged. The reason is that
+  a workflow's integrity anchors — a frozen contract digest, a push destination, a
+  working-tree fingerprint computed before any agent runs — are all vars, and a step
+  that trusts one must be able to trust it came from the author. Routing signals from
+  an agent are untouched: saying what happened is how the graph works.
 - `.env` — **secrets**: env-only, never templated, never persisted.
 - `IMAGE` / `DOCKERFILE` vars — docker image selection (see [Docker](#docker)).
 
