@@ -10,7 +10,8 @@ description: |
   the question, this is the wrong tool. Colloquially this panel is the
   "братва" (the crew) — "запусти братву" / "спроси братву" means run
   this skill; a "панелист" is one member of the братва.
-effort: high
+requires: medulla + docker (the panel runs in a container; `spar-run.sh` checks both
+  before it starts and says which one is missing)
 ---
 
 You're consulting an independent panel — the "братва" (the crew) — for
@@ -19,8 +20,12 @@ someone says "запусти братву", "собери братву" or "сп
 they mean run this panel. Each member ("панелист") is one model in the
 братва. The panel does not see this conversation, your codebase, or your
 prior reasoning. Everything they need to give a useful answer has to be
-in the prompt you build. **DO NOT TRY TO CONVINCE THEM OF ANYTHING. YOUR
-JOB IS TO PROVOKE THEM, NOT TO ALIGN THEM.**
+in the prompt you build.
+
+**Provoke them, do not align them.** These are not in tension, though they look it:
+name your leaning as a TARGET ("we are leaning toward X — take it apart"), never as a
+conclusion the panel is asked to bless ("we should do X, please critique"). The first
+hands them something to attack; the second buys agreement. Same fact, opposite round.
 
 # Build the prompt
 
@@ -36,20 +41,16 @@ Cover:
   the panel can attack it.
 - **The stuck point.** Where your reasoning runs out, what data
   you don't have, what you genuinely cannot decide alone.
-- **Zero agent bias (CRITICAL).** You, the agent writing this prompt, MUST NOT
-  solve the problem in advance and MUST NOT lead the witness. Do not pre-digest
-  the situation so your preferred answer looks like the only logical one. State
-  the raw facts, the conflicting constraints, and the options as they actually
-  stand. "I think we should do X, please critique" is a failure: it buys
-  agreement, not scrutiny. Let the panel do the thinking.
-- **Do not fence the search either.** Listing the three things you want checked is
-  a frame just as much as naming the answer is: whatever is not on your list gets
-  looked at last, or not at all — and the defect you did not think to list is
-  precisely the one worth a panel. Name the surface, not the checklist: which change,
-  which files, which callers, and then ask what is wrong with it. Your own suspicions
-  belong at the END, marked as yours, after you have asked the open question — never
-  as the agenda the round is organised around. If a panelist comes back with
-  something you never mentioned, the brief did its job.
+- **Do not lead, and do not fence.** Two halves of one rule, and the second is the
+  one people miss. Leading is telling them the answer: "we should do X, please
+  critique" buys agreement, not scrutiny. Fencing is telling them where to look —
+  listing the three things you want checked frames a round just as surely, because
+  whatever is off the list gets looked at last or not at all, and the defect nobody
+  thought to list is exactly the one worth a panel. So: state the raw facts, the
+  conflicting constraints and the options as they stand; name the SURFACE (which
+  change, which files, which callers) and ask what is wrong with it; put your own
+  suspicions at the END, marked as yours. If a panelist returns something you never
+  mentioned, the brief did its job.
 - **Files in the repo (point, don't paste).** The panel runs as full
   agents with file-read and search tools. Point them at files and
   directories — "look at `src/payments/`, the deposit handler, the
@@ -60,14 +61,7 @@ Cover:
   code outside the current workspace: `--mount ../folder1 [--mount ../folder2] ...`
   Point the panel at them in the prompt — they can't search what
   isn't mounted.
-- **Framing.** Give the raw situation, not your solution — build an arena for
-  them to fight in, do not hand them a script. Your ideas
-  belong in the brief — but as options to consider, not as the only
-  path. Leave room for the panel to say "you're solving the wrong
-  problem" or "here's an option you didn't consider." If you hand
-  them a fully-formed plan, they'll critique the plan instead of
-  questioning whether it's the right plan. If you do pick a format,
-  these are starting points, not a menu:
+- **Pick a shape, not a script.** These are starting points, not a menu:
    - Sparring with verdicts (COMMIT / DRAW / INSUFFICIENT) for
      binary or near-binary calls with stakes.
    - Multiple-lens roleplay (assign each panelist a distinct role —
@@ -75,82 +69,37 @@ Cover:
      organizational, or judgment calls.
    - Red-team for plans about to execute.
    - Whatever else suits the situation.
-- **Demands.** These are words you WRITE INTO THE PROMPT — not medulla settings,
-  not workflow config. The panelists only obey what your prompt says, so spell
-  out: depth, dissent, the strongest counter, the blind spot you're least likely
-  to see, no sycophancy, mark each cited fact `(R)` for confirmed or `(G)` for
-  guess. Aim ~700 words — but a REPRODUCTION BEATS BREVITY: never truncate the
-  steps that show HOW a defect happens. The `## FINDINGS` list is the compression;
-  the argument above it may run long when it is carrying evidence.
+- **Demands — only the ones your question needs.** The standing rules already reach
+  every panelist through the workflow's own prompt: investigate before answering,
+  no sycophancy, `(R)` for what you verified and `(G)` for what you guessed, report
+  EVERY defect rather than the worst one, close with `## FINDINGS`. Do not restate
+  them; you are spending the panel's attention twice. Add only what is specific to
+  this question — the lens you want (skeptic, operator, red-team), the verdict shape
+  you need, the blind spot you suspect is yours.
 
 # Run the panel
 
-No preflight needed: a repo without its own copy falls back to the machine-wide
-definition in `~/.medulla/workflows/spar/`. A local `workflow.yaml` wins if present.
+    spar-run.sh start question.md                 # prints the run dir
+    spar-run.sh start question.md --mount ../repo # repeatable, read-only
+    spar-run.sh wait  <run-dir>                   # blocks until it finishes
 
-Mechanical contract — invoke verbatim, substituting your built prompt
-for the heredoc body (quoted 'EOF' keeps `$(...)`, backticks and
-quotes in the prompt inert). Add `--mount ../repo` (repeatable, read-only) for
-every sibling repo the panel must be able to read:
+The script lives beside the workflow — `.medulla/workflows/spar/scripts/spar-run.sh`
+locally, `~/.medulla/workflows/spar/scripts/spar-run.sh` machine-wide. Write your
+prompt to a file and hand it that file; nothing about the question passes through a
+shell argument, so quoting, `$`, backticks and length stop mattering.
 
-    BOX="$PWD/.medulla/panel-runs"        # in the project, beside it, never in /tmp
-    mkdir -p "$BOX"
-    grep -q '^\.medulla/panel-runs/' .gitignore 2>/dev/null \
-      || echo '.medulla/panel-runs/' >> .gitignore
-    cat > "$BOX/question.md" <<'EOF'
-    <your prompt>
-    EOF
-    # Sibling repos: insert `--mount ../path` (repeatable) before --var-file.
-    medulla --print-run-dir --docker --cwd-ro --runs-folder "$BOX" \
-      -w .medulla/workflows/spar \
-      --var-file "QUESTION=$BOX/question.md" >"$BOX/run.log" 2>"$BOX/err.log" &
-    PID=$!
-    # The run dir is printed within a second — the host now names the run rather than
-    # waiting for the container. Watch the PROCESS too: if medulla dies before printing
-    # — bad yaml, Docker not running, an image that must be built first — waiting on
-    # the file alone hangs forever.
-    while [ ! -s "$BOX/run.log" ] && kill -0 "$PID" 2>/dev/null; do sleep 1; done
-    if [ ! -s "$BOX/run.log" ]; then
-        echo "ERROR: medulla failed to start:"; cat "$BOX/err.log"; exit 1
-    fi
-    run=$(head -1 "$BOX/run.log")
-    echo "panel running in background (pid $PID), run dir: $run"
+It is a script and not a command for you to reproduce because this repo's own
+AGENTS.md says LLMs cannot be trusted to run exact commands — and the contract it
+replaced had a heredoc, a background job, a poll loop and a `$PID` in it. The script
+checks medulla, docker and the workflow before starting, keeps the run's history out
+of the tree under review, adds the box to `.gitignore` (saying so), and refuses to
+report a run directory it cannot vouch for.
 
-**Run it from the project ROOT.** That directory is what gets mounted as
-`/workspace`, what `-w .medulla/workflows/spar` is resolved against, and what `$BOX`
-is named after — start from a subdirectory and the panel reviews a slice of the repo
-under a box named after that slice. The root is the launch point even when the
-question is about one file deep inside it.
-
-**Why the flags, and why $BOX.** A panel reads the tree and must not write it —
-three rounds left something behind (a dangling symlink, a file staged in the agent's
-index, a stray `test.sh`), and at review time none of it is distinguishable from real
-work. `--cwd-ro` mounts the workspace read-only; `--runs-folder` gives the run
-somewhere else to write, and it is required — read-only alone would leave the run
-nowhere to go. The shell redirects go to `$BOX` for the same reason: they are written
-by the HOST shell, so `--cwd-ro` cannot stop them landing in the repo.
-
-**The question travels as a FILE.** `--var-file QUESTION=…` reads it straight off
-disk, so nothing about it passes through a shell argument: no quoting to get wrong, no
-length limit to hit, and every newline arrives as written. A shell variable that lost
-its content sets an EMPTY question and the panel spends ten minutes answering nothing —
-an empty file is refused outright instead.
-
-`$BOX` lives **in the project**, at `.medulla/panel-runs/`. It is mounted writable at
-its own path, so it stays writable while everything around it is read-only, and the
-run directory printed by `--print-run-dir` opens on the host unchanged. Do not put it
-in `/tmp`: the VM shares only part of the filesystem, and a path it cannot see is
-mounted as an empty root-owned directory instead — medulla checks for this and refuses
-to start, but the run you wanted is still not running. Add `.medulla/panel-runs/` to
-`.gitignore` — the snippet above does it, so nobody has to remember.
-
-This script returns in ~20s with the run dir; the panel keeps working in the
-background for its 10-20 minutes. **Do not sit and wait on it** — go do other
-work and come back for the artifacts.
-
-**Do not paste `--mount` away.** If the question touches code outside this
-workspace, the mounts belong in the command above — a panel that cannot read a
-repo will confidently reason about it from the brief alone.
+`start` returns in about a second and the panel keeps working for 10-20 minutes. Do
+not sit on it: go do other work, then `wait` — it blocks until `outcome.json` exists,
+lists what was delivered, and exits non-zero if the run failed or never finished (45
+minutes by default, `--timeout` to change). A hang and a verdict need different
+reactions, so it distinguishes them.
 
 When the run finishes, LIST the artifacts and then read them **one file at a
 time with your own file-reading tool**:
