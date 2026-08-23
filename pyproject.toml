@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "medulla"
-version = "4.25.0"
+version = "4.25.1"
 description = "medulla — a state machine for AI agents (nodes, signals, pools)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,6 +17,7 @@ medulla = "medulla.cli:entry"
 packages = [
   "medulla",
   "medulla.scripts",
+  "medulla.scripts.dockerlib",
   "medulla.v2",
   "medulla.workflows",
   "medulla.workflows.spar",
@@ -27,8 +28,10 @@ packages = [
 [tool.setuptools.package-dir]
 "medulla" = "cli-agent/medulla"
 "medulla.scripts" = "cli-agent/scripts"
+"medulla.scripts.dockerlib" = "cli-agent/scripts/dockerlib"
 "medulla.workflows" = "cli-agent/workflows"
 
 [tool.setuptools.package-data]
 "medulla.scripts" = ["*.py", "*.sh", "Dockerfile.default"]
+"medulla.scripts.dockerlib" = ["*.py"]
 "medulla.workflows" = ["**/*"]

@@ -207,7 +207,12 @@ def build_volumes(claude_home, mount_agy=True, *,
 
 
 def _mount_init_docker(vols: list) -> None:
-    src = Path(__file__).parent / "init-docker.sh"
+    # SCRIPT_DIR, not __file__.parent: this module lives one level down in dockerlib/
+    # now, and init-docker.sh stayed beside docker.py. Getting it wrong mounts nothing
+    # and the container dies on `exec /mnt/init-docker.sh: No such file or directory`
+    # — with the file plainly present on the host, which reads as anything but a
+    # missing mount.
+    src = SCRIPT_DIR / "init-docker.sh"
     if src.is_file():
         vols.extend(["-v", f"{src}:/mnt/init-docker.sh:ro"])
 

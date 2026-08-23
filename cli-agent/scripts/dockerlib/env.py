@@ -10,7 +10,10 @@ import os
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(os.path.realpath(__file__)).parent.parent
+# .parent.parent.parent: this file is scripts/dockerlib/env.py, and medulla/ lives
+# beside scripts/, not inside it. The siblings compute SCRIPT_DIR first for the same
+# reason — one level was lost when these modules moved down into dockerlib/.
+PROJECT_ROOT = Path(os.path.realpath(__file__)).parent.parent.parent
 try:
     from medulla.v2.workflow_path import workflow_dir_for
 except ImportError:                                   # running from a source checkout
