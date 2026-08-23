@@ -45,6 +45,7 @@ def _agy_trusted(workdir: Path) -> bool:
 
 class AgyAdapter(HarnessAdapter):
     name = "agy"
+    session_key = "conversation_id"
     binary = "agy"
 
     def prepare(self, spec, workdir):
@@ -63,7 +64,7 @@ class AgyAdapter(HarnessAdapter):
                 f"once (open `agy` there interactively, or add the path to "
                 f"\"trustedWorkspaces\" in {_AGY_SETTINGS}).")
 
-    def build(self, spec, prompt_file, prompt_text, timeout_s):
+    def build(self, spec, prompt_file, prompt_text, timeout_s, resume=None):
         # sandbox → agy `--mode plan`, exactly as claude maps it to `--permission-mode
         # plan`. This used to raise "not expressible": true when agy offered only the
         # boolean `--sandbox` (terminal restrictions, no write protection), stale since
@@ -85,6 +86,8 @@ class AgyAdapter(HarnessAdapter):
                 "--print-timeout", f"{int(timeout_s) + INNER_SLACK_S}s"]
         if spec.model:
             argv += ["--model", AGY_MODEL_ALIASES.get(spec.model, spec.model)]
+        if resume:
+            argv += ["--conversation", resume]   # before --print; see the note below
         argv += spec.args
         # --print MUST be last: it consumes the next token as the prompt value.
         # Any flag placed after it silently becomes the prompt (verified v1.0.4).

@@ -15,8 +15,9 @@ from ..harness_base import (
 class ClaudeAdapter(HarnessAdapter):
     name = "claude-code"
     binary = "claude"
+    session_key = "session_id"
 
-    def build(self, spec, prompt_file, prompt_text, timeout_s):
+    def build(self, spec, prompt_file, prompt_text, timeout_s, resume=None):
         # sandbox → claude permission modes. `plan` is the only mode that refuses
         # edits outright, so it is what read-only means here.
         ro = _read_only(spec)
@@ -27,6 +28,8 @@ class ClaudeAdapter(HarnessAdapter):
             argv += ["--model", spec.model]
         if spec.effort:
             argv += ["--effort", spec.effort]   # low|medium|high|xhigh|max (claude --help)
+        if resume:
+            argv += ["--resume", resume]     # same conversation, second turn
         argv += ["--append-system-prompt-file", str(prompt_file)]
         argv += spec.args
         argv += ["-p", "Execute."]

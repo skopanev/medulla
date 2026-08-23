@@ -39,6 +39,12 @@ environment the engine provides to bodies and hooks (agents: read this, it is th
     MEDULLA_BODY_RC / MEDULLA_BODY_SIGNAL
                             the body attempt's exit code and its raw signal (if any)
 
+agent nodes (fields beyond harness/model/effort/sandbox/args):
+    sets: [K, ...]          vars this agent may set from stdout; empty (default) = none
+    session: <name>         name a conversation: the first node with the name opens it,
+                            every later one continues it. Recorded in <run>/sessions.json;
+                            templated, so a pool uses "panel-{{input.slug}}"
+
 docker (host-side, handled by scripts/docker.py before the engine starts):
     medulla --docker -w <dir> ...   run inside the workflow's image
     --build                         force a no-cache image rebuild

@@ -236,6 +236,23 @@ Rule of thumb: **data flows to shell via env** (quoting-safe — `"$MEDULLA_INPU
 - `.env` — **secrets**: env-only, never templated, never persisted.
 - `IMAGE` / `DOCKERFILE` vars — docker image selection (see [Docker](#docker)).
 
+- `session:` on an agent — **name a conversation**. The first node to use the name
+  opens it; every later node with the same name continues it, so the agent still
+  remembers what it did:
+
+  ```yaml
+  work:   {agent: {harness: claude-code, session: land}, ...}
+  fixup:  {agent: {harness: claude-code, session: land}, ...}   # same conversation
+  ```
+
+  The id is recorded in `<run>/sessions.json` and belongs to that run — a new run
+  starts a new conversation. Templated, so a pool gives each input its own
+  (`session: "panel-{{input.slug}}"`); parallel agents sharing one name is an author
+  error, and the first to answer keeps it. Continuing across harnesses is refused:
+  a claude id means nothing to codex, and failing here beats an agent that silently
+  did not answer. Each CLI's own way of continuing is the adapter's business —
+  `--resume`, `exec resume`, `--session`, `--conversation`.
+
 ## Examples
 
 ### Full workflow

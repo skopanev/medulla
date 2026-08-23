@@ -10,6 +10,7 @@ import datetime
 import fcntl
 import json
 import os
+import sys
 import threading
 import uuid
 from pathlib import Path
@@ -32,8 +33,55 @@ class RunStore:
         self.run_id = run_id
         self.steps_dir = run_dir / "steps"
         self._journal_lock = threading.Lock()
+        self._session_lock = threading.Lock()
         self._step_counter = 0
         self._lock_fd = None
+
+    # ── sessions ────────────────────────────────────────────────────────────
+    # <run>/sessions.json maps a workflow's session NAME to the id the CLI handed
+    # back. It lives in the run, not the workflow: a conversation belongs to one
+    # execution, and a resumed run legitimately picks up the ids it recorded before
+    # it was interrupted. A pool writes here from several threads at once.
+
+    def session_entry(self, name: str) -> dict | None:
+        """{"id": ..., "harness": ...} for a named conversation, or None if this run
+        has not opened it yet — which is not an error, it is the first turn."""
+        try:
+            data = json.loads((self.dir / "sessions.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        entry = data.get(name)
+        return entry if isinstance(entry, dict) else None
+
+    def session_id_for(self, name: str) -> str | None:
+        entry = self.session_entry(name)
+        return entry.get("id") if entry else None
+
+    def record_session(self, name: str, session_id: str, harness: str) -> None:
+        """First writer wins.
+
+        A pool of agents sharing one session name would otherwise have the last
+        thread to finish decide which conversation the NEXT node continues — a
+        coin flip between five panelists. Keeping the first is at least stable,
+        and the log line below is what tells the author their name is not unique.
+        """
+        path = self.dir / "sessions.json"
+        with self._session_lock:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                data = {}
+            if name in data:
+                if data[name].get("id") != session_id:
+                    print(f"[medulla] session '{name}' already belongs to "
+                          f"{data[name].get('id')}; keeping it (a second agent claimed "
+                          f"{session_id} — give parallel agents distinct session names)",
+                          file=sys.stderr, flush=True)
+                return
+            data[name] = {"id": session_id, "harness": harness}
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+            tmp.replace(path)
 
     def _acquire_flock(self) -> None:
         fd = os.open(self.dir / ".lock", os.O_CREAT | os.O_RDWR)

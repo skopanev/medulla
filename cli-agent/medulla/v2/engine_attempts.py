@@ -132,6 +132,7 @@ class AttemptsMixin(BodyMixin):
                             failure_class="harness",
                         )
                     raise EngineCrash(E_HARNESS, fatal, node=node.name)
+                self.capture_session(adapter, agent_spec, raw_text)
                 raw_text = adapter.filter_stdout(raw_text)
             body_scan = scan_stdout(raw_text, known)
 

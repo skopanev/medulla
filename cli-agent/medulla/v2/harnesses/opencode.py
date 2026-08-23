@@ -15,15 +15,18 @@ from ..harness_base import (
 
 class OpenCodeAdapter(HarnessAdapter):
     name = "opencode"
+    session_key = "sessionID"
     binary = "opencode"
 
-    def build(self, spec, prompt_file, prompt_text, timeout_s):
+    def build(self, spec, prompt_file, prompt_text, timeout_s, resume=None):
         # --format json for the same reason as agy: the default buffers the answer and
         # hands it over at the end, so a working panelist looks like a hung one
         # (measured on opencode 1.18.19: events at +2s/+3s versus one block at the
         # close). It also ends the guessing — the answer arrives as `text` parts, so
         # tool output can no longer be mistaken for a signal.
         argv = ["opencode", "run", "--format", "json", "--agent", "build"]
+        if resume:
+            argv += ["--session", resume]
         if spec.model:
             argv += ["-m", spec.model]
         argv += spec.args

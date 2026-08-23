@@ -51,6 +51,11 @@ class AgentSpec:
     # that freezes a digest, a push URL or a tree fingerprint before any agent runs
     # has no protection at all if one line of agent stdout can retire them.
     sets: list[str] = field(default_factory=list)
+    # Name a CONVERSATION this node joins. The first node to use a name starts it;
+    # every later node with the same name continues it, with everything the first
+    # turn learned still in context. Templated, so a pool gives each input its own
+    # ("panel-{{input.slug}}"). Unset means what it always meant: a fresh agent.
+    session: str | None = None
 
 
 @dataclass

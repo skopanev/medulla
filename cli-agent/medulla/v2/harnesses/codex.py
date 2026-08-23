@@ -16,6 +16,7 @@ from ..harness_base import (
 
 class CodexAdapter(HarnessAdapter):
     name = "codex"
+    session_key = "thread_id"    # codex calls the conversation a thread
     binary = "codex"
 
     def __init__(self):
@@ -27,17 +28,22 @@ class CodexAdapter(HarnessAdapter):
                 E_HARNESS,
                 f"harness '{self.name}': 'codex' not on PATH")
 
-    def build(self, spec, prompt_file, prompt_text, timeout_s):
+    def build(self, spec, prompt_file, prompt_text, timeout_s, resume=None):
         bin_ = "codex"
         inner_ms = (int(timeout_s) + INNER_SLACK_S) * 1000
         # sandbox: codex has native modes, so this maps exactly. The historical
         # default stays `danger` — the container IS the sandbox for most workflows,
         # and tightening it silently would break every existing one.
         ro = _read_only(spec)
-        argv = [bin_, "exec", "--json", "--skip-git-repo-check"]
-        argv.insert(3, "-s" if ro else "--dangerously-bypass-approvals-and-sandbox")
+        # `codex exec resume <id>` is a SUBCOMMAND, not a flag: the id follows it and
+        # the prompt still rides stdin. Building it as `exec --json ... resume <id>`
+        # would be parsed as a prompt, so the resume word goes in right after exec.
+        argv = [bin_, "exec", *(["resume", resume] if resume else []),
+                "--json", "--skip-git-repo-check"]
+        at = 4 if resume else 2
+        argv.insert(at, "-s" if ro else "--dangerously-bypass-approvals-and-sandbox")
         if ro:
-            argv.insert(4, "read-only")
+            argv.insert(at + 1, "read-only")
         if spec.model:
             argv += ["-c", f'model="{spec.model}"']
         if spec.effort:

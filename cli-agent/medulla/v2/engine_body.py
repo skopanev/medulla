@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .engine_scan import AttemptsOutcome, _tail, _timeout_env, scan_stdout
+from .engine_scan import AttemptsOutcome, _tail, _timeout_env, log, scan_stdout
 from .errors import E_RENDER, EngineCrash
 from .harness import resolve as resolve_harness
 from .model import HOOK_TIMEOUT_S, SIG_FAILED, Action, Node
@@ -45,9 +45,12 @@ class BodyMixin:
         # an arg rendering empty is absent (never the literal template text back)
         args = [r for a in spec.args
                 if (r := render_fn(a, "agent.args", required=False)).strip()]
+        session = (render_fn(spec.session, "agent.session", required=False).strip()
+                   if spec.session else "")
         from .model import AgentSpec
         rendered_spec = AgentSpec(harness=harness, model=model or None,
-                                  effort=effort or None, sandbox=sandbox or None, args=args)
+                                  effort=effort or None, sandbox=sandbox or None,
+                                  args=args, sets=spec.sets, session=session or None)
 
         adapter = resolve_harness(rendered_spec)
         adapter.prepare(rendered_spec, self.workdir)   # idempotent preflight (agy trust, opencode.json)
@@ -65,7 +68,27 @@ class BodyMixin:
         full_prompt = prompt_text + SIGNAL_PROTOCOL
         prompt_file.write_text(full_prompt, encoding="utf-8")
         timeout_s = self._clamp(self.p.action_timeout(action))
-        invoke = adapter.build(rendered_spec, prompt_file, full_prompt, timeout_s)
+        # Continue the named conversation if this run already opened one. The FIRST
+        # node to name it starts it; the id is recorded when that node's body returns.
+        # A named session whose id is not on file yet is not an error — it is the
+        # first turn.
+        entry = self.store.session_entry(session) if session else None
+        if entry and entry.get("harness") != harness:
+            # A claude session id handed to codex is not a resume, it is a lookup that
+            # fails inside the CLI — which surfaces as an agent that "just did not
+            # answer". Say it here, where the name and both harnesses are still known.
+            raise EngineCrash(
+                E_RENDER,
+                f"session '{session}' was opened by harness "
+                f"'{entry.get('harness')}' and this node runs '{harness}' — a "
+                f"conversation cannot move between CLIs. Use a different session name "
+                f"for the {harness} node.",
+                node=node.name)
+        resume = entry.get("id") if entry else None
+        if resume:
+            log(f"  [{node.name}] continuing session '{session}' ({resume})")
+        invoke = adapter.build(rendered_spec, prompt_file, full_prompt, timeout_s,
+                               resume=resume)
         return invoke, prompt_text, rendered_spec
 
     # ── decision node: the seam + decision-node policy (fold law application) ──
@@ -120,3 +143,17 @@ class BodyMixin:
 
         apply_pre_vars(scan.vars)          # env prep BEFORE the body renders
         return None, updates, events
+
+    def capture_session(self, adapter, agent_spec, raw_stdout: str) -> None:
+        """Record the conversation id this attempt just created, if the node named one.
+
+        Called BEFORE filter_stdout: the id lives in the CLI's own event stream, which
+        the filter exists to throw away. Called on every attempt rather than only a
+        successful one — a retry that dies still opened a conversation, and the store
+        keeps the first id it is given.
+        """
+        if agent_spec is None or not agent_spec.session:
+            return
+        sid = adapter.session_id(raw_stdout)
+        if sid:
+            self.store.record_session(agent_spec.session, sid, agent_spec.harness)

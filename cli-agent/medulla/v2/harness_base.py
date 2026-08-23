@@ -6,6 +6,7 @@ scrolling past agy's.
 """
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -97,8 +98,42 @@ class HarnessAdapter:
         """Idempotent preflight/setup before a phase's first attempt. May raise
         E_HARNESS only for unresolvable conditions (the razor)."""
 
+    # ── sessions ────────────────────────────────────────────────────────────
+    # A workflow that hands work to an agent, acts on the result OUTSIDE the
+    # container and then needs the agent again cannot reach it: every agent node
+    # is a fresh conversation, so the second turn re-derives what the first knew.
+    # A rejected push or a rebase conflict is exactly when that context is worth
+    # most. Each CLI names its own handle, so the adapter owns both halves:
+    # finding the id in the output, and asking to continue from it.
+    session_key = ""       # the JSON field this CLI reports its id under; "" = no sessions
+
+    def session_id(self, stdout: str) -> str | None:
+        """The conversation id this run just created, mined from raw stdout.
+
+        Reads the FIELD, not a regex over prose: every one of these CLIs emits it in
+        structured output (claude session_id, codex thread_id, opencode sessionID,
+        agy conversation_id) and the first occurrence is the one that identifies the
+        conversation the whole run belonged to.
+        """
+        if not self.session_key:
+            return None
+        needle = f'"{self.session_key}"'
+        for line in stdout.splitlines():
+            if needle not in line:
+                continue
+            line = line.strip()
+            if not line.startswith("{"):
+                line = line[line.index("{"):] if "{" in line else line
+            try:
+                found = _find_key(json.loads(line), self.session_key)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if found:
+                return found
+        return None
+
     def build(self, spec: AgentSpec, prompt_file: Path, prompt_text: str,
-              timeout_s: float) -> Invoke:
+              timeout_s: float, resume: str | None = None) -> Invoke:
         raise NotImplementedError
 
     def filter_stdout(self, stdout: str) -> str:
@@ -136,3 +171,25 @@ class HarnessAdapter:
         return None
 
 
+def _find_key(node, key: str) -> str | None:
+    """First value for `key` anywhere in a decoded JSON structure.
+
+    Nested because the CLIs disagree about depth: agy puts the id at the top level,
+    claude alongside a hook payload. Looking only at the top level found the id for
+    one harness and silently not for another — a session that never resumes and no
+    error to explain why.
+    """
+    if isinstance(node, dict):
+        val = node.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+        for v in node.values():
+            found = _find_key(v, key)
+            if found:
+                return found
+    elif isinstance(node, list):
+        for v in node:
+            found = _find_key(v, key)
+            if found:
+                return found
+    return None
