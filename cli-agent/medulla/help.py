@@ -25,10 +25,18 @@ from .v2.workflow_path import config_yaml, shared_workflows
 def _discover() -> list[tuple[str, Path, str]]:
     found: list[tuple[str, Path, str]] = []
     seen: set[str] = set()
+    roots_done: set[Path] = set()
     for root, scope in ((Path.cwd() / ".medulla" / "workflows", "local"),
                         (shared_workflows(), "machine-wide")):
         if not root.is_dir():
             continue
+        # Run from $HOME and the two roots ARE the same directory — every workflow
+        # got listed twice, the second time as "shadowed by the local copy" by
+        # itself. Compare the resolved path, not the spelling.
+        real = root.resolve()
+        if real in roots_done:
+            continue
+        roots_done.add(real)
         for d in sorted(p for p in root.iterdir() if p.is_dir()):
             if not config_yaml(d).is_file():
                 continue

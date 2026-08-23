@@ -109,3 +109,13 @@ def test_help_word_is_a_subcommand(sandbox, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["medulla", "help"])
     assert entry() == 0
     assert "RUN ONE" in capsys.readouterr().out
+
+
+def test_run_from_home_lists_each_workflow_once(sandbox, monkeypatch):
+    """From $HOME the local root and the machine-wide root are the SAME directory —
+    listing it twice made a workflow look like it shadowed itself."""
+    home, _ = sandbox
+    _make(home / ".medulla" / "workflows", "spar")
+    monkeypatch.chdir(home)
+    assert [n for n, _d, _s in mhelp._discover()] == ["spar"]
+    assert "shadowed" not in _page()
