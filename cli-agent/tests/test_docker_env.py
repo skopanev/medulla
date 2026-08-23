@@ -76,12 +76,12 @@ def test_shadow_mounts_tmpfs_and_no_block_is_byte_identical(dockerpy, tmp_path):
     assert dockerpy.read_shadow_paths(str(wdir)) == ["secrets", "sub/dir"]
 
     base = dockerpy.build_run_command("img", [], ["-w", "x"], "c1")
-    dockerpy.shadow_paths_for_run = ["secrets"]
+    dockerpy.dockerpaths.shadow_paths_for_run = ["secrets"]
     shadowed = dockerpy.build_run_command("img", [], ["-w", "x"], "c1")
     i = shadowed.index("--tmpfs")
     assert shadowed[i + 1] == "/workspace/secrets"
 
-    dockerpy.shadow_paths_for_run = []           # acceptance: no block ->
+    dockerpy.dockerpaths.shadow_paths_for_run = []           # acceptance: no block ->
     assert dockerpy.build_run_command("img", [], ["-w", "x"], "c1") == base
 
 
@@ -101,9 +101,9 @@ def test_env_file_unlinked_on_every_exit_path(dockerpy, tmp_path):
     # cleanup is now finally + atexit — must be idempotent (both fire).
     f = tmp_path / "medulla-env-x"
     f.write_text("TOKEN=secret\n", encoding="utf-8")
-    dockerpy.env_file_for_run = str(f)
+    dockerpy.dockerenv.env_file_for_run = str(f)   # it lives in dockerlib.env now
     dockerpy._unlink_env_file()
-    assert not f.exists() and dockerpy.env_file_for_run is None
+    assert not f.exists() and dockerpy.dockerenv.env_file_for_run is None
     dockerpy._unlink_env_file()                               # second call is a no-op
 
 
@@ -287,7 +287,7 @@ def test_overlay_carries_a_symlinked_package_directory_whole(dockerpy, tmp_path,
     vols = dockerpy.build_volumes(tmp_path / "claude-home", mount_agy=False)
     mounts = " ".join(vols)
     assert f"{wrapper}:/usr/local/bin/wrap:ro" in mounts          # the file, as before
-    assert f"{lib}:{dockerpy.CONTAINER_HOME}/.local/lib/pkg:ro" in mounts   # the package
+    assert f"{lib}:{dockerpy.dockermounts.CONTAINER_HOME}/.local/lib/pkg:ro" in mounts   # the package
 
 
 def test_sighup_does_not_kill_a_backgrounded_run(dockerpy):
