@@ -43,6 +43,13 @@ One line per finding, nothing merged:
 - (R|G) <claim> — <file:line or a concrete failure scenario> — <why it matters>
 
 Rules:
+- **Report EVERY defect you find, not the worst one.** Stopping at the first, or at
+  "the main issue", is the single most common way this panel wastes a round: the
+  round costs the same whether you return one finding or nine, and the ones you
+  swallowed come back as a second round days later. Sweep the whole surface the
+  question opens — every path through the change, every input that reaches it, every
+  caller that depends on it — and list all of it. There is no limit on how many
+  findings a panelist may return, and no reward for brevity here.
 - **One finding per line**, even if it feels minor, and even if you suspect the
   others will say the same thing. A finding only you saw is the most valuable
   thing you can return; a finding buried mid-paragraph is a finding lost.

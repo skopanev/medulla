@@ -42,6 +42,14 @@ Cover:
   the raw facts, the conflicting constraints, and the options as they actually
   stand. "I think we should do X, please critique" is a failure: it buys
   agreement, not scrutiny. Let the panel do the thinking.
+- **Do not fence the search either.** Listing the three things you want checked is
+  a frame just as much as naming the answer is: whatever is not on your list gets
+  looked at last, or not at all — and the defect you did not think to list is
+  precisely the one worth a panel. Name the surface, not the checklist: which change,
+  which files, which callers, and then ask what is wrong with it. Your own suspicions
+  belong at the END, marked as yours, after you have asked the open question — never
+  as the agenda the round is organised around. If a panelist comes back with
+  something you never mentioned, the brief did its job.
 - **Files in the repo (point, don't paste).** The panel runs as full
   agents with file-read and search tools. Point them at files and
   directories — "look at `src/payments/`, the deposit handler, the
