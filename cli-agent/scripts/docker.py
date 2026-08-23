@@ -49,7 +49,9 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 # Secrets: the three .env tiers, the Claude token fallback, the transient 0600 env-file.
+from dockerlib import announce  # noqa: E402
 from dockerlib import cliargs  # noqa: E402
+from dockerlib import mountpoints  # noqa: E402
 from dockerlib import env as dockerenv  # noqa: E402
 
 # What the container can see — dockerlib/mounts.py.
@@ -200,88 +202,17 @@ def main():
                 # live: the panel printed a run dir that could not be listed).
                 shared_runs_under = str(dest)
 
-    # Mount extra folders into /workspace/<name> (nested mount inside workspace)
-    #
-    # A nested mount needs its mount POINT to exist, and the daemon lays /workspace down
-    # first: under --cwd-ro it is read-only by the time the nested mount is applied, so
-    # the daemon cannot create /workspace/<name> and the run dies before it starts. That
-    # hits the one case the flag exists for — a panel launched from an empty box that
-    # brings every repository in with --mount. So the point is made HERE, on the host,
-    # where the directory is still writable, and removed again below.
+    # --var-file sources: mounted at their own absolute path, so the argument the engine
+    # receives is valid on both sides of the boundary.
     for src in var_files:
         volumes.extend(["-v", f"{src}:{src}:ro"])
 
-    workspace_root = Path(os.environ.get("PWD") or os.getcwd())
-    made_mountpoints: list[Path] = []
-    for mount_path, ro in extra_mounts:
-        p = Path(mount_path).resolve()
-        if not p.is_dir():
-            print(f"[docker.py] mount path not found: {p}", file=sys.stderr)
-            _remove_made_mountpoints(made_mountpoints)
-            return 1
-        if cwd_ro and not ro:
-            # A writable mount of the reviewed tree (or any part of it) hands back the
-            # write access --cwd-ro just took away, through a second door.
-            try:
-                p.relative_to(workspace_root)
-                inside = True
-            except ValueError:
-                inside = workspace_root == p
-            if inside:
-                print(f"[docker.py] --mount-rw {p} is inside the read-only workspace — "
-                      f"that would undo --cwd-ro", file=sys.stderr)
-                _remove_made_mountpoints(made_mountpoints)
-                return 1
-        if cwd_ro:
-            point = workspace_root / p.name
-            if not point.exists():
-                # Remember EVERY level created, not just the leaf: mkdir(parents=True)
-                # can make several, and rmdir on the leaf alone leaves the rest behind
-                # in a tree we promised not to touch.
-                missing = [q for q in [point, *point.parents]
-                           if not q.exists() and workspace_root in q.parents]
-                try:
-                    point.mkdir(parents=True)
-                except OSError as exc:
-                    print(f"[docker.py] cannot make mount point {point}: {exc}",
-                          file=sys.stderr)
-                    _remove_made_mountpoints(made_mountpoints)
-                    return 1
-                made_mountpoints.extend(missing)
-        suffix = ":ro" if ro else ""
-        volumes.extend(["-v", f"{p}:/workspace/{p.name}{suffix}"])
+    made_mountpoints, rc = mountpoints.prepare(volumes, extra_mounts, cwd_ro)
+    if rc:
+        return rc
 
-    # --print-run-dir, answered NOW. The engine used to print it, which meant waiting
-    # out the container bootstrap and its medulla upgrade — ~20s during which an
-    # orchestrator has nothing to attach to, and every caller grew the same polling
-    # loop. The name is decided here instead and handed in, so the path is known before
-    # the container exists. It also fixes whose clock names the run: the container's
-    # differs from the host's (a run started at 11:08 was named 09:08).
-    # A RESUMED run already has a directory, and it is not ours to name: the engine
-    # finds it from the journal. Printing a freshly invented path here would answer the
-    # caller with somewhere that will never exist, and the engine would print the real
-    # one seconds later — two lines, the wrong one first. So when resuming, step aside
-    # and let the engine print, exactly as before.
-    resuming = "--resume" in args or "--run" in args
-    run_dir_name = None
-    if not resuming and ("--print-run-dir" in args or "--print-run-json" in args):
-        import datetime
-        import uuid
-        run_dir_name = (datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                        + "-" + uuid.uuid4().hex[:8])
-        base = runs_folder or (runs_under_for(Path(workflow)) / "runs" if workflow
-                               else Path("runs"))
-        host_run_dir = Path(base) / run_dir_name
-        if "--print-run-json" in args:
-            import json as _json
-            args = [a for a in args if a != "--print-run-json"]
-            print(_json.dumps(
-                {"run_dir": str(host_run_dir), "runs_folder": str(base), "image": image,
-                 "started_at": datetime.datetime.now().isoformat(timespec="seconds")},
-                ensure_ascii=False), flush=True)
-        if "--print-run-dir" in args:
-            args = [a for a in args if a != "--print-run-dir"]
-            print(host_run_dir, flush=True)
+
+    args, run_dir_name = announce.announce(args, workflow, runs_folder)
 
     try:
         return run_docker(image, volumes, args, runs_under=shared_runs_under,

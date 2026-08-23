@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "medulla"
-version = "4.25.1"
+version = "4.26.0"
 description = "medulla — a state machine for AI agents (nodes, signals, pools)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -35,3 +35,17 @@ packages = [
 "medulla.scripts" = ["*.py", "*.sh", "Dockerfile.default"]
 "medulla.scripts.dockerlib" = ["*.py"]
 "medulla.workflows" = ["**/*"]
+
+# One rule, deliberately: file length. ruff has no equivalent (pylint's C0302 is not
+# among the pylint rules it reimplements), and a second linter earns its keep only if
+# it is not a second opinion on everything else — so everything else is off.
+[tool.pylint.main]
+disable = ["all"]
+enable = ["too-many-lines"]
+
+[tool.pylint.format]
+max-module-lines = 250
+
+[dependency-groups]
+# Never shipped: `pipx install medulla` reads [project.dependencies] and nothing here.
+dev = ["pytest", "ruff", "pylint"]
