@@ -95,11 +95,14 @@ every sibling repo the panel must be able to read:
 
     BOX="$PWD/.medulla/panel-runs"        # in the project, beside it, never in /tmp
     mkdir -p "$BOX"
+    grep -q '^\.medulla/panel-runs/' .gitignore 2>/dev/null \
+      || echo '.medulla/panel-runs/' >> .gitignore
     cat > "$BOX/question.md" <<'EOF'
     <your prompt>
     EOF
+    # Sibling repos: insert `--mount ../path` (repeatable) before --var-file.
     medulla --print-run-dir --docker --cwd-ro --runs-folder "$BOX" \
-      -w .medulla/workflows/spar [--mount ../repo] \
+      -w .medulla/workflows/spar \
       --var-file "QUESTION=$BOX/question.md" >"$BOX/run.log" 2>"$BOX/err.log" &
     PID=$!
     # The run dir is printed within a second — the host now names the run rather than
@@ -139,7 +142,7 @@ run directory printed by `--print-run-dir` opens on the host unchanged. Do not p
 in `/tmp`: the VM shares only part of the filesystem, and a path it cannot see is
 mounted as an empty root-owned directory instead — medulla checks for this and refuses
 to start, but the run you wanted is still not running. Add `.medulla/panel-runs/` to
-`.gitignore` once per repo.
+`.gitignore` — the snippet above does it, so nobody has to remember.
 
 This script returns in ~20s with the run dir; the panel keeps working in the
 background for its 10-20 minutes. **Do not sit and wait on it** — go do other
