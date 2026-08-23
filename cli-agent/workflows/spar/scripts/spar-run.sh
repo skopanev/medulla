@@ -15,7 +15,7 @@
 set -uo pipefail
 
 BOX_NAME=".medulla/panel-runs"
-WORKFLOW=".medulla/workflows/spar"
+WORKFLOW="spar"               # a bare name: local .medulla/workflows/spar wins, else machine-wide
 DEFAULT_TIMEOUT=2700          # 45 min: a panel is 10-20, so this is "something hung"
 
 die() { echo "spar-run: $*" >&2; exit 1; }
@@ -25,8 +25,8 @@ preflight() {
     command -v medulla >/dev/null 2>&1 || die "medulla is not installed (see the medulla repo)"
     command -v docker  >/dev/null 2>&1 || die "docker is not installed — the panel runs in a container"
     docker info >/dev/null 2>&1        || die "the docker daemon is not responding (colima start?)"
-    [ -d "$WORKFLOW" ] || [ -d "$HOME/$WORKFLOW" ] \
-        || die "no spar workflow: neither ./$WORKFLOW nor ~/$WORKFLOW"
+    [ -d ".medulla/workflows/$WORKFLOW" ] || [ -d "$HOME/.medulla/workflows/$WORKFLOW" ] \
+        || die "no spar workflow: neither ./.medulla/workflows/$WORKFLOW nor ~/.medulla/workflows/$WORKFLOW (medulla init spar)"
 }
 
 ignore_the_box() {

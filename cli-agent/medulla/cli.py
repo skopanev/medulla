@@ -14,6 +14,14 @@ from pathlib import Path
 def entry() -> int:
     argv = sys.argv[1:]
 
+    # No arguments is a question, not an error. argparse answers it with a usage line
+    # that says which flags exist and nothing about which workflows do — and a wrong
+    # -w path is the single most common way a run dies. `medulla help` prints the
+    # resolvable ones, by name, for this machine.
+    if not argv or argv[0] in ("help", "--help-run"):
+        from .help import print_help
+        return print_help()
+
     # documented subcommands (before any flag parsing)
     if argv and argv[0] == "refresh":
         from .init import bundled_templates, refresh_skill

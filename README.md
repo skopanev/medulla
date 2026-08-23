@@ -26,13 +26,17 @@ medulla init spar --skill         # ...and register its SKILL.md machine-wide wi
 medulla init spar --local         # ...or install into this project only (a local copy always wins)
 medulla init                      # lists available bundled templates
 
-medulla -w .medulla/workflows/my-pipe                  # run
-medulla -w .medulla/workflows/my-pipe --dry-run        # print the resolved plan, run nothing
-medulla -w .medulla/workflows/my-pipe --var KEY=VALUE  # override vars (fresh runs only)
-medulla -w .medulla/workflows/my-pipe --resume         # continue the latest unfinished run
-medulla -w .medulla/workflows/my-pipe --run <dir>      # continue a specific run directory
-medulla -w .medulla/workflows/my-pipe --validate       # load + validate only
-medulla --docker -w .medulla/workflows/my-pipe         # run inside the workflow's Docker image
+medulla help                      # the launch contract + every workflow that resolves HERE, with its command
+
+medulla -w my-pipe                # run — a BARE NAME is the reliable form, from any directory
+medulla -w my-pipe --dry-run      # print the resolved plan, run nothing
+medulla -w my-pipe --var KEY=VAL  # override vars (fresh runs only)
+medulla -w my-pipe --resume       # continue the latest unfinished run
+medulla -w my-pipe --run <dir>    # continue a specific run directory
+medulla -w my-pipe --validate     # load + validate only
+medulla --docker -w my-pipe       # run inside the workflow's Docker image
+                                  # -w also takes a directory or a workflow.yaml path;
+                                  # ./.medulla/workflows/<name> wins over ~/.medulla/workflows/<name>
 medulla upgrade                                        # re-runs the installer (pipx installs: pipx upgrade)
 medulla refresh spar ~/Projects [--depth N] [--dry-run] # after upgrade: re-sync every deployed spar copy
                                                        # under a folder to the current bundle (workflow +
@@ -153,10 +157,11 @@ symlink, no flag:
 
 ```bash
 mkdir -p ~/.medulla/workflows/spar && cp workflow.yaml prompts/ ~/.medulla/workflows/spar/
-cd any-repo && medulla -w .medulla/workflows/spar      # resolves to the shared copy
+cd any-repo && medulla -w spar                        # a bare name resolves to the shared copy
 ```
 
-Resolution is **local first**: a real `workflow.yaml` in the repo always wins, so a project
+Resolution is **local first** for both forms — the bare name and the full path: a real
+`workflow.yaml` in `./.medulla/workflows/<name>/` always wins, so a project
 that needs its own version just writes one. Fix the shared file once and every repo that
 doesn't override it is fixed.
 

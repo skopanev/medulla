@@ -27,6 +27,9 @@ class _Parser(argparse.ArgumentParser):
 
 
 ENV_HELP = """\
+new here? `medulla help` — the launch contract, plus the workflows that resolve on
+this machine, each with the exact command. This page is the reference, not the start.
+
 environment the engine provides to bodies and hooks (agents: read this, it is the API):
 
   always

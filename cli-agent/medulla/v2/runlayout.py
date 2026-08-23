@@ -11,8 +11,6 @@ import os
 import shutil
 from pathlib import Path
 
-from .workflow_path import config_yaml
-
 
 def runs_root_for(workflow_dir: Path, runs_root: Path | None = None) -> Path:
     """Where this workflow's runs/ live.

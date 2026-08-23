@@ -383,7 +383,7 @@ def test_missing_harness_binary_is_e_harness(tmp_path, monkeypatch):
     # part 5 wired the real adapters: the razor now fires on a missing binary
     from medulla.v2 import harness as H
     H.reset_registry()
-    monkeypatch.setattr(H.shutil, "which", lambda name: None)
+    monkeypatch.setattr("shutil.which", lambda name: None)   # adapters import their own
     text = """
 version: "2"
 start: a

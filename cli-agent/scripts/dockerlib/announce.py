@@ -4,15 +4,12 @@ Split from docker.py under the project's 250-line rule ($MAX_LOC).
 """
 from __future__ import annotations
 
-import datetime
-import json as _json
-import uuid
 from pathlib import Path
 
 from dockerlib.paths import runs_under_for
 
 
-def announce(args: list[str], workflow, runs_folder) -> tuple[list[str], str | None]:
+def announce(args: list[str], workflow, runs_folder, image) -> tuple[list[str], str | None]:
     """Print where the run will be, and return (args to pass on, the chosen name)."""
     # --print-run-dir, answered NOW. The engine used to print it, which meant waiting
     # out the container bootstrap and its medulla upgrade — ~20s during which an

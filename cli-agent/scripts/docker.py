@@ -49,9 +49,11 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 # Secrets: the three .env tiers, the Claude token fallback, the transient 0600 env-file.
-from dockerlib import announce  # noqa: E402
-from dockerlib import cliargs  # noqa: E402
-from dockerlib import mountpoints  # noqa: E402
+from dockerlib import (
+    announce,  # noqa: E402
+    cliargs,  # noqa: E402
+    mountpoints,  # noqa: E402
+)
 from dockerlib import env as dockerenv  # noqa: E402
 
 # What the container can see — dockerlib/mounts.py.
@@ -212,7 +214,7 @@ def main():
         return rc
 
 
-    args, run_dir_name = announce.announce(args, workflow, runs_folder)
+    args, run_dir_name = announce.announce(args, workflow, runs_folder, image)
 
     try:
         return run_docker(image, volumes, args, runs_under=shared_runs_under,

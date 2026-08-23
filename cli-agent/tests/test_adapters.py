@@ -149,7 +149,7 @@ def test_agy_trust_skipped_in_docker(tmp_path, monkeypatch):
 # ── resolve: binary check = the E_HARNESS razor ─────────────────────────────
 
 def test_missing_binary_is_e_harness(monkeypatch):
-    monkeypatch.setattr(H.shutil, "which", lambda name: None)
+    monkeypatch.setattr("shutil.which", lambda name: None)   # adapters import their own
     with pytest.raises(EngineCrash) as exc:
         H.resolve(AgentSpec(harness="codex"))
     assert exc.value.code == "E_HARNESS" and "on PATH" in exc.value.message

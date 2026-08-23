@@ -10,7 +10,6 @@ import datetime
 import fcntl
 import json
 import os
-import shutil
 import threading
 import uuid
 from pathlib import Path

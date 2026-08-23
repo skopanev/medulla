@@ -85,6 +85,18 @@ def _shared_yaml(name: str) -> Path | None:
     return y if y.is_file() else None
 
 
+def _local_yaml(name: str) -> Path | None:
+    """The copy in THIS repo, addressed by bare name.
+
+    `-w spar` used to reach the machine-wide copy even when the repo held its own
+    .medulla/workflows/spar — the bare name never looked locally at all, so "local
+    always wins" held for a typed path and silently did not for a name. The two
+    forms must select the same definition or the rule is not a rule.
+    """
+    y = config_yaml(Path.cwd() / ".medulla" / "workflows" / name)
+    return y if _usable(y) else None
+
+
 def resolve_workflow_yaml(w: Path) -> Path:
     """LOCAL ALWAYS WINS, then the machine-wide copy.
 
@@ -118,7 +130,8 @@ def resolve_workflow_yaml(w: Path) -> Path:
         return _shared_yaml(w.name) or local
     name = shared_name_for(w)
     if name:
-        return _shared_yaml(name) or w
+        # local first, exactly as for a path that exists — see _local_yaml
+        return _local_yaml(name) or _shared_yaml(name) or w
     return w
 
 
