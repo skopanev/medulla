@@ -1,17 +1,10 @@
 ---
 name: spar
-description: |
-  A panel of independent models attacks the same decision in parallel —
-  counsel without consensus, scrutiny without sycophancy. Each returns
-  reasoning, verdict, and the strongest counter to whatever's being
-  leaned toward. For decisions that can't be confirmed by facts:
-  strategic, architectural, organizational, career, product. The panel
-  exists to disagree. If a fact lookup or a code change would resolve
-  the question, this is the wrong tool. Colloquially this panel is the
-  "братва" (the crew) — "запусти братву" / "спроси братву" means run
-  this skill; a "панелист" is one member of the братва.
-requires: medulla + docker (the panel runs in a container; `spar-run.sh` checks both
-  before it starts and says which one is missing)
+description: >-
+  A panel of independent models attacks one decision in parallel — counsel without
+  consensus. For calls that facts cannot settle: strategic, architectural,
+  organizational, product. Wrong tool if a lookup or a code change would answer it.
+  Called "братва"; "запусти братву" means run this.
 ---
 
 You're consulting an independent panel — the "братва" (the crew) — for
@@ -57,18 +50,13 @@ Cover:
   infra config for staging" — and let them dig. Don't paste specific
   lines or snippets; that wastes tokens and anchors them on what you
   think matters. Give direction, not extracts.
-- **Sibling repos (mount them read-only).** If the question involves
-  code outside the current workspace: `--mount ../folder1 [--mount ../folder2] ...`
-  Point the panel at them in the prompt — they can't search what
-  isn't mounted.
-- **Pick a shape, not a script.** These are starting points, not a menu:
-   - Sparring with verdicts (COMMIT / DRAW / INSUFFICIENT) for
-     binary or near-binary calls with stakes.
-   - Multiple-lens roleplay (assign each panelist a distinct role —
-     skeptic, devil's advocate, operator, contrarian) for relational,
-     organizational, or judgment calls.
-   - Red-team for plans about to execute.
-   - Whatever else suits the situation.
+- **Sibling repos — mount them, and name them the way the panel sees them.** For code
+  outside this workspace: `spar-run.sh start q.md --mount ../other-repo` (repeatable,
+  read-only). Inside the container it appears at **`/workspace/other-repo`** — the
+  basename, under /workspace — NOT at `../other-repo`, which does not exist there. Point
+  the panel at the container path, or they burn a turn on "No such file or directory".
+  `spar-run.sh` prints the mapping for every mount when it starts.
+
 - **Demands — only the ones your question needs.** The standing rules already reach
   every panelist through the workflow's own prompt: investigate before answering,
   no sycophancy, `(R)` for what you verified and `(G)` for what you guessed, report
@@ -101,10 +89,9 @@ lists what was delivered, and exits non-zero if the run failed or never finished
 minutes by default, `--timeout` to change). A hang and a verdict need different
 reactions, so it distinguishes them.
 
-When the run finishes, LIST the artifacts and then read them **one file at a
-time with your own file-reading tool**:
+List the artifacts with your Glob tool, then read them **one file at a time**:
 
-    ls "$run/artifacts"/*.md
+    <Glob> "$run/artifacts/*.md"
 
 Do not `cat` them all into the terminal: five panelists × ~500 words is a wall
 of text that buries exactly the lone finding you are here to preserve.
@@ -126,24 +113,23 @@ partial panel as a full one.
 
 # Use the result
 
-You called the panel because you needed perspective. Now you have
-takes from outside your context. Read them, then:
+    spar-run.sh findings <run-dir>     # every FINDINGS list, cut out verbatim
 
-1. Notice where the panel converges — rare; worth flagging.
-2. Notice where they diverge, and identify which divergence most
-   matters for the specific decision you're working through.
-3. Notice what the panel collectively missed because they didn't
-   see your conversation, your codebase, or your actual constraints.
+Read that file FIRST. Asking a summariser not to summarise is asking water to be dry:
+a model that reads five artifacts and retells them will drop the lone finding — which
+is the one the panel was convened for. `awk` has no opinions, so the collection is
+mechanical and the count is printed. Carry those lines forward as they are, attributed;
+merge two only when they are literally the same claim, never when they "feel similar".
 
-**Carry EVERY concrete finding forward — never average the panel.** The value
-is in the union of what they found, not the consensus. A point made by one
-panelist out of five is not a weak point; it is the one nobody else saw. When
-you report back, keep each distinct finding as its own item, attributed to who
-raised it, with its file:line or concrete scenario intact. Merge two items only
-when they are literally the same claim — not when they merely "feel similar".
-Dropping a lone finding because the others did not repeat it is the single
-failure mode of this whole tool.
+Then read the artifacts themselves, one file at a time — the argument above each list
+carries the reasoning, and `synthesized.md` is a UNION, not a verdict. What to look for:
 
-Do not soften their verdicts when integrating into your reasoning.
-Do not flatten dissent into consensus through restatement. The
-disagreement is the signal — the entire point of running this.
+1. Where they converge — rare, and worth flagging when it happens.
+2. Where they diverge, and which divergence actually decides your question.
+3. What all of them missed, because none of them saw your conversation or your
+   constraints. You are the only one who can notice that.
+
+A `WARNING: only N/M panelists delivered` line means partial delivery — somebody died
+or a provider refused. Say so when you report; never present a partial panel as a full
+one. Do not soften a verdict to fit what you already thought: the disagreement is the
+signal, and it is the entire reason this costs twenty minutes.
