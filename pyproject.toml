@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "medulla"
-version = "4.27.0"
+version = "4.27.1"
 description = "medulla — a state machine for AI agents (nodes, signals, pools)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -19,6 +19,7 @@ packages = [
   "medulla.scripts",
   "medulla.scripts.dockerlib",
   "medulla.v2",
+  "medulla.v2.harnesses",
   "medulla.workflows",
   "medulla.workflows.spar",
   "medulla.workflows.spar.prompts",
