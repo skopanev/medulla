@@ -80,8 +80,8 @@ It is a script and not a command for you to reproduce because this repo's own
 AGENTS.md says LLMs cannot be trusted to run exact commands — and the contract it
 replaced had a heredoc, a background job, a poll loop and a `$PID` in it. The script
 checks medulla, docker and the workflow before starting, keeps the run's history out
-of the tree under review, adds the box to `.gitignore` (saying so), and refuses to
-report a run directory it cannot vouch for.
+of the tree under review (the box carries its own `.gitignore`, so nothing is written
+into yours), and refuses to report a run directory it cannot vouch for.
 
 `start` returns in about a second and the panel keeps working for 10-20 minutes. Do
 not sit on it: go do other work, then `wait` — it blocks until `outcome.json` exists,

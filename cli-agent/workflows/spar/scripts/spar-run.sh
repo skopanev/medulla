@@ -31,17 +31,20 @@ preflight() {
 
 ignore_the_box() {
     # The box lives in the repo, so it must not reach the index of the very tree the
-    # panel promised not to touch. Say so out loud: a silent write into someone's
-    # .gitignore is the kind of help nobody asked for.
-    local gi=".gitignore"
-    git rev-parse --git-dir >/dev/null 2>&1 || return 0      # not a repo: nothing to ignore
-    if ! grep -q '^\.medulla/panel-runs/' "$gi" 2>/dev/null; then
-        if printf '%s\n' "$BOX_NAME/" >> "$gi" 2>/dev/null; then
-            echo "spar-run: added $BOX_NAME/ to .gitignore" >&2
-        else
-            echo "spar-run: WARNING cannot write .gitignore — $BOX_NAME/ will show up in git status" >&2
-        fi
-    fi
+    # panel promised not to touch — but the way to arrange that is NOT to edit
+    # somebody's .gitignore. That file is theirs, it is committed, and a line
+    # appearing in it because a tool ran is a diff they now have to explain. Seen
+    # live: the line was deleted by hand in another repo, which is the correct
+    # reaction to a tool writing where it was not invited.
+    # A directory can ignore ITSELF: .gitignore inside it, matching everything.
+    # Same effect on git status, nothing outside the box is touched, and deleting
+    # the box deletes the rule with it.
+    local gi="$1/.gitignore"
+    [ -f "$gi" ] && return 0
+    printf '%s\n' "# spar panel history, written by spar-run.sh. Ignores itself so it" \
+                  "# never reaches the index of the repository under review." \
+                  "*" > "$gi" 2>/dev/null \
+        || echo "spar-run: WARNING cannot write $gi — the box will show up in git status" >&2
 }
 
 force_repo_root() {
@@ -64,10 +67,10 @@ cmd_start() {
     question=$(cd "$(dirname "$question")" && pwd)/$(basename "$question")   # before cd
     force_repo_root
     preflight
-    ignore_the_box
 
     local box="$PWD/$BOX_NAME"
     mkdir -p "$box" || die "cannot create $box"
+    ignore_the_box "$box"
     # A fixed name races: fire-and-forget is the whole design, and a second start
     # before the first medulla read its var-file would silently swap the question.
     # One id per run, for the question AND the logs. A shared run.log is worse than it

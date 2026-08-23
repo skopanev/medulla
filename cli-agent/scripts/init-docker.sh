@@ -133,8 +133,27 @@ grep -q '/workspace/.medulla/scripts' ~/.bashrc 2>/dev/null || echo 'export PATH
 # reinstall removes-then-fetches, and a network hiccup would leave the container
 # with NO medulla at all (exit 127).
 # MEDULLA_UPGRADE_ON_START=0 opts out: offline boxes, or an image pinned on purpose.
+#
+# ASK FIRST, and only then pay. `medulla upgrade` clones and builds from git — eight
+# seconds, spent on every single start, and on most starts it installs the version
+# that was already there. Reading the version off raw.githubusercontent costs 0.3s
+# and answers the only question that matters: is there anything new? This repo's own
+# law makes that answer trustworthy — any behavioral change bumps the version in the
+# same commit, because pipx skips a same-version git install anyway.
+# An unreachable or unparseable answer means we do NOT know, so we upgrade: being
+# slow is the tolerable failure here, being stale is the one that cost two versions
+# of drift before.
 if [ "${MEDULLA_UPGRADE_ON_START:-1}" != "0" ]; then
-    medulla upgrade >&2 || echo "⚠ medulla upgrade skipped (offline?) — using baked version" >&2
+    have=$(medulla --version 2>/dev/null | awk '{print $2}')
+    want=$(curl -fsSL --max-time 5 \
+             https://raw.githubusercontent.com/skopanev/medulla/main/pyproject.toml 2>/dev/null \
+           | awk -F'"' '/^version = /{print $2; exit}')
+    if [ -n "$want" ] && [ "$have" = "$want" ]; then
+        echo "medulla $have — current" >&2
+    else
+        [ -n "$want" ] && echo "medulla $have -> $want" >&2
+        medulla upgrade >&2 || echo "⚠ medulla upgrade skipped (offline?) — using baked version" >&2
+    fi
 fi
 
 exec "$@"
