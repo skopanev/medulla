@@ -109,11 +109,10 @@ part: carry every line forward, attributed. `NONE` in FINDINGS is a real answer,
 so is `INSUFFICIENT` — a panelist who could not see enough says so instead of dressing
 a guess as a decision.
 
-**Read every panelist's own file, not only `synthesized.md`.** The artifacts
-directory holds one `<slug>.md` per panelist plus the combined
-`synthesized.md`. Read them ALL. Skimming the synthesis is how a finding that
-exactly one panelist made — usually the sharpest one, since only one of them
-saw it — gets dropped.
+**Then read every panelist's own file.** The artifacts directory holds one
+`<slug>.md` per panelist — the argument behind their findings, which `verdict.md`
+does not carry. Read them ALL. A finding exactly one panelist made is usually the
+sharpest one, since only one of them saw it.
 
 A `WARNING: only N/M panelists delivered` line means partial delivery: someone
 died or their provider refused. Say so when you report; do not present a
@@ -121,10 +120,10 @@ partial panel as a full one.
 
 # Use the result
 
-    <run-dir>/all-findings.md          # already written when the panel finished
+    <run-dir>/verdict.md               # already written when the panel finished
     medulla launch spar findings <run-dir>   # only to rebuild it
 
-Read `all-findings.md` FIRST — the panel writes it as its last act, so it is there
+Read `verdict.md` FIRST — the panel writes it as its last act, so it is there
 before you ask. It opens with every panelist's verdict together — `GO 1 · NO-GO 1
 · INSUFFICIENT 1` — because the SPLIT is the answer to "can we ship", and five files
 each ending in one word are unreadable as five files and obvious as one block. A
@@ -136,7 +135,7 @@ mechanical and the count is printed. Carry those lines forward as they are, attr
 merge two only when they are literally the same claim, never when they "feel similar".
 
 Then read the artifacts themselves, one file at a time — the argument above each list
-carries the reasoning, and `synthesized.md` is a UNION, not a verdict. What to look for:
+carries the reasoning that `verdict.md` cannot. What to look for:
 
 1. Where they converge — rare, and worth flagging when it happens.
 2. Where they diverge, and which divergence actually decides your question.

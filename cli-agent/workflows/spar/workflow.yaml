@@ -120,37 +120,36 @@ nodes:
 
   synthesize:
     shell: |
-      out="$ROUND_DIR/synthesized.md"
+      # No model runs here — this node is jq and awk. It answers two questions the
+      # per-panelist files cannot: WHO delivered (a dead panelist leaves no file, so
+      # counting files cannot tell a silent failure from a panel of three), and what
+      # the verdicts were TOGETHER, which is the answer to "can we ship".
+      #
+      # It no longer writes synthesized.md. That file was every panelist's full text
+      # concatenated — the same bytes as the <slug>.md files beside it, twice on disk,
+      # and the skill had to keep telling readers not to stop at it. verdict.md carries
+      # what is actually collectible: the verdicts, and every FINDINGS line verbatim.
       rows=$(jq -s 'group_by(.key) | map(.[-1])' "$MEDULLA_MANIFEST_PANEL")   # resume appends: latest row per input wins
       total=$(echo "$rows" | jq length)
       ok=$(echo "$rows" | jq 'map(select(.ok)) | length')
-      : > "$out"
-      {
-        echo "<!-- Full text of every panelist that delivered. This is a UNION, not a"
-        echo "     consensus: carry each distinct finding forward. A point raised by one"
-        echo "     panelist is not a weak point — it is the one nobody else saw. Per-panelist"
-        echo "     files live beside this one as <slug>.md; read those too. -->"
-        echo
-      } >> "$out"
-      for slug in $(echo "$rows" | jq -r 'map(select(.ok) | .input.slug) | .[]'); do
-        f="$ROUND_DIR/$slug.md"
-        [ -f "$f" ] || continue
-        { echo "# $slug"; echo; cat "$f"; echo; echo "---"; echo; } >> "$out"
-      done
-      if [ "$ok" -lt "$total" ]; then
-        printf '> WARNING: only %s/%s panelists delivered output\n' "$ok" "$total" >> "$out"
-        echo "<signal:update>only $ok/$total panelists delivered</signal:update>"
-      fi
-      # Collect the verdicts and findings NOW, while the panel is still the thing
-      # happening — not on a later command that needs medulla installed and this
-      # workflow still resolvable to read files that are already on disk. Same script
-      # the caller would have run, so the awk lives in one place.
+
       collector="$MEDULLA_WORKFLOW_DIR/scripts/spar-run.sh"
       if [ -x "$collector" ]; then
         bash "$collector" findings "$MEDULLA_RUN_DIR" >/dev/null || \
           echo "<signal:update>could not collect findings (artifacts are still there)</signal:update>"
       fi
-      echo "synthesized $ok takes -> $out"
+
+      out="$ROUND_DIR/verdict.md"
+      if [ "$ok" -lt "$total" ]; then
+        # Partial delivery belongs at the TOP of the file people read, not in a log
+        # line that scrolled away. A panel of three presented as a panel of five is
+        # the one lie this workflow can tell.
+        printf 'WARNING: only %s/%s panelists delivered\n\n' "$ok" "$total" > "$out.tmp"
+        cat "$out" >> "$out.tmp" 2>/dev/null
+        mv "$out.tmp" "$out"
+        echo "<signal:update>only $ok/$total panelists delivered</signal:update>"
+      fi
+      echo "$ok/$total panelists -> $out"
       echo "<signal:ready>$out</signal:ready>"
     timeout: 30
     on_signal:

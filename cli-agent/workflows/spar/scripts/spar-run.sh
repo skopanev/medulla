@@ -170,12 +170,13 @@ cmd_wait() {
         fi
     done
 
-    # Panelist artifacts only: synthesized.md is the engine's own summary and question.md
-    # is the input — counting them turns four panelists into "5 artifact(s)".
+    # Panelist artifacts only. question.md is the input, verdict.md is this script's
+    # own output, and synthesized.md is what runs before 4.34 left behind — counting
+    # any of them turns four panelists into "5 artifact(s)".
     local delivered=0 f
     for f in "$run"/artifacts/*.md; do
         [ -e "$f" ] || continue
-        case "$(basename "$f")" in question.md|synthesized.md|all-findings.md) continue ;; esac
+        case "$(basename "$f")" in question.md|synthesized.md|verdict.md) continue ;; esac
         delivered=$((delivered + 1))
         echo "  $f"
     done
@@ -196,7 +197,7 @@ cmd_findings() {
     # them WILL drop the lone finding, which is the one the panel was convened for.
     # awk does not have opinions. The prose above each list stays where it is — read it
     # too, but read it knowing nothing was lost on the way here.
-    local out="$run/all-findings.md"
+    local out="$run/verdict.md"
     : > "$out"
 
     # Verdicts first, together: the split IS the answer to "can we ship". Five files
@@ -205,7 +206,7 @@ cmd_findings() {
     {
         printf '# VERDICTS\n\n'
         for f in "$run"/artifacts/*.md; do
-            case "$(basename "$f")" in question.md|synthesized.md|all-findings.md) continue ;; esac
+            case "$(basename "$f")" in question.md|synthesized.md|verdict.md) continue ;; esac
             slug=$(basename "$f" .md)
             word=$(awk '/^## VERDICT/{flag=1; next} /^## /{flag=0}
                         flag && NF {print; exit}' "$f")
@@ -215,15 +216,15 @@ cmd_findings() {
                 NO-GO*)        nogo=$((nogo + 1)) ;;
                 INSUFFICIENT*) insuf=$((insuf + 1)) ;;
             esac
-            printf '%-12s %s\n' "$slug" "$word"
+            printf '%s: %s\n' "$slug" "$word"
             awk '/^## VERDICT/{flag=1; next} /^## /{flag=0}
-                 flag && /^(FIRST|THEN):/ {print "             " $0}' "$f"
+                 flag && /^(FIRST|THEN):/ {print "  " $0}' "$f"
         done
         printf '\nGO %s · NO-GO %s · INSUFFICIENT %s\n\n' "$go" "$nogo" "$insuf"
     } >> "$out"
 
     for f in "$run"/artifacts/*.md; do
-        case "$(basename "$f")" in question.md|synthesized.md|all-findings.md) continue ;; esac
+        case "$(basename "$f")" in question.md|synthesized.md|verdict.md) continue ;; esac
         slug=$(basename "$f" .md)
         n=$(awk '/^## FINDINGS/{flag=1; next} /^## /{flag=0} flag && /^[-*]/' "$f" | wc -l | tr -d ' ')
         total=$((total + n))
