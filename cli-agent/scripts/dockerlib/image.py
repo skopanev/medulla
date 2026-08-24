@@ -179,6 +179,47 @@ def ensure_image(image, build, workflow, cli_vars, dockerfile=None, ready_image=
         subprocess.run(["docker", "buildx", "stop"], capture_output=True, check=False)
     if proc.returncode != 0:
         print("docker build failed", file=sys.stderr)
+        return proc.returncode
+    prune_old_images(image)
     return proc.returncode
+
+
+# Keep this many builds of one repository, newest first (the fresh one included).
+# Two, because the previous image is what you fall back to when a Dockerfile change
+# turns out wrong — a third has never been the one anybody wanted.
+KEEP_IMAGES = 2
+
+
+def prune_old_images(image: str, keep: int = KEEP_IMAGES) -> None:
+    """Drop older builds of the SAME repository after a successful build.
+
+    An image tag here is the sha of its Dockerfile, so every edit mints a new one and
+    the old stays forever: three medulla-project-manager images, 17 GB, none of them
+    running. Content-addressing without eviction is a leak.
+
+    Only this repository, never `docker image prune` — the daemon is shared, and other
+    people's images are not ours to reap. `docker rmi` without -f is the safety: an
+    image a container still uses refuses to go, and that refusal is the answer, not an
+    error to report.
+    """
+    repo = image.rsplit(":", 1)[0] if ":" in image else image
+    try:
+        out = subprocess.run(
+            ["docker", "images", repo, "--format", "{{.ID}}\t{{.Repository}}:{{.Tag}}"],
+            capture_output=True, text=True, check=False, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    # `docker images` lists newest first; one ID can carry several tags, and dropping
+    # the duplicate rows keeps "keep 2" meaning two BUILDS rather than two names.
+    seen: list[tuple[str, str]] = []
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 2 and parts[0] not in [i for i, _ in seen]:
+            seen.append((parts[0], parts[1]))
+    for image_id, tag in seen[keep:]:
+        res = subprocess.run(["docker", "rmi", image_id],
+                             capture_output=True, text=True, check=False)
+        if res.returncode == 0:
+            print(f"  removed older image {tag}", file=sys.stderr)
 
 
