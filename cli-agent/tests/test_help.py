@@ -123,3 +123,29 @@ def test_run_from_home_lists_each_workflow_once(sandbox, monkeypatch):
     # and it is the machine-wide copy — "local" would be true only of where you
     # are standing, and reads as a repo copy that does not exist
     assert "(machine-wide)" in page
+
+
+def test_refresh_updates_the_machine_wide_copy_too(sandbox, monkeypatch, capsys):
+    """`refresh <name> ~/Projects` used to report success while leaving the copy every
+    bare name resolves to two versions behind — it lives in $HOME, not in the folder
+    anyone passes as the search root."""
+    from medulla.refresh import refresh_skill
+
+    home, cwd = sandbox
+    shared = home / ".medulla" / "workflows" / "spar"
+    (shared / "scripts").mkdir(parents=True)
+    (shared / "workflow.yaml").write_text("stale\n")
+    (shared / "scripts" / "spar-run.sh").write_text("#!/bin/sh\necho stale\n")
+
+    # a bundle to refresh FROM, standing in for the installed package's copy
+    bundle = home / "bundle" / "spar"
+    (bundle / "scripts").mkdir(parents=True)
+    (bundle / "workflow.yaml").write_text("current\n")
+    (bundle / "SKILL.md").write_text("skill\n")
+    (bundle / "scripts" / "spar-run.sh").write_text("#!/bin/sh\necho current\n")
+    monkeypatch.setattr("medulla.refresh._bundle_dir", lambda _n: bundle)
+
+    assert refresh_skill("spar", str(cwd)) == 0        # search root does NOT contain it
+    assert (shared / "workflow.yaml").read_text() == "current\n"
+    assert "current" in (shared / "scripts" / "spar-run.sh").read_text()
+    assert "machine-wide" in capsys.readouterr().out

@@ -11,6 +11,8 @@ import os
 import shutil
 from pathlib import Path
 
+from .v2.workflow_path import shared_workflows
+
 DEFAULT_REFRESH_DEPTH = 4
 _REFRESH_PRUNE = {".git", "node_modules", "__pycache__", ".venv", "venv", "runs"}
 
@@ -87,6 +89,24 @@ def refresh_skill(name: str, root: str, depth: int = DEFAULT_REFRESH_DEPTH, dry_
     base = len(root_p.parts)
     n_wf = n_sk = 0
     failures: list[str] = []
+
+    # The machine-wide copy FIRST, and whether or not it sits under `root`. It is the
+    # one every bare name resolves to and the one repo-local symlinks point at, so
+    # leaving it stale leaves everything stale — and it lives in $HOME, which is not
+    # the folder anyone passes here. Seen live: `refresh spar ~/Projects` reported
+    # "refreshed 1 workflow" while the definition every one of those repos actually
+    # runs stayed two versions behind.
+    shared = shared_workflows() / name
+    if (shared / "workflow.yaml").is_file() and shared.resolve() != bundle:
+        if dry_run:
+            print(f"  [dry-run] workflow -> {shared} (machine-wide)")
+        else:
+            try:
+                _copy_bundle_over(bundle, shared)
+                print(f"  workflow  -> {shared} (machine-wide)")
+            except OSError as exc:
+                failures.append(f"{shared}: {exc}")
+        n_wf += 1
     for dirpath, dirnames, _ in os.walk(root_p):     # followlinks=False: no escape/cycles
         p = Path(dirpath)
         if len(p.parts) - base >= depth:
