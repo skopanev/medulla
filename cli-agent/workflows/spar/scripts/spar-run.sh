@@ -191,14 +191,37 @@ cmd_findings() {
     [ -n "$run" ] || die "usage: spar-run.sh findings <run-dir>"
     [ -d "$run/artifacts" ] || die "no artifacts in: $run"
 
-    # Cut the FINDINGS sections out mechanically. Asking a summariser not to summarise
-    # is asking water to be dry: a model reading five files and retelling them WILL
-    # drop the lone finding, which is the one the panel was convened for. awk does not
-    # have opinions. The prose above each list stays where it is — read it too, but
-    # read it knowing nothing was lost on the way here.
+    # Cut the FINDINGS and VERDICT sections out mechanically. Asking a summariser not
+    # to summarise is asking water to be dry: a model reading five files and retelling
+    # them WILL drop the lone finding, which is the one the panel was convened for.
+    # awk does not have opinions. The prose above each list stays where it is — read it
+    # too, but read it knowing nothing was lost on the way here.
     local out="$run/all-findings.md"
     : > "$out"
-    local f slug n total=0
+
+    # Verdicts first, together: the split IS the answer to "can we ship". Five files
+    # each ending in one word are unreadable as five files and obvious as one block.
+    local f slug n total=0 go=0 nogo=0 insuf=0 word
+    {
+        printf '# VERDICTS\n\n'
+        for f in "$run"/artifacts/*.md; do
+            case "$(basename "$f")" in question.md|synthesized.md|all-findings.md) continue ;; esac
+            slug=$(basename "$f" .md)
+            word=$(awk '/^## VERDICT/{flag=1; next} /^## /{flag=0}
+                        flag && NF {print; exit}' "$f")
+            [ -n "$word" ] || word="(no verdict section)"
+            case "$word" in
+                GO*)           go=$((go + 1)) ;;
+                NO-GO*)        nogo=$((nogo + 1)) ;;
+                INSUFFICIENT*) insuf=$((insuf + 1)) ;;
+            esac
+            printf '%-12s %s\n' "$slug" "$word"
+            awk '/^## VERDICT/{flag=1; next} /^## /{flag=0}
+                 flag && /^(FIRST|THEN):/ {print "             " $0}' "$f"
+        done
+        printf '\nGO %s · NO-GO %s · INSUFFICIENT %s\n\n' "$go" "$nogo" "$insuf"
+    } >> "$out"
+
     for f in "$run"/artifacts/*.md; do
         case "$(basename "$f")" in question.md|synthesized.md|all-findings.md) continue ;; esac
         slug=$(basename "$f" .md)
@@ -212,6 +235,9 @@ cmd_findings() {
     done
     echo "$out"
     echo "spar-run: $total finding(s) collected verbatim — read the file, do not re-summarise it" >&2
+    if [ "$nogo" -gt 0 ]; then
+        echo "spar-run: $nogo panelist(s) said NO-GO" >&2
+    fi
 }
 
 case "${1:-}" in

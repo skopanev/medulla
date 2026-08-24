@@ -100,10 +100,14 @@ List the artifacts with your Glob tool, then read them **one file at a time**:
 Do not `cat` them all into the terminal: five panelists × ~500 words is a wall
 of text that buries exactly the lone finding you are here to preserve.
 
-Each panelist closes with a `## FINDINGS` list — one line per finding, `(R)`
-confirmed or `(G)` guessed, with a `file:line` or a concrete scenario. That list
-is the machine-readable part: carry every line forward, attributed. If a
-panelist's FINDINGS says `NONE`, that is a real answer, not a failure.
+Each panelist closes with two sections. `## FINDINGS` — one line per finding, `(R)`
+confirmed or `(G)` guessed, a `file:line` or a concrete scenario, and a `FIX:` clause
+saying what to do about it. Then `## VERDICT` — one of `GO` / `NO-GO` /
+`INSUFFICIENT` with a reason, plus `FIRST:` (what to fix before anything else) and
+`THEN:` (where the next defect lands once it is fixed). Both are the machine-readable
+part: carry every line forward, attributed. `NONE` in FINDINGS is a real answer, and
+so is `INSUFFICIENT` — a panelist who could not see enough says so instead of dressing
+a guess as a decision.
 
 **Read every panelist's own file, not only `synthesized.md`.** The artifacts
 directory holds one `<slug>.md` per panelist plus the combined
@@ -117,9 +121,13 @@ partial panel as a full one.
 
 # Use the result
 
-    medulla launch spar findings <run-dir>   # every FINDINGS list, cut out verbatim
+    medulla launch spar findings <run-dir>   # every VERDICT and FINDINGS line, verbatim
 
-Read that file FIRST. Asking a summariser not to summarise is asking water to be dry:
+Read that file FIRST. It opens with every panelist's verdict together — `GO 1 · NO-GO 1
+· INSUFFICIENT 1` — because the SPLIT is the answer to "can we ship", and five files
+each ending in one word are unreadable as five files and obvious as one block. A
+panelist who skipped the section shows as `(no verdict section)` rather than being
+counted as agreement. Asking a summariser not to summarise is asking water to be dry:
 a model that reads five artifacts and retells them will drop the lone finding — which
 is the one the panel was convened for. `awk` has no opinions, so the collection is
 mechanical and the count is printed. Carry those lines forward as they are, attributed;

@@ -35,14 +35,22 @@ wrong, not just flawed.
 ## Form of your answer
 
 Argue freely first — prose, disagreement, the counter you would make, the frame
-you would reject. Then close with this section, verbatim heading:
+you would reject. Then close with these two sections, verbatim headings, in this
+order — FINDINGS first, VERDICT last:
 
 ## FINDINGS
 One line per finding, nothing merged:
 
-- (R|G) <claim> — <file:line or a concrete failure scenario> — <why it matters>
+- (R|G) <claim> — <file:line or a concrete failure scenario> — <why it matters> — FIX: <what to do>
 
 Rules:
+- **FIX belongs ON THE LINE, not in the prose above.** One clause: the change you
+  would make, concrete enough to act on — "guard the None before line 88", "drop the
+  cache, it cannot be invalidated", "ask the author, this is not ours to fix". Only
+  the FINDINGS section is collected mechanically; a remedy written anywhere else is
+  a remedy the reader has to go find, and this panel has already learned what
+  happens to things that must be gone and found. If you genuinely do not know the
+  fix, write `FIX: unknown — <what would tell you>`. That is information too.
 - **Report EVERY defect you find, not the worst one.** Stopping at the first, or at
   "the main issue", is the single most common way this panel wastes a round: the
   round costs the same whether you return one finding or nine, and the ones you
@@ -56,3 +64,29 @@ Rules:
 - `(R)` only if you actually opened the file, ran the command, or read the doc —
   and cite what you checked. `(G)` for everything else.
 - No findings? Write `NONE`. An empty section is information; padding is not.
+
+## VERDICT
+
+Close with this section, verbatim heading, exactly three lines:
+
+```
+## VERDICT
+GO | NO-GO | INSUFFICIENT — one line: why
+FIRST: <the one thing to fix before anything else, and why that one>
+THEN: <what this change breaks or exposes next — where the next defect will come from>
+```
+
+Pick ONE word:
+
+- **GO** — ship it. Findings may still exist; none of them is a reason to stop.
+- **NO-GO** — do not ship until named findings are addressed. Name which.
+- **INSUFFICIENT** — you could not see enough to answer. Say what you were missing.
+  This is a real verdict, not an escape: a panelist who lacked the data and picks
+  GO or NO-GO anyway is dressing a guess as a decision, and the asker cannot tell
+  the difference. Nobody is punished for INSUFFICIENT; a confident wrong call costs
+  the round twice.
+
+FIRST and THEN are what turn a list into a plan. Five panelists returning fifteen
+findings leaves the ordering to whoever reads them — which is the one person who did
+not investigate. FIRST is your ordering, and THEN is where you expect the next defect
+to land once this one is fixed, so the fix does not simply move the problem.
