@@ -9,6 +9,11 @@
 #   spar-run.sh start <question-file> [--mount ../repo]...   -> prints the run dir
 #   spar-run.sh wait  <run-dir> [--timeout SECONDS]          -> waits, then reports
 #
+# It does NOT collect the verdict: the workflow's own synthesize node writes
+# verdict.md as its last act. Collecting from here meant this file had to REACH the
+# container, and it did not — a live panel reported success having written nothing.
+# A node that carries its own tool cannot lose it.
+#
 # Exit codes: 0 ok · 1 usage/preflight · 2 the run FAILED · 3 it never finished.
 # Two different reactions, so two different numbers: a verdict is read, a hang is
 # chased. Saying it only in stderr prose is not what an exit code is for.
@@ -187,128 +192,8 @@ cmd_wait() {
     }
 }
 
-cmd_findings() {
-    local run="${1:-}"
-    [ -n "$run" ] || die "usage: spar-run.sh findings <run-dir>"
-    [ -d "$run/artifacts" ] || die "no artifacts in: $run"
-
-    # Cut the VERDICT and FINDINGS sections out mechanically, into markdown. Asking a
-    # summariser not to summarise is asking water to be dry: a model reading five files
-    # and retelling them WILL drop the lone finding, which is the one the panel was
-    # convened for. awk has no opinions. The prose above each list stays where it is —
-    # read it too, but read it knowing nothing was lost on the way here.
-    local out="$run/verdict.md" body="$run/.verdict.body"
-    : > "$body"
-
-    local f slug n total=0 go=0 nogo=0 insuf=0 nover=0 word
-    {
-        printf '## Verdicts\n\n'
-        for f in "$run"/artifacts/*.md; do
-            case "$(basename "$f")" in question.md|synthesized.md|verdict.md) continue ;; esac
-            slug=$(basename "$f" .md)
-            word=$(awk '/^## VERDICT/{flag=1; next} /^## /{flag=0}
-                        flag && NF {print; exit}' "$f")
-            case "$word" in
-                GO*)           go=$((go + 1)) ;;
-                NO-GO*)        nogo=$((nogo + 1)) ;;
-                INSUFFICIENT*) insuf=$((insuf + 1)) ;;
-                *)             nover=$((nover + 1)); word="_no VERDICT section_" ;;
-            esac
-            printf -- '- **%s** — %s\n' "$slug" "$word"
-        done
-        printf '\n'
-    } >> "$body"
-
-    # ONE list, not a section per panelist. Five headings with counts made the reader
-    # compare panelists, which is not the job — the job is to see every defect. Who
-    # said it rides at the FRONT of its own line, so nothing is anonymous and nothing
-    # is buried under a name. A panelist with no findings gets one line at the end
-    # rather than an empty section: "found nothing" and "never answered" must stay
-    # distinguishable, and an empty heading says neither.
-    # ONE list, sorted by the severity the FINDER gave it. Not a section per panelist:
-    # that made the reader compare panelists, which is not the job — the job is to see
-    # what is worst first. Who said it rides at the FRONT of its own line, so nothing is
-    # anonymous and nothing is buried under a name.
-    local quiet="" raw="$run/.verdict.raw"
-    : > "$raw"
-    for f in "$run"/artifacts/*.md; do
-        case "$(basename "$f")" in question.md|synthesized.md|verdict.md) continue ;; esac
-        slug=$(basename "$f" .md)
-        n=$(awk '/^## FINDINGS/{flag=1; next} /^## /{flag=0} flag && /^[-*]/' "$f" | wc -l | tr -d ' ')
-        if [ "$n" -eq 0 ]; then
-            quiet="$quiet${quiet:+, }$slug"
-            continue
-        fi
-        total=$((total + n))
-        # Prefix each line with a sort key: 1 HIGH, 2 MED, 3 LOW, 4 unrated. Unrated
-        # sinks rather than floats — a panelist who skipped the rating did not thereby
-        # make their finding urgent.
-        awk -v who="$slug" '/^## FINDINGS/{flag=1; next} /^## /{flag=0}
-             flag && /^[-*]/ {
-                 sub(/^[-*][ \t]*/, "")
-                 key = 4
-                 if ($0 ~ /HIGH/)     key = 1
-                 else if ($0 ~ /MED/) key = 2
-                 else if ($0 ~ /LOW/) key = 3
-                 printf "%d\t%s\t%s\n", key, who, $0
-             }' "$f" >> "$raw"
-    done
-
-    {
-        printf '## Findings\n\n'
-        # -s keeps each panelist's own order inside one severity: they ranked their
-        # own list, and re-sorting within a band would throw that away.
-        sort -s -k1,1n "$raw" | awk -F'\t' '{ printf "F%d. %s — %s\n", NR, $2, $3 }'
-        [ -n "$quiet" ] && printf '\nNo findings reported by: %s\n' "$quiet"
-        printf '\n'
-    } >> "$body"
-    rm -f "$raw"
-
-    # The head line last, because it counts what the body just found. SPAR_DELIVERED
-    # and SPAR_EXPECTED come from the workflow, which is the only place that knows how
-    # many panelists were ASKED — a panelist that died leaves no file, so counting
-    # files cannot tell a silent failure from a smaller panel.
-    {
-        printf '# Panel verdict — GO %s · NO-GO %s · INSUFFICIENT %s' "$go" "$nogo" "$insuf"
-        [ "$nover" -gt 0 ] && printf ' · no verdict %s' "$nover"
-        printf '\n\n%s findings from %s panelist(s).\n\n' "$total" "$((go + nogo + insuf + nover))"
-        # Written for the agent that opens this file without having read the skill.
-        # Every rule here is one this panel has already been burned by.
-        printf '%s\n' \
-          'HOW TO READ THIS (rules, not suggestions):' \
-          '' \
-          '- Carry EVERY finding forward by its id. A finding one panelist made is not' \
-          '  weak — it is the one nobody else saw. Merge two only if they are literally' \
-          '  the same claim, never because they feel similar.' \
-          '- Do NOT re-summarise this file. It is already the compression; the prose it' \
-          '  came from is in the per-panelist files beside it.' \
-          '- (R) means the panelist verified it — opened the file, ran the command.' \
-          '  (G) is a guess. Check a (G) before acting on it; do not discard it.' \
-          '- FIX: is the panelist'"'"'s proposed remedy, not an instruction. Judge it.' \
-          '- Verdicts are independent opinions, not votes. One NO-GO with a reason' \
-          '  outweighs four GO without one. INSUFFICIENT means that panelist could not' \
-          '  see enough — read what it says it was missing.' \
-          ''
-
-        if [ -n "${SPAR_EXPECTED:-}" ] && [ "${SPAR_DELIVERED:-0}" -lt "${SPAR_EXPECTED}" ]; then
-            printf '\n> **WARNING:** only %s of %s panelists delivered. This is a partial\n' \
-                   "$SPAR_DELIVERED" "$SPAR_EXPECTED"
-            printf '> panel — do not report it as a full one.\n'
-        fi
-        printf '\n'
-        cat "$body"
-    } > "$out"
-    rm -f "$body"
-
-    echo "$out"
-    echo "spar-run: $total finding(s) collected verbatim — read the file, do not re-summarise it" >&2
-    [ "$nogo" -gt 0 ] && echo "spar-run: $nogo panelist(s) said NO-GO" >&2
-    return 0
-}
-
 case "${1:-}" in
     start)    shift; cmd_start    "$@" ;;
     wait)     shift; cmd_wait     "$@" ;;
-    findings) shift; cmd_findings "$@" ;;
-    *) die "usage: spar-run.sh start <question-file> [--mount ../repo]... | wait <run-dir> | findings <run-dir>" ;;
+    *) die "usage: spar-run.sh start <question-file> [--mount ../repo]... | wait <run-dir>" ;;
 esac

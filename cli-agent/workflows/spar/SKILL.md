@@ -118,11 +118,12 @@ sharpest one, since only one of them saw it.
 
 # Use the result
 
-    <run-dir>/verdict.md               # already written when the panel finished
-    medulla launch spar findings <run-dir>   # only to rebuild it
+    <run-dir>/verdict.md     # written by the panel itself, as its last act
 
-Read `verdict.md` FIRST — the panel writes it as its last act, so it is there
-before you ask. It opens with every panelist's verdict together — `GO 1 · NO-GO 1
+Read `verdict.md` FIRST — the panel writes it as its last act, so it is there before
+you ask, and it is written by the workflow itself rather than by a tool that has to be
+found (a tool that has to be found is a tool that can be missing: it was, once, and the
+run reported success having written nothing). It opens with every panelist's verdict together — `GO 1 · NO-GO 1
 · INSUFFICIENT 1` — because the SPLIT is the answer to "can we ship", and five files
 each ending in one word are unreadable as five files and obvious as one block. A
 panelist who skipped the section shows as `(no verdict section)` rather than being

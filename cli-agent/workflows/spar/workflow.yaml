@@ -120,48 +120,115 @@ nodes:
 
   synthesize:
     shell: |
-      # No model runs here — this node is jq and awk. It answers two questions the
-      # per-panelist files cannot: WHO delivered (a dead panelist leaves no file, so
-      # counting files cannot tell a silent failure from a panel of three), and what
-      # the verdicts were TOGETHER, which is the answer to "can we ship".
+      # No model runs here — jq and awk, in the workflow itself. It used to call a
+      # script the workflow ships, which meant the script had to REACH the container:
+      # it did not (only prompts/ was mounted), so a live panel reported success while
+      # writing no verdict at all. A node that carries its own tool cannot lose it.
       #
-      # It no longer writes synthesized.md. That file was every panelist's full text
-      # concatenated — the same bytes as the <slug>.md files beside it, twice on disk,
-      # and the skill had to keep telling readers not to stop at it. verdict.md carries
-      # what is actually collectible: the verdicts, and every FINDINGS line verbatim.
+      # What this answers that the per-panelist files cannot: WHO delivered — a dead
+      # panelist leaves no file, so counting files cannot tell a silent failure from a
+      # smaller panel — and what the verdicts were TOGETHER, which is the answer to
+      # "can we ship".
       rows=$(jq -s 'group_by(.key) | map(.[-1])' "$MEDULLA_MANIFEST_PANEL")   # resume appends: latest row per input wins
       total=$(echo "$rows" | jq length)
       ok=$(echo "$rows" | jq 'map(select(.ok)) | length')
-
-      # ONE writer for verdict.md, and it is the collector. This node used to add the
-      # partial-delivery warning itself — to $ROUND_DIR/verdict.md, while the collector
-      # writes $MEDULLA_RUN_DIR/verdict.md. Two different files: the real one was
-      # complete a directory up, and artifacts/verdict.md held the warning and NOTHING
-      # else, because the `cat` that was meant to append the body found no such file.
-      # Seen live on a 4/5 panel — a full set of findings replaced by one line.
       out="$MEDULLA_RUN_DIR/verdict.md"
-      # `-f`, not `-x`: a copy that lost its executable bit is still runnable through
-      # bash, and refusing it would be a second way to lose the verdict over nothing.
-      collector="$MEDULLA_WORKFLOW_DIR/scripts/spar-run.sh"
-      if [ -f "$collector" ]; then
-        SPAR_EXPECTED="$total" SPAR_DELIVERED="$ok" \
-          bash "$collector" findings "$MEDULLA_RUN_DIR" >/dev/null || \
-          echo "<signal:update>collector failed — the per-panelist files are intact</signal:update>"
-      else
-        echo "<signal:update>no collector at $collector</signal:update>"
-      fi
+      body="$MEDULLA_RUN_DIR/.verdict.body"
+      raw="$MEDULLA_RUN_DIR/.verdict.raw"
+      : > "$body"; : > "$raw"
+
+      skip_file() {   # not panelists: the question, and this file itself
+        case "$(basename "$1")" in question.md|verdict.md|synthesized.md) return 0 ;; esac
+        return 1
+      }
+
+      go=0; nogo=0; insuf=0; nover=0; findings=0; quiet=""
+      {
+        printf '## Verdicts\n\n'
+        for f in "$ROUND_DIR"/*.md; do
+          [ -e "$f" ] || continue
+          skip_file "$f" && continue
+          slug=$(basename "$f" .md)
+          word=$(awk '/^## VERDICT/{flag=1; next} /^## /{flag=0} flag && NF {print; exit}' "$f")
+          case "$word" in
+            GO*)           go=$((go + 1)) ;;
+            NO-GO*)        nogo=$((nogo + 1)) ;;
+            INSUFFICIENT*) insuf=$((insuf + 1)) ;;
+            *)             nover=$((nover + 1)); word="_no VERDICT section_" ;;
+          esac
+          printf -- '- **%s** — %s\n' "$slug" "$word"
+        done
+        printf '\n'
+      } >> "$body"
+
+      # Findings as ONE list, sorted by the severity the FINDER gave it, numbered so a
+      # reader can report back per item. Unrated sinks: skipping the rating does not
+      # make a finding urgent.
+      for f in "$ROUND_DIR"/*.md; do
+        [ -e "$f" ] || continue
+        skip_file "$f" && continue
+        slug=$(basename "$f" .md)
+        n=$(awk '/^## FINDINGS/{flag=1; next} /^## /{flag=0} flag && /^[-*]/' "$f" | wc -l | tr -d ' ')
+        if [ "$n" -eq 0 ]; then quiet="$quiet${quiet:+, }$slug"; continue; fi
+        findings=$((findings + n))
+        awk -v who="$slug" '/^## FINDINGS/{flag=1; next} /^## /{flag=0}
+             flag && /^[-*]/ {
+               sub(/^[-*][ \t]*/, "")
+               key = 4
+               if ($0 ~ /HIGH/)     key = 1
+               else if ($0 ~ /MED/) key = 2
+               else if ($0 ~ /LOW/) key = 3
+               printf "%d\t%s\t%s\n", key, who, $0
+             }' "$f" >> "$raw"
+      done
+      {
+        printf '## Findings\n\n'
+        # -s keeps each panelist's own order within a severity band: they ranked their
+        # own list, and re-sorting inside a band would throw that away.
+        sort -s -k1,1n "$raw" | awk -F'\t' '{ printf "F%d. %s — %s\n", NR, $2, $3 }'
+        [ -n "$quiet" ] && printf '\nNo findings reported by: %s\n' "$quiet"
+        printf '\n'
+      } >> "$body"
+
+      # The head last, because it counts what the body found. The reading rules ride
+      # in the file for the agent that was handed a path and never saw the skill.
+      {
+        printf '# Panel verdict — GO %s · NO-GO %s · INSUFFICIENT %s' "$go" "$nogo" "$insuf"
+        [ "$nover" -gt 0 ] && printf ' · no verdict %s' "$nover"
+        printf '\n\n%s findings from %s panelist(s).\n\n' "$findings" "$((go + nogo + insuf + nover))"
+        if [ "$ok" -lt "$total" ]; then
+          printf '> **WARNING:** only %s of %s panelists delivered. This is a partial\n' "$ok" "$total"
+          printf '> panel — do not report it as a full one.\n\n'
+        fi
+        printf '%s\n' \
+          'HOW TO READ THIS (rules, not suggestions):' \
+          '' \
+          '- Carry EVERY finding forward by its id. A finding one panelist made is not' \
+          '  weak — it is the one nobody else saw. Merge two only if they are literally' \
+          '  the same claim, never because they feel similar.' \
+          '- Do NOT re-summarise this file. It is already the compression; the prose it' \
+          '  came from is in the per-panelist files beside it.' \
+          '- (R) means the panelist verified it — opened the file, ran the command.' \
+          '  (G) is a guess. Check a (G) before acting on it; do not discard it.' \
+          '- FIX: is the panelist'"'"'s proposed remedy, not an instruction. Judge it.' \
+          '- Verdicts are independent opinions, not votes. One NO-GO with a reason' \
+          '  outweighs four GO without one. INSUFFICIENT means that panelist could not' \
+          '  see enough — read what it says it was missing.' \
+          ''
+        cat "$body"
+      } > "$out"
+      rm -f "$body" "$raw"
+
       [ "$ok" -lt "$total" ] && echo "<signal:update>only $ok/$total panelists delivered</signal:update>"
 
-      # Do not sign for what was not delivered. `ready` used to fire unconditionally,
-      # so a run whose collector was missing reported success and named a verdict.md
-      # that did not exist — the reader went looking for a file rather than for the
-      # four intact panelist files beside it. Say which those are.
+      # Do not sign for what was not written. `ready` used to fire unconditionally, so
+      # a run that collected nothing still named a verdict.md that did not exist.
       if [ ! -s "$out" ]; then
         echo "verdict.md was not written; the panelists' own files are in $ROUND_DIR:"
         ls "$ROUND_DIR"/*.md 2>/dev/null || true
-        echo "<signal:no_verdict>collector produced no $out — read $ROUND_DIR/*.md</signal:no_verdict>"
+        echo "<signal:no_verdict>no $out — read $ROUND_DIR/*.md</signal:no_verdict>"
       else
-        echo "$ok/$total panelists -> $out"
+        echo "$ok/$total panelists, $findings finding(s) -> $out"
         echo "<signal:ready>$out</signal:ready>"
       fi
     timeout: 30
