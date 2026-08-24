@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 from medulla.v2.engine import run_workflow
-
 from test_hooks_agents import read_run, setup
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
@@ -158,7 +157,7 @@ def test_every_workflow_directory_reaches_the_container(tmp_path, monkeypatch):
     ("prompts",) — so scripts/ never arrived and the synthesize node's collector did
     not exist inside. The panel wrote no verdict.md and still reported success."""
     sys.path.insert(0, str(SCRIPTS))
-    import docker as dockerpy                       # noqa: F401  (the runner script)
+    import docker as dockerpy  # noqa: F401  (the runner script)
 
     shared = tmp_path / "home" / ".medulla" / "workflows" / "spar"
     for sub in ("prompts", "scripts", "templates"):
