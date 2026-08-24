@@ -582,3 +582,23 @@ nodes:
     assert len(dead) == 1
     assert dead[0]["reason"] == "pre" and dead[0]["attempts"] == 0
     assert any(r["ok"] for r in rows)                     # the healthy one delivered
+
+
+def test_a_node_is_told_where_its_workflow_lives(tmp_path):
+    """A node that wants to run its workflow's own script had no way to find it: the
+    path depends on which copy resolved and, in a container, on where it was mounted."""
+    yaml, work = setup(tmp_path, """
+version: "2"
+start: a
+nodes:
+  a:
+    shell: |
+      echo "$MEDULLA_WORKFLOW_DIR" > seen.txt
+      test -f "$MEDULLA_WORKFLOW_DIR/workflow.yaml"
+      echo "<signal:ok>k</signal:ok>"
+    on_signal: {ok: __exit_ok__}
+""")
+    run_workflow(yaml, workdir=work)
+    _run, out, _j = read_run(yaml.parent)
+    assert out["outcome"] == "succeeded"          # the `test -f` above had to pass
+    assert (work / "seen.txt").read_text().strip() == str(yaml.parent)

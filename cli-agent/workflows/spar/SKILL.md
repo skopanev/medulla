@@ -121,9 +121,11 @@ partial panel as a full one.
 
 # Use the result
 
-    medulla launch spar findings <run-dir>   # every VERDICT and FINDINGS line, verbatim
+    <run-dir>/all-findings.md          # already written when the panel finished
+    medulla launch spar findings <run-dir>   # only to rebuild it
 
-Read that file FIRST. It opens with every panelist's verdict together — `GO 1 · NO-GO 1
+Read `all-findings.md` FIRST — the panel writes it as its last act, so it is there
+before you ask. It opens with every panelist's verdict together — `GO 1 · NO-GO 1
 · INSUFFICIENT 1` — because the SPLIT is the answer to "can we ship", and five files
 each ending in one word are unreadable as five files and obvious as one block. A
 panelist who skipped the section shows as `(no verdict section)` rather than being

@@ -141,6 +141,15 @@ nodes:
         printf '> WARNING: only %s/%s panelists delivered output\n' "$ok" "$total" >> "$out"
         echo "<signal:update>only $ok/$total panelists delivered</signal:update>"
       fi
+      # Collect the verdicts and findings NOW, while the panel is still the thing
+      # happening — not on a later command that needs medulla installed and this
+      # workflow still resolvable to read files that are already on disk. Same script
+      # the caller would have run, so the awk lives in one place.
+      collector="$MEDULLA_WORKFLOW_DIR/scripts/spar-run.sh"
+      if [ -x "$collector" ]; then
+        bash "$collector" findings "$MEDULLA_RUN_DIR" >/dev/null || \
+          echo "<signal:update>could not collect findings (artifacts are still there)</signal:update>"
+      fi
       echo "synthesized $ok takes -> $out"
       echo "<signal:ready>$out</signal:ready>"
     timeout: 30

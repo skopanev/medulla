@@ -96,11 +96,17 @@ RUN ONE — the whole launch contract is these two lines:
                 w(f"            medulla launch {name} ...   ({script.name})\n")
         w("\n    medulla init <name>            add another (bundled template or scaffold)\n")
     else:
-        w("""
+        # Name a real bundled template rather than hardcoding one: the engine has no
+        # business knowing any particular workflow, and a name printed here that the
+        # install does not carry is a wrong path — the exact failure this page exists
+        # to stop.
+        from .init import bundled_templates
+        example = (bundled_templates() or ["<name>"])[0]
+        w(f"""
 AVAILABLE HERE — none. Neither ./.medulla/workflows/ nor ~/.medulla/workflows/
 holds a workflow.yaml. Get one:
 
-    medulla init spar              deploy a bundled template machine-wide
+    medulla init {example}{" " * max(1, 14 - len(example))}deploy a bundled template machine-wide
     medulla init <name>            scaffold a new workflow in this repo
 """)
 

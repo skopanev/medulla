@@ -13,6 +13,8 @@ environment the engine provides to bodies and hooks (agents: read this, it is th
   always
     MEDULLA_RUN_ID          run id (settable from outside for correlation)
     MEDULLA_RUN_DIR         this run's directory; put deliverables in $MEDULLA_RUN_DIR/artifacts/
+    MEDULLA_WORKFLOW_DIR    where this workflow's own files live (prompts/, scripts/) —
+                            the copy that actually resolved, at its path in THIS process
     <all workflow vars>     exported as-is, including <signal:var>-set ones
     MEDULLA_TIMEOUT_S       resolved (deadline-clamped) timeout of the current step, seconds
     MEDULLA_ATTEMPT_ID      unique attempt id: <step>.<p|f><n>  (e.g. 003.i2.p1)

@@ -179,6 +179,7 @@ a symlink into the shared copy is mounted the same way and works too.
 | Variable | When | Meaning |
 |---|---|---|
 | `MEDULLA_RUN_ID` / `MEDULLA_RUN_DIR` | always | run id / run directory. Put deliverables in `$MEDULLA_RUN_DIR/artifacts/` |
+| `MEDULLA_WORKFLOW_DIR` | always | where this workflow's own files live (`prompts/`, `scripts/`) |
 | *all workflow vars* | always | exported as-is, including `<signal:var>`-set ones |
 | *all `.env` entries* | always | secrets merge: `~/.medulla/.env` < `<project>/.medulla/.env` < `<workflow>/.env` |
 | `MEDULLA_TIMEOUT_S` | always | resolved, deadline-clamped timeout of the current step (CLIs size their own limits from it) |

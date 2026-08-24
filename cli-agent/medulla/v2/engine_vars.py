@@ -36,6 +36,13 @@ class VarsMixin:
         env = {**self.dotenv, **source}
         env["MEDULLA_RUN_ID"] = self.store.run_id
         env["MEDULLA_RUN_DIR"] = str(self.store.dir)
+        # Where the workflow's own files live — prompts/, scripts/, anything it ships.
+        # A node that wants to call its workflow's own script had no way to find it:
+        # the path depends on which copy resolved (repo-local or machine-wide) and, in
+        # a container, on where that copy was mounted. Every other answer to "where am
+        # I" is here, so this one belongs here too.
+        if self.p.dir:
+            env["MEDULLA_WORKFLOW_DIR"] = str(self.p.dir)
         # Stops HERE. It is an internal compensator (scripts/docker.py sets it when the
         # definition is mounted read-only), and bodies inherit os.environ wholesale — so
         # a `medulla` invoked from inside a body would root ITS history in OUR run
