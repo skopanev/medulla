@@ -184,10 +184,12 @@ def ensure_image(image, build, workflow, cli_vars, dockerfile=None, ready_image=
     return proc.returncode
 
 
-# Keep this many builds of one repository, newest first (the fresh one included).
-# Two, because the previous image is what you fall back to when a Dockerfile change
-# turns out wrong — a third has never been the one anybody wanted.
-KEEP_IMAGES = 2
+# Keep this many builds of one repository, newest first: just the one that was
+# built. The image is reproducible from its Dockerfile, so an older one is not a
+# backup, it is 6 GB of disk holding a version nobody asked for — and a wrong
+# Dockerfile change is fixed by fixing the Dockerfile, not by rolling back to an
+# image whose contents nobody remembers.
+KEEP_IMAGES = 1
 
 
 def prune_old_images(image: str, keep: int = KEEP_IMAGES) -> None:

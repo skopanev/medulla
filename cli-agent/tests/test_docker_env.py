@@ -307,7 +307,7 @@ def test_sighup_does_not_kill_a_backgrounded_run(dockerpy):
 
 # ── image eviction ───────────────────────────────────────────────────────────
 
-def test_prune_keeps_the_newest_builds_of_that_repository_only(monkeypatch, capsys):
+def test_prune_keeps_only_the_build_that_just_ran(monkeypatch, capsys):
     """A tag here is the sha of its Dockerfile, so every edit mints a new image and
     the old one stays forever — three project-manager images, 17 GB, none running."""
     import sys as _sys
@@ -337,7 +337,7 @@ def test_prune_keeps_the_newest_builds_of_that_repository_only(monkeypatch, caps
 
     monkeypatch.setattr(im.subprocess, "run", fake_run)
     im.prune_old_images("medulla-pm:new")
-    assert removed == ["ccc", "ddd"]             # the two newest survive
+    assert removed == ["bbb", "ccc", "ddd"]      # only the build that just ran survives
 
 
 def test_prune_counts_builds_not_tags(monkeypatch):
@@ -363,7 +363,7 @@ def test_prune_counts_builds_not_tags(monkeypatch):
 
     monkeypatch.setattr(im.subprocess, "run", fake_run)
     im.prune_old_images("medulla-pm:new")
-    assert removed == ["ccc"]
+    assert removed == ["bbb", "ccc"]             # aaa survives under BOTH its tags
 
 
 def test_a_failed_build_evicts_nothing(monkeypatch, tmp_path):
