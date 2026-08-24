@@ -2,7 +2,7 @@
 #
 # Run (the question travels as a FILE — a shell argument loses quoting, hits
 # MAX_ARG_STRLEN, and turns a variable that lost its content into an empty question):
-#   spar-run.sh start question.md          <- the supported way; it composes the below
+#   medulla launch spar start question.md   <- the supported way; it composes the below
 #   medulla -w spar --var-file "QUESTION=question.md"
 #   medulla --docker --cwd-ro --runs-folder .medulla/panel-runs \
 #     -w spar --var-file "QUESTION=question.md"

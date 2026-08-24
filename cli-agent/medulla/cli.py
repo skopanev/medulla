@@ -85,6 +85,10 @@ def entry() -> int:
                      else _P.home() / ".medulla") / "workflows" / name)
             rc = install_skill_md(name, wdir, local=local)
         return rc
+    if argv and argv[0] == "launch":
+        from .launch import launch
+        return launch(argv[1:])
+
     if argv and argv[0] == "upgrade":
         # two install methods exist: install.sh (venv at ~/.medulla/engine;
         # pre-4.0.4 installs used ~/.medulla-engine — the installer migrates)

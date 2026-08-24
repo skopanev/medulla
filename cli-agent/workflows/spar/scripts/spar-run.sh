@@ -14,7 +14,12 @@
 # chased. Saying it only in stderr prose is not what an exit code is for.
 set -uo pipefail
 
-BOX_NAME=".medulla/panel-runs"
+# Run history lives OUTSIDE the tree under review. It used to sit in
+# .medulla/panel-runs/ inside the repo, which meant every worktree grew a directory
+# and a .gitignore line it never asked for — and the panel promised not to write into
+# that tree at all. One box per repo root under $HOME, named for the root and keyed by
+# its full path so two worktrees of the same project never share.
+# MEDULLA_PANEL_RUNS overrides it whole.
 WORKFLOW="spar"               # a bare name: local .medulla/workflows/spar wins, else machine-wide
 DEFAULT_TIMEOUT=2700          # 45 min: a panel is 10-20, so this is "something hung"
 
@@ -29,22 +34,18 @@ preflight() {
         || die "no spar workflow: neither ./.medulla/workflows/$WORKFLOW nor ~/.medulla/workflows/$WORKFLOW (medulla init spar)"
 }
 
-ignore_the_box() {
-    # The box lives in the repo, so it must not reach the index of the very tree the
-    # panel promised not to touch — but the way to arrange that is NOT to edit
-    # somebody's .gitignore. That file is theirs, it is committed, and a line
-    # appearing in it because a tool ran is a diff they now have to explain. Seen
-    # live: the line was deleted by hand in another repo, which is the correct
-    # reaction to a tool writing where it was not invited.
-    # A directory can ignore ITSELF: .gitignore inside it, matching everything.
-    # Same effect on git status, nothing outside the box is touched, and deleting
-    # the box deletes the rule with it.
-    local gi="$1/.gitignore"
-    [ -f "$gi" ] && return 0
-    printf '%s\n' "# spar panel history, written by spar-run.sh. Ignores itself so it" \
-                  "# never reaches the index of the repository under review." \
-                  "*" > "$gi" 2>/dev/null \
-        || echo "spar-run: WARNING cannot write $gi — the box will show up in git status" >&2
+box_for() {
+    # Same root -> same box, always; different worktrees of one project -> different
+    # boxes. basename alone collides (three repos have a `main` worktree), the full
+    # path alone is unreadable, so: name for humans, hash for identity.
+    local root="$1" slug tag
+    if [ -n "${MEDULLA_PANEL_RUNS:-}" ]; then
+        printf '%s\n' "$MEDULLA_PANEL_RUNS"
+        return 0
+    fi
+    slug=$(basename "$root")
+    tag=$(printf '%s' "$root" | shasum 2>/dev/null | cut -c1-8)
+    printf '%s\n' "$HOME/.medulla/panel-runs/${slug}-${tag}"
 }
 
 force_repo_root() {
@@ -68,9 +69,8 @@ cmd_start() {
     force_repo_root
     preflight
 
-    local box="$PWD/$BOX_NAME"
+    local box; box=$(box_for "$PWD")
     mkdir -p "$box" || die "cannot create $box"
-    ignore_the_box "$box"
     # A fixed name races: fire-and-forget is the whole design, and a second start
     # before the first medulla read its var-file would silently swap the question.
     # One id per run, for the question AND the logs. A shared run.log is worse than it

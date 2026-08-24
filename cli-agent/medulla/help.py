@@ -92,7 +92,8 @@ RUN ONE — the whole launch contract is these two lines:
             w(f"        {d}  ({scope})\n")
             script = _launcher(d)
             if script is not None:
-                w(f"        this one ships a launcher — use it instead: {script}\n")
+                w("        ships a launcher — use it instead, from ANY directory:\n")
+                w(f"            medulla launch {name} ...   ({script.name})\n")
         w("\n    medulla init <name>            add another (bundled template or scaffold)\n")
     else:
         w("""
@@ -127,6 +128,7 @@ PATHS INSIDE --docker — the mistake worth naming twice
 
 MORE
 
+    medulla launch <name>   run a workflow's own launcher from anywhere (see above)
     medulla --help          every flag, every MEDULLA_* variable, the signal grammar
     medulla init --help     deploying templates and registering SKILL.md
     medulla upgrade         update this installation

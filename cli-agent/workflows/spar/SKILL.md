@@ -51,11 +51,11 @@ Cover:
   lines or snippets; that wastes tokens and anchors them on what you
   think matters. Give direction, not extracts.
 - **Sibling repos — mount them, and name them the way the panel sees them.** For code
-  outside this workspace: `spar-run.sh start q.md --mount ../other-repo` (repeatable,
+  outside this workspace: `medulla launch spar start q.md --mount ../other-repo` (repeatable,
   read-only). Inside the container it appears at **`/workspace/other-repo`** — the
   basename, under /workspace — NOT at `../other-repo`, which does not exist there. Point
   the panel at the container path, or they burn a turn on "No such file or directory".
-  `spar-run.sh` prints the mapping for every mount when it starts.
+  The launcher prints the mapping for every mount when it starts.
 
 - **Demands — only the ones your question needs.** The standing rules already reach
   every panelist through the workflow's own prompt: investigate before answering,
@@ -67,24 +67,28 @@ Cover:
 
 # Run the panel
 
-    spar-run.sh start question.md                 # prints the run dir
-    spar-run.sh start question.md --mount ../repo # repeatable, read-only
-    spar-run.sh wait  <run-dir>                   # blocks until it finishes
+    medulla launch spar start question.md                 # prints the run dir
+    medulla launch spar start question.md --mount ../repo # repeatable, read-only
+    medulla launch spar wait  <run-dir>                   # blocks until it finishes
 
-The script lives beside the workflow — `.medulla/workflows/spar/scripts/spar-run.sh`
-locally, `~/.medulla/workflows/spar/scripts/spar-run.sh` machine-wide. Write your
-prompt to a file and hand it that file; nothing about the question passes through a
-shell argument, so quoting, `$`, backticks and length stop mattering.
+Call it through `medulla launch`, never by path. The script is a FILE, so a relative
+path to it exists only where the workflow is installed: in a git worktree, in a sibling
+repo, in any tree without its own copy, `.medulla/workflows/spar/scripts/spar-run.sh`
+is "no such file or directory". `medulla launch spar` finds it by NAME through the same
+cascade `-w` uses, from any directory. Write your prompt to a file and hand it that
+file; nothing about the question passes through a shell argument, so quoting, `$`,
+backticks and length stop mattering.
 
 It is a script and not a command for you to reproduce because this repo's own
 AGENTS.md says LLMs cannot be trusted to run exact commands — and the contract it
 replaced had a heredoc, a background job, a poll loop and a `$PID` in it. The script
 checks medulla, docker and the workflow before starting, keeps the run's history out
-of the tree under review (the box carries its own `.gitignore`, so nothing is written
-into yours), and refuses to report a run directory it cannot vouch for.
+of the tree under review entirely — it lands in `~/.medulla/panel-runs/<repo>-<hash>/`,
+so the repository you are reviewing gains no directory and no `.gitignore` line — and
+refuses to report a run directory it cannot vouch for.
 
 `start` returns in about a second and the panel keeps working for 10-20 minutes. Do
-not sit on it: go do other work, then `wait` — it blocks until `outcome.json` exists,
+not sit on it: go do other work, then `medulla launch spar wait <run-dir>` — it blocks until `outcome.json` exists,
 lists what was delivered, and exits non-zero if the run failed or never finished (45
 minutes by default, `--timeout` to change). A hang and a verdict need different
 reactions, so it distinguishes them.
@@ -113,7 +117,7 @@ partial panel as a full one.
 
 # Use the result
 
-    spar-run.sh findings <run-dir>     # every FINDINGS list, cut out verbatim
+    medulla launch spar findings <run-dir>   # every FINDINGS list, cut out verbatim
 
 Read that file FIRST. Asking a summariser not to summarise is asking water to be dry:
 a model that reads five artifacts and retells them will drop the lone finding — which
