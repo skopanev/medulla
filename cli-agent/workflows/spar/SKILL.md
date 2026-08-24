@@ -88,10 +88,10 @@ so the repository you are reviewing gains no directory and no `.gitignore` line 
 refuses to report a run directory it cannot vouch for.
 
 `start` returns in about a second and the panel keeps working for 10-20 minutes. Do
-not sit on it: go do other work, then `medulla launch spar wait <run-dir>` — it blocks until `outcome.json` exists,
-lists what was delivered, and exits non-zero if the run failed or never finished (45
-minutes by default, `--timeout` to change). A hang and a verdict need different
-reactions, so it distinguishes them.
+not sit on it: go do other work, then `medulla launch spar wait <run-dir>`. It blocks
+until `outcome.json` exists, lists what was delivered, and exits non-zero if the run
+failed or never finished (45 minutes by default, `--timeout` to change). A hang and a
+verdict need different reactions, so it distinguishes them.
 
 List the artifacts with your Glob tool, then read them **one file at a time**:
 
@@ -100,23 +100,21 @@ List the artifacts with your Glob tool, then read them **one file at a time**:
 Do not `cat` them all into the terminal: five panelists × ~500 words is a wall
 of text that buries exactly the lone finding you are here to preserve.
 
-Each panelist closes with two sections. `## FINDINGS` — one line per finding, `(R)`
-confirmed or `(G)` guessed, a `file:line` or a concrete scenario, and a `FIX:` clause
-saying what to do about it. Then `## VERDICT` — one of `GO` / `NO-GO` /
-`INSUFFICIENT` with a reason, plus `FIRST:` (what to fix before anything else) and
-`THEN:` (where the next defect lands once it is fixed). Both are the machine-readable
-part: carry every line forward, attributed. `NONE` in FINDINGS is a real answer, and
-so is `INSUFFICIENT` — a panelist who could not see enough says so instead of dressing
-a guess as a decision.
+Each panelist closes with two sections. `## FINDINGS` — one line per finding: `(R)`
+confirmed or `(G)` guessed, `HIGH`/`MED`/`LOW` as the FINDER rates it, a `file:line`
+or a concrete scenario, and a `FIX:` naming the function, the change and why. Then
+`## VERDICT` — one line, `GO` / `NO-GO` / `INSUFFICIENT` and a reason. Both are the
+machine-readable part: carry every line forward, attributed. `NONE` in FINDINGS is a
+real answer, and so is `INSUFFICIENT` — a panelist who could not see enough says so
+instead of dressing a guess as a decision.
+
+`verdict.md` sorts the findings HIGH first and numbers them `F1`, `F2`… so you can
+report back on each one by name.
 
 **Then read every panelist's own file.** The artifacts directory holds one
 `<slug>.md` per panelist — the argument behind their findings, which `verdict.md`
 does not carry. Read them ALL. A finding exactly one panelist made is usually the
 sharpest one, since only one of them saw it.
-
-A `WARNING: only N/M panelists delivered` line means partial delivery: someone
-died or their provider refused. Say so when you report; do not present a
-partial panel as a full one.
 
 # Use the result
 
@@ -141,6 +139,17 @@ carries the reasoning that `verdict.md` cannot. What to look for:
 2. Where they diverge, and which divergence actually decides your question.
 3. What all of them missed, because none of them saw your conversation or your
    constraints. You are the only one who can notice that.
+4. **Use the `FIX:` clauses — they were written FOR you.** The panel provides
+   mechanical fixes (functions, lines, commands) specifically to save your time. Pick
+   the one that fits and apply it; re-deriving a remedy the panel already worked out
+   turns a 20-minute run into a 40-minute one.
+
+   **Using is not obeying:**
+   - A `(G)` fix is a guess — verify the claim before applying it.
+   - Incompatible fixes for one defect mean the *fix* is the arguable part, not the
+     defect. Decide which one to use, and say why.
+   - You alone see the full context and constraints. Apply what fits, adapt what
+     nearly fits, and explicitly state which fixes you rejected and on what evidence.
 
 A `WARNING: only N/M panelists delivered` line means partial delivery — somebody died
 or a provider refused. Say so when you report; never present a partial panel as a full

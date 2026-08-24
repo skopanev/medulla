@@ -41,16 +41,30 @@ order — FINDINGS first, VERDICT last:
 ## FINDINGS
 One line per finding, nothing merged:
 
-- (R|G) <claim> — <file:line or a concrete failure scenario> — <why it matters> — FIX: <what to do>
+- (R|G) HIGH|MED|LOW — <claim> — <file:line or a concrete failure scenario> — <why it matters> — FIX: <what to do>
 
 Rules:
-- **FIX belongs ON THE LINE, not in the prose above.** One clause: the change you
-  would make, concrete enough to act on — "guard the None before line 88", "drop the
-  cache, it cannot be invalidated", "ask the author, this is not ours to fix". Only
-  the FINDINGS section is collected mechanically; a remedy written anywhere else is
-  a remedy the reader has to go find, and this panel has already learned what
-  happens to things that must be gone and found. If you genuinely do not know the
-  fix, write `FIX: unknown — <what would tell you>`. That is information too.
+- **HIGH / MED / LOW is YOUR call, not a scale handed to you.** You found it, you
+  say how much it matters: HIGH if it should stop the change, MED if it must be fixed
+  but not today, LOW if it is worth knowing and nothing more. Two panelists rating the
+  same defect differently is information, not a contradiction — it says the thing is
+  arguable, and the reader should look. Do not inflate: a file where everything is
+  HIGH sorts to exactly the same order as a file with no ratings at all.
+- **FIX is a PROPOSAL, and it says HOW.** The reader is often an AI agent fixing a
+  ticket. Save their time: write mechanical, directly actionable fixes. Instead of
+  abstract advice ("handle the edge case"), write EXACTLY what to change — function
+  names, specific lines, or shell commands. "Crash instead of warning" is an
+  instruction with no mechanism. "Raise EngineCrash in record_session() when the name
+  already holds a different id — a warning there is invisible in a pool of five" is a
+  proposal: it names the place, the change and the reason, so the reader can accept,
+  adapt, or refuse it on evidence. Without the reason there is nothing to refuse
+  except your authority.
+
+  Specific is not long: this is a route, not a patch — a function name and one clause
+  of why. If you do not know the fix, write `FIX: unknown — <what would tell you>`;
+  that is information, and better than an invented remedy stated with confidence. Only
+  FINDINGS is collected mechanically, so a remedy written anywhere else is one the
+  reader has to go find.
 - **Report EVERY defect you find, not the worst one.** Stopping at the first, or at
   "the main issue", is the single most common way this panel wastes a round: the
   round costs the same whether you return one finding or nine, and the ones you
@@ -67,13 +81,11 @@ Rules:
 
 ## VERDICT
 
-Close with this section, verbatim heading, exactly three lines:
+Close with this section, verbatim heading, exactly two lines:
 
 ```
 ## VERDICT
 GO | NO-GO | INSUFFICIENT — one line: why
-FIRST: <the one thing to fix before anything else, and why that one>
-THEN: <what this change breaks or exposes next — where the next defect will come from>
 ```
 
 Pick ONE word:
@@ -86,7 +98,7 @@ Pick ONE word:
   the difference. Nobody is punished for INSUFFICIENT; a confident wrong call costs
   the round twice.
 
-FIRST and THEN are what turn a list into a plan. Five panelists returning fifteen
-findings leaves the ordering to whoever reads them — which is the one person who did
-not investigate. FIRST is your ordering, and THEN is where you expect the next defect
-to land once this one is fixed, so the fix does not simply move the problem.
+Nothing else goes in this section. If you think something must be fixed before
+anything else, or that fixing X will expose Y, those are FINDINGS — write them up
+there, with a file and a FIX, where they will be carried forward. The verdict is
+your answer to "can this ship", and that is one line.
