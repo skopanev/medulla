@@ -193,10 +193,17 @@ def main():
                 name = resolved.parent.name
                 mnt = f"/mnt/medulla-workflows/{name}"
                 volumes.extend(["-v", f"{resolved}:{mnt}/workflow.yaml:ro"])
-                for extra in ("prompts",):
-                    src = resolved.parent / extra
-                    if src.is_dir():
-                        volumes.extend(["-v", f"{src}:{mnt}/{extra}:ro"])
+                # EVERY directory the workflow ships, not a hardcoded list. It was
+                # ("prompts",) — so scripts/ never reached the container, and the
+                # synthesize node's `$MEDULLA_WORKFLOW_DIR/scripts/spar-run.sh` did not
+                # exist there. The panel then wrote no verdict.md at all while the node
+                # still reported success. A workflow that ships a directory ships it
+                # because a node needs it; runs/ is the one exception, being history
+                # rather than definition.
+                for src in sorted(d for d in resolved.parent.iterdir() if d.is_dir()):
+                    if src.name in ("runs", "__pycache__"):
+                        continue
+                    volumes.extend(["-v", f"{src}:{mnt}/{src.name}:ro"])
                 args = [f"{mnt}/workflow.yaml" if a == str(workflow) else a for a in args]
                 # RELATIVE, not /workspace/...: --print-run-dir hands this path back to
                 # the caller, who is on the HOST while the run happened inside the

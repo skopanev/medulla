@@ -140,17 +140,33 @@ nodes:
       # else, because the `cat` that was meant to append the body found no such file.
       # Seen live on a 4/5 panel — a full set of findings replaced by one line.
       out="$MEDULLA_RUN_DIR/verdict.md"
+      # `-f`, not `-x`: a copy that lost its executable bit is still runnable through
+      # bash, and refusing it would be a second way to lose the verdict over nothing.
       collector="$MEDULLA_WORKFLOW_DIR/scripts/spar-run.sh"
-      if [ -x "$collector" ]; then
+      if [ -f "$collector" ]; then
         SPAR_EXPECTED="$total" SPAR_DELIVERED="$ok" \
           bash "$collector" findings "$MEDULLA_RUN_DIR" >/dev/null || \
-          echo "<signal:update>could not collect findings (artifacts are still there)</signal:update>"
+          echo "<signal:update>collector failed — the per-panelist files are intact</signal:update>"
       else
-        echo "<signal:update>collector not found at $collector — artifacts are still there</signal:update>"
+        echo "<signal:update>no collector at $collector</signal:update>"
       fi
       [ "$ok" -lt "$total" ] && echo "<signal:update>only $ok/$total panelists delivered</signal:update>"
-      echo "$ok/$total panelists -> $out"
-      echo "<signal:ready>$out</signal:ready>"
+
+      # Do not sign for what was not delivered. `ready` used to fire unconditionally,
+      # so a run whose collector was missing reported success and named a verdict.md
+      # that did not exist — the reader went looking for a file rather than for the
+      # four intact panelist files beside it. Say which those are.
+      if [ ! -s "$out" ]; then
+        echo "verdict.md was not written; the panelists' own files are in $ROUND_DIR:"
+        ls "$ROUND_DIR"/*.md 2>/dev/null || true
+        echo "<signal:no_verdict>collector produced no $out — read $ROUND_DIR/*.md</signal:no_verdict>"
+      else
+        echo "$ok/$total panelists -> $out"
+        echo "<signal:ready>$out</signal:ready>"
+      fi
     timeout: 30
     on_signal:
       ready: __exit_ok__
+      # A panel that answered but could not be collected is NOT a failed panel: the
+      # artifacts are there and worth reading. It exits ok with the reason on record.
+      no_verdict: __exit_ok__

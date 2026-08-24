@@ -151,3 +151,29 @@ def test_a_nested_worktrees_git_dir_is_mounted(tmp_path, monkeypatch):
     assert mounted, f"the common .git was not mounted; got {vols}"
     # at its OWN path, which is what makes the worktree's absolute pointer resolve
     assert mounted[0].split(":")[1] == common
+
+
+def test_every_workflow_directory_reaches_the_container(tmp_path, monkeypatch):
+    """A shared definition is mounted file by file, and the list was hardcoded to
+    ("prompts",) — so scripts/ never arrived and the synthesize node's collector did
+    not exist inside. The panel wrote no verdict.md and still reported success."""
+    sys.path.insert(0, str(SCRIPTS))
+    import docker as dockerpy                       # noqa: F401  (the runner script)
+
+    shared = tmp_path / "home" / ".medulla" / "workflows" / "spar"
+    for sub in ("prompts", "scripts", "templates"):
+        (shared / sub).mkdir(parents=True)
+    (shared / "workflow.yaml").write_text("version: '2'\nstart: n\nnodes: {}\n")
+    (shared / "runs").mkdir()
+
+    from dockerlib.image import _config_yaml
+    monkeypatch.setattr("dockerlib.paths.definition_is_outside_workspace", lambda _p: True)
+
+    resolved = _config_yaml(shared)
+    mounted = []
+    for src in sorted(d for d in resolved.parent.iterdir() if d.is_dir()):
+        if src.name in ("runs", "__pycache__"):
+            continue
+        mounted.append(src.name)
+    assert mounted == ["prompts", "scripts", "templates"]
+    assert "runs" not in mounted                    # history, not definition
