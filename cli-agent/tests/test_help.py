@@ -149,3 +149,33 @@ def test_refresh_updates_the_machine_wide_copy_too(sandbox, monkeypatch, capsys)
     assert (shared / "workflow.yaml").read_text() == "current\n"
     assert "current" in (shared / "scripts" / "spar-run.sh").read_text()
     assert "machine-wide" in capsys.readouterr().out
+
+
+def test_refresh_updates_machine_wide_skills_including_profiles(sandbox, monkeypatch, capsys):
+    """A skill installed in $HOME is never under the search root either — and Claude
+    Code profiles (~/.claude-<name>) multiply the copies. Five of them stayed stale
+    while refresh reported success."""
+    from medulla.refresh import refresh_skill
+
+    home, cwd = sandbox
+    bundle = home / "bundle" / "spar"
+    bundle.mkdir(parents=True)
+    (bundle / "workflow.yaml").write_text("current\n")
+    (bundle / "SKILL.md").write_text("current skill\n")
+    monkeypatch.setattr("medulla.refresh._bundle_dir", lambda _n: bundle)
+
+    installed = []
+    for rel in (".claude/skills", ".agents/skills", ".config/opencode/skills",
+                ".claude-work/skills", ".claude-personal/skills"):
+        d = home / rel / "spar"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text("stale\n")
+        installed.append(d / "SKILL.md")
+    # a profile with no skills dir must not be conjured into one
+    (home / ".claude-empty").mkdir()
+
+    assert refresh_skill("spar", str(cwd)) == 0
+    for target in installed:
+        assert target.read_text() == "current skill\n", target
+    assert not (home / ".claude-empty" / "skills").exists()
+    assert capsys.readouterr().out.count("(machine-wide)") >= 5

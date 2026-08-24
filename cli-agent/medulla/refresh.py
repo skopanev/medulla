@@ -86,9 +86,30 @@ def refresh_skill(name: str, root: str, depth: int = DEFAULT_REFRESH_DEPTH, dry_
     print(f"scanning {root_p} for '{name}' (depth {depth}){tag} — "
           f"refreshing every medulla-owned copy to the current version "
           f"(deploys deeper than {depth} levels are skipped — raise with --depth)...")
-    base = len(root_p.parts)
     n_wf = n_sk = 0
     failures: list[str] = []
+
+    # Machine-wide SKILL copies, which live in $HOME and so are never under the search
+    # root either: ~/.claude/skills, ~/.agents/skills, ~/.config/opencode/skills, and
+    # one per Claude Code profile. Only where the skill is ALREADY installed — refresh
+    # updates what exists, it does not deploy.
+    from .init import skill_dests_global
+    if bundle_skill.is_file():
+        for dest in skill_dests_global():
+            target = dest / name / "SKILL.md"
+            if not target.is_file() or target.is_symlink():
+                continue
+            if dry_run:
+                print(f"  [dry-run] SKILL.md -> {dest / name} (machine-wide)")
+            else:
+                try:
+                    shutil.copy2(bundle_skill, target)
+                    print(f"  SKILL.md  -> {dest / name} (machine-wide)")
+                except OSError as exc:
+                    failures.append(f"{target}: {exc}")
+            n_sk += 1
+
+    base = len(root_p.parts)
 
     # The machine-wide copy FIRST, and whether or not it sits under `root`. It is the
     # one every bare name resolves to and the one repo-local symlinks point at, so

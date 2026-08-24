@@ -64,9 +64,16 @@ def skill_dests_global() -> tuple[Path, ...]:
     opencode reads ~/.config/opencode — the per-user layout differs from per-project.
     """
     home = Path.home()
-    return (home / ".claude" / "skills",
-            home / ".agents" / "skills",
-            home / ".config" / "opencode" / "skills")
+    dests = [home / ".claude" / "skills",
+             home / ".agents" / "skills",
+             home / ".config" / "opencode" / "skills"]
+    # Claude Code profiles: CLAUDE_CONFIG_DIR points at ~/.claude-<name>, and a user
+    # with several of them (work, personal, a client) has several skill directories.
+    # Only EXISTING ones — this must not conjure a profile nobody uses. Found by a
+    # refresh that reported success while five machine-wide copies stayed stale.
+    dests += sorted(p / "skills" for p in home.glob(".claude-*")
+                    if p.is_dir() and (p / "skills").is_dir())
+    return tuple(dests)
 
 
 def install_skill_md(name: str, workflow_dir: Path, local: bool = False) -> int:
