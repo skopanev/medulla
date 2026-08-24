@@ -8,7 +8,6 @@ something inside cannot find something that plainly exists outside.
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -18,6 +17,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))   # source checkout: medulla lives one level up
 
 from dockerlib.image import _config_yaml
+from dockerlib.mountfiles import _mount_agy_keys, _mount_init_docker
+from dockerlib.paths import workspace_cwd
 
 # Home of the NON-ROOT user INSIDE the container. Only the FALLBACK: docker.py probes
 # the resolved image (image_home) and assigns the real one here before mounts are
@@ -69,8 +70,7 @@ def workflow_uses_agy(workflow: str | None) -> bool:
 def build_volumes(claude_home, mount_agy=True, *,
                   cwd_ro: bool = False, runs_folder: Path | None = None):
     home = Path.home()
-    pwd_env = os.environ.get("PWD")
-    cwd = Path(pwd_env) if pwd_env else Path(os.getcwd())
+    cwd = workspace_cwd()
     vols = []
 
     def add(src, dst, ro=False):
@@ -103,20 +103,16 @@ def build_volumes(claude_home, mount_agy=True, *,
     # agents spend their turn working around it instead of reviewing. Mount the common
     # .git at its own host path so the pointer resolves; read-only exactly when the
     # workspace is, since git writes its index and reflog in there.
-    git_pointer = cwd / ".git"
-    if git_pointer.is_file():
-        try:
-            line = git_pointer.read_text(encoding="utf-8").strip()
-        except OSError:
-            line = ""
-        if line.startswith("gitdir:"):
-            gitdir = Path(line.split(":", 1)[1].strip())
-            if not gitdir.is_absolute():
-                gitdir = (cwd / gitdir).resolve()
-            # the worktree's own dir holds no objects or refs — the COMMON .git does
-            common = gitdir.parent.parent if gitdir.parent.name == "worktrees" else gitdir
-            if common.is_dir():
-                add(common, str(common), ro=cwd_ro)
+    #
+    # Checked for cwd AND for its immediate children: a pack that hands an agent an
+    # isolated copy usually creates the worktree INSIDE the project it is working on,
+    # and cwd is then the project, not the worktree. That case used to fall through
+    # this branch entirely and every git command inside answered "fatal: not a git
+    # repository: (null)" — reported from a develop pack, where it makes the whole
+    # arrangement unusable. One level only: deeper is a tree walk on every run, for a
+    # layout nobody has needed yet.
+    for holder in [cwd, *(d for d in cwd.iterdir() if d.is_dir())] if cwd.is_dir() else [cwd]:
+        _mount_worktree_gitdir(holder, add, cwd_ro)
 
     # Shared workflow definitions: a symlink under .medulla/workflows/ points OUT of the
     # workspace (e.g. ~/.medulla/workflows/spar/workflow.yaml, one copy per machine), and
@@ -206,44 +202,25 @@ def build_volumes(claude_home, mount_agy=True, *,
     return vols
 
 
-def _mount_init_docker(vols: list) -> None:
-    # SCRIPT_DIR, not __file__.parent: this module lives one level down in dockerlib/
-    # now, and init-docker.sh stayed beside docker.py. Getting it wrong mounts nothing
-    # and the container dies on `exec /mnt/init-docker.sh: No such file or directory`
-    # — with the file plainly present on the host, which reads as anything but a
-    # missing mount.
-    src = SCRIPT_DIR / "init-docker.sh"
-    if src.is_file():
-        vols.extend(["-v", f"{src}:/mnt/init-docker.sh:ro"])
+def _mount_worktree_gitdir(holder: Path, add, cwd_ro: bool) -> None:
+    """If `holder` is a git worktree, mount the repository its .git file points into.
 
-
-def _mount_agy_keys(vols: list) -> None:
-    import atexit
-    import platform
-    import tempfile
-    if platform.system() != "Darwin":
+    The pointer is an absolute HOST path, so mounting the common .git at that same
+    path is what makes it resolve on both sides of the boundary.
+    """
+    pointer = holder / ".git"
+    if not pointer.is_file():
         return
-
-    def _keychain_get(service: str, account: str) -> str:
-        try:
-            return subprocess.check_output(
-                ["security", "find-generic-password", "-s", service, "-a", account, "-w"],
-                stderr=subprocess.DEVNULL,
-            ).strip().decode()
-        except Exception:
-            return ""
-
-    def _mount(value: str, dst: str) -> None:
-        if not value:
-            return
-        tmp = tempfile.NamedTemporaryFile(prefix="agy-", delete=False, mode="w", suffix=".txt")
-        tmp.write(value)
-        tmp.flush()
-        tmp.close()
-        atexit.register(lambda p=tmp.name: __import__("os").unlink(p) if __import__("os").path.exists(p) else None)
-        vols.extend(["-v", f"{tmp.name}:{dst}:ro"])
-
-    _mount(_keychain_get("gemini", "antigravity"), "/mnt/agy-token")
-    _mount(_keychain_get("Antigravity Safe Storage", "Antigravity Key"), "/mnt/agy-safe-key")
-
-
+    try:
+        line = pointer.read_text(encoding="utf-8").strip()
+    except OSError:
+        return
+    if not line.startswith("gitdir:"):
+        return
+    gitdir = Path(line.split(":", 1)[1].strip())
+    if not gitdir.is_absolute():
+        gitdir = (holder / gitdir).resolve()
+    # the worktree's own dir holds no objects or refs — the COMMON .git does
+    common = gitdir.parent.parent if gitdir.parent.name == "worktrees" else gitdir
+    if common.is_dir():
+        add(common, str(common), ro=cwd_ro)

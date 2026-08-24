@@ -145,3 +145,25 @@ def assert_runs_folder_reaches_the_container(runs_folder: Path, image: str) -> N
 # What the container can see — dockerlib/mounts.py.
 
 
+def workspace_cwd() -> Path:
+    """The directory to mount as /workspace.
+
+    os.getcwd() is the TRUTH; $PWD is only a nicer spelling of it. Reading PWD first
+    was wrong in a way that took an hour to find: subprocess.run(cwd=X) does not touch
+    PWD, so a programmatic call inherited the CALLER's PWD — non-empty, so `or
+    os.getcwd()` never fired — and mounted the caller's directory. The symptom was
+    `E_VALIDATION: workflow not found`, with nothing about mounts in it.
+
+    PWD is still preferred when it names the SAME directory, because it preserves the
+    symlink form a user typed (/Users/... rather than /private/var/...), and that path
+    has to be valid on the host side of a -v argument.
+    """
+    real = Path(os.getcwd())
+    pwd = os.environ.get("PWD")
+    if pwd:
+        try:
+            if os.path.samefile(pwd, real):
+                return Path(pwd)
+        except OSError:
+            pass
+    return real

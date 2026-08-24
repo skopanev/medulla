@@ -10,10 +10,18 @@ from pathlib import Path
 
 from .classify import Move, Verdict, classify_attempt, next_move
 from .engine_body import BodyMixin
-from .engine_scan import AttemptsOutcome, ScanResult, _retry_delay, _tail, _timeout_env, log, scan_stdout
+from .engine_scan import (
+    AttemptsOutcome,
+    ScanResult,
+    _retry_delay,
+    _timeout_env,
+    conclusion_message,
+    log,
+    scan_stdout,
+)
 from .errors import E_HARNESS, EngineCrash
 from .harness import resolve as resolve_harness
-from .model import HOOK_TIMEOUT_S, SIG_DEFAULT, SIG_FAILED, Node
+from .model import HOOK_TIMEOUT_S, SIG_FAILED, Node
 from .procrun import run as proc_run
 
 
@@ -134,7 +142,10 @@ class AttemptsMixin(BodyMixin):
                     raise EngineCrash(E_HARNESS, fatal, node=node.name)
                 self.capture_session(adapter, agent_spec, raw_text)
                 raw_text = adapter.filter_stdout(raw_text)
-            body_scan = scan_stdout(raw_text, known)
+            # A shell body is the author's own code: its signals count only where it
+            # wrote them. An agent body keeps the lenient parse it needs (see
+            # extract_signals) and is fenced by agent.sets instead.
+            body_scan = scan_stdout(raw_text, known, strict=(current.kind == "shell"))
 
             post_rc = post_signal = None
             post_scan = ScanResult()
@@ -147,7 +158,7 @@ class AttemptsMixin(BodyMixin):
                 post_res = proc_run(post_rendered, self.workdir,
                                     hook_timeout, extra_env=post_env,
                                     log_path=step_dir / f"post-{total}.txt")
-                post_scan = scan_stdout(post_res.stdout, known)
+                post_scan = scan_stdout(post_res.stdout, known, strict=True)  # hooks are shell
                 post_rc, post_signal = post_res.rc, post_scan.first_known
 
             # Pool conjunction law: ok = rc==0 AND no timeout AND no post veto.
@@ -205,30 +216,10 @@ class AttemptsMixin(BodyMixin):
                 pending = {**body_vars, **post_scan.vars}   # post wins on conflict
 
             signal = move.signal
-            if signal == SIG_FAILED:
-                if limit_reason:
-                    # Name the wall. "body died: rc=1" for an exhausted plan sent a
-                    # panel round down the wrong path more than once.
-                    message = (f"{limit_reason} ({total} attempt(s)"
-                               f"{', fallback tried' if fallback_used else ''})")
-                else:
-                    message = (f"body died: rc={result.rc}, {total} attempt(s)"
-                               f"{' (fallback tried)' if fallback_used else ''}; "
-                               f"stderr: {_tail(result.stderr)}")
-                if current.kind == "agent":
-                    # harness-mined failure detail (codex error/turn.failed lives in
-                    # stdout JSON the signal filter rightly drops)
-                    detail = resolve_harness(agent_spec).extract_error(result.stdout)
-                    if detail:
-                        message += f"; {detail}"
-            elif signal == SIG_DEFAULT:
-                message = f"no known signal emitted; stdout: {_tail(result.stdout)}"
-            elif signal is None:
-                message = ""                        # pool silent ok
-            elif post_signal is not None and signal == post_signal:
-                message = post_scan.first_body
-            else:
-                message = body_scan.first_body
+            message = conclusion_message(
+                signal, current, result, total, limit_reason, fallback_used,
+                post_signal, post_scan, body_scan, known,
+                agent_spec=agent_spec)
             return AttemptsOutcome(
                 signal=signal, message=message, attempts=total,
                 attempts_primary=n_primary, attempts_fallback=n_fallback,

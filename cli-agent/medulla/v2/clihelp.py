@@ -41,6 +41,13 @@ environment the engine provides to bodies and hooks (agents: read this, it is th
     MEDULLA_BODY_RC / MEDULLA_BODY_SIGNAL
                             the body attempt's exit code and its raw signal (if any)
 
+--var and --docker: values cross the boundary AS-IS, paths do not
+    --var KEY=/host/path    arrives byte for byte; that path does not exist inside
+    --var-file KEY=/host/f  the FILE is mounted at its own absolute path, so the
+                            argument the engine receives is valid on both sides
+    Translating a value is the caller's job — medulla does not guess which strings
+    are paths. Inside the container your workspace is /workspace.
+
 agent nodes (fields beyond harness/model/effort/sandbox/args):
     sets: [K, ...]          vars this agent may set from stdout; empty (default) = none
     session: <name>         name a conversation: the first node with the name opens it,

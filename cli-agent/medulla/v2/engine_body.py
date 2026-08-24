@@ -123,7 +123,7 @@ class BodyMixin:
         env = {**env_fn(), "MEDULLA_TIMEOUT_S": _timeout_env(timeout), "MEDULLA_HARNESS": tag}
         res = proc_run(render_fn(node.pre, "pre"), self.workdir, timeout,
                        extra_env=env, log_path=step_dir / "pre.txt")
-        scan = scan_stdout(res.stdout, known)
+        scan = scan_stdout(res.stdout, known, strict=True)   # the pre hook is shell
         updates, events = scan.updates, scan.events
 
         # a known signal wins over rc — same grammar as everywhere else

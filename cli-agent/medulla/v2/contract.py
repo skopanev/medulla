@@ -4,6 +4,7 @@ Every rejection here is E_VALIDATION — load-time, before any run dir exists.
 """
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -32,29 +33,6 @@ VAR_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 NODE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
 
-class _StrictLoader(yaml.SafeLoader):
-    """SafeLoader that rejects duplicate mapping keys (PyYAML silently overwrites)."""
-
-
-def _no_dup_mapping(loader, deep=False, node=None):
-    mapping = {}
-    for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
-        if key in mapping:
-            raise EngineCrash(E_VALIDATION, f"duplicate YAML key: {key!r} (line {key_node.start_mark.line + 1})")
-        mapping[key] = loader.construct_object(value_node, deep=deep)
-    return mapping
-
-
-_StrictLoader.add_constructor(
-    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
-    lambda loader, node: _no_dup_mapping(loader, node=node),
-)
-
-
-_ERR_PATH: Path | None = None      # file being validated; set by load_workflow
-
-
 def _err(msg: str) -> EngineCrash:
     # Always name the file. "workflow must be a YAML mapping" sent a whole day
     # chasing provider quotas: the offending file was a zero-byte workflow.yaml
@@ -76,6 +54,8 @@ from .contract_node import (  # noqa: E402,F401
     _parse_inputs,
     _parse_node,
 )
+from .contract_warn import _warn_dead_budgets
+from .contract_yaml import _StrictLoader
 
 
 def _validate_var_name(key: str, where: str) -> None:
@@ -113,7 +93,19 @@ def load_workflow(path: Path) -> Workflow:
     path = Path(path)
     _ERR_PATH = path
     if not path.is_file():
-        raise _err(f"workflow not found: {path}")
+        # Inside a container this is usually a MOUNT problem, not a typo: the engine
+        # is looking in a /workspace that holds someone else's directory. Naming what
+        # is actually here turns an hour of "is it nesting? permissions?" into a look.
+        where = Path.cwd()
+        hint = ""
+        if os.environ.get("MEDULLA_DOCKER") == "1":
+            visible = sorted(p.name for p in (where / ".medulla" / "workflows").glob("*")) \
+                if (where / ".medulla" / "workflows").is_dir() else []
+            hint = (f"; cwd inside the container is {where}"
+                    + (f", which offers: {', '.join(visible)}" if visible
+                       else ", which has no .medulla/workflows at all — check what was "
+                            "mounted as /workspace"))
+        raise _err(f"workflow not found: {path}{hint}")
     try:
         data = yaml.load(path.read_text(encoding="utf-8"), Loader=_StrictLoader)
     except EngineCrash:
@@ -237,6 +229,8 @@ def load_workflow(path: Path) -> Workflow:
     keep_runs = data.get("keep_runs", 20)
     if isinstance(keep_runs, bool) or not isinstance(keep_runs, int) or keep_runs < 1:
         raise _err("keep_runs must be a positive integer")
+
+    _warn_dead_budgets(nodes, timeout, defaults)
 
     return Workflow(
         version="2", start=start, nodes=nodes, vars=vars_map,

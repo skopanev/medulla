@@ -4,11 +4,10 @@ Split from docker.py under the project's 250-line rule ($MAX_LOC).
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
-from dockerlib.paths import _remove_made_mountpoints
+from dockerlib.paths import _remove_made_mountpoints, workspace_cwd
 
 
 def prepare(volumes: list, extra_mounts: list, cwd_ro: bool) -> tuple[list[Path], int]:
@@ -21,7 +20,7 @@ def prepare(volumes: list, extra_mounts: list, cwd_ro: bool) -> tuple[list[Path]
     # hits the one case the flag exists for — a panel launched from an empty box that
     # brings every repository in with --mount. So the point is made HERE, on the host,
     # where the directory is still writable, and removed again below.
-    workspace_root = Path(os.environ.get("PWD") or os.getcwd())
+    workspace_root = workspace_cwd()
     made_mountpoints: list[Path] = []
     for mount_path, ro in extra_mounts:
         p = Path(mount_path).resolve()

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .errors import E_INPUTS, EngineCrash
-from .model import CHANNEL_SIGNALS
+from .model import CHANNEL_SIGNALS, SIG_DEFAULT, SIG_FAILED
 from .signals import extract_signals
 
 
@@ -88,14 +88,15 @@ class ScanResult:
     events: list[dict] = field(default_factory=list)   # EVERY signal, stdout order
 
 
-def scan_stdout(stdout: str, known: set[str] | None) -> ScanResult:
+def scan_stdout(stdout: str, known: set[str] | None,
+                strict: bool = False) -> ScanResult:
     """stdout only — stderr never routes. Engine facts are excluded from `known`
     upstream: a body printing <signal:__failed__> must never route (namespace law).
 
     known=None is pool mode: record the first ANY bare user signal (pool routing
     tables hold only dunders, yet body signals must reach the manifest)."""
     res = ScanResult()
-    for name, attrs, body in extract_signals(stdout):
+    for name, attrs, body in extract_signals(stdout, strict=strict):
         event = {"name": name, "message": _tail(body, 2000)}
         if name == "var" and (attrs or {}).get("key"):
             event["key"] = attrs["key"]
@@ -187,3 +188,50 @@ def load_dotenv(workflow_dir: Path, launch_dir: Path | None = None) -> dict[str,
     return merged
 
 
+def conclusion_message(signal, action, result, total, limit_reason, fallback_used,
+                       post_signal, post_scan, body_scan, known, *, agent_spec=None):
+    """The human-facing sentence for how an attempt ended.
+
+    Lives beside scan_stdout because every branch here is explaining what the scanner
+    did or did not find, and because the retry loop was over the project's line limit
+    carrying prose it does not otherwise need.
+    """
+    from .harness import resolve as resolve_harness
+    if signal == SIG_FAILED:
+        if limit_reason:
+            # Name the wall. "body died: rc=1" for an exhausted plan sent a
+            # panel round down the wrong path more than once.
+            message = (f"{limit_reason} ({total} attempt(s)"
+                       f"{', fallback tried' if fallback_used else ''})")
+        else:
+            message = (f"body died: rc={result.rc}, {total} attempt(s)"
+                       f"{' (fallback tried)' if fallback_used else ''}; "
+                       f"stderr: {_tail(result.stderr)}")
+        if action.kind == "agent":
+            # harness-mined failure detail (codex error/turn.failed lives in
+            # stdout JSON the signal filter rightly drops)
+            detail = resolve_harness(agent_spec).extract_error(result.stdout)
+            if detail:
+                message += f"; {detail}"
+    elif signal == SIG_DEFAULT:
+        # "the node did its job, wrote its file, printed nothing, and failed"
+        # is correct but startling — and it is only discoverable by reading the
+        # journal. Name the rule in the message that reports it.
+        message = ("no known signal emitted, so the node took __default__ "
+                   "(route it, or print a signal, or the run fails here); "
+                   f"stdout: {_tail(result.stdout)}")
+        # A shell node whose signal sits mid-line used to be rescued by the
+        # lenient parse, which is the same leniency that let an interpolated
+        # value become a variable. Say what changed instead of leaving the
+        # author with a node that "just stopped routing".
+        if action.kind == "shell" and "<signal:" in result.stdout \
+                and not scan_stdout(result.stdout, known).events == []:
+            message += ("; note: a shell node's signal must start its own line "
+                        "— a tag printed mid-line is treated as text")
+    elif signal is None:
+        message = ""                        # pool silent ok
+    elif post_signal is not None and signal == post_signal:
+        message = post_scan.first_body
+    else:
+        message = body_scan.first_body
+    return message
