@@ -133,22 +133,22 @@ nodes:
       total=$(echo "$rows" | jq length)
       ok=$(echo "$rows" | jq 'map(select(.ok)) | length')
 
+      # ONE writer for verdict.md, and it is the collector. This node used to add the
+      # partial-delivery warning itself — to $ROUND_DIR/verdict.md, while the collector
+      # writes $MEDULLA_RUN_DIR/verdict.md. Two different files: the real one was
+      # complete a directory up, and artifacts/verdict.md held the warning and NOTHING
+      # else, because the `cat` that was meant to append the body found no such file.
+      # Seen live on a 4/5 panel — a full set of findings replaced by one line.
+      out="$MEDULLA_RUN_DIR/verdict.md"
       collector="$MEDULLA_WORKFLOW_DIR/scripts/spar-run.sh"
       if [ -x "$collector" ]; then
-        bash "$collector" findings "$MEDULLA_RUN_DIR" >/dev/null || \
+        SPAR_EXPECTED="$total" SPAR_DELIVERED="$ok" \
+          bash "$collector" findings "$MEDULLA_RUN_DIR" >/dev/null || \
           echo "<signal:update>could not collect findings (artifacts are still there)</signal:update>"
+      else
+        echo "<signal:update>collector not found at $collector — artifacts are still there</signal:update>"
       fi
-
-      out="$ROUND_DIR/verdict.md"
-      if [ "$ok" -lt "$total" ]; then
-        # Partial delivery belongs at the TOP of the file people read, not in a log
-        # line that scrolled away. A panel of three presented as a panel of five is
-        # the one lie this workflow can tell.
-        printf 'WARNING: only %s/%s panelists delivered\n\n' "$ok" "$total" > "$out.tmp"
-        cat "$out" >> "$out.tmp" 2>/dev/null
-        mv "$out.tmp" "$out"
-        echo "<signal:update>only $ok/$total panelists delivered</signal:update>"
-      fi
+      [ "$ok" -lt "$total" ] && echo "<signal:update>only $ok/$total panelists delivered</signal:update>"
       echo "$ok/$total panelists -> $out"
       echo "<signal:ready>$out</signal:ready>"
     timeout: 30
