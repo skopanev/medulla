@@ -12,6 +12,7 @@ import os
 import signal
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,6 +40,9 @@ class RunResult:
     timed_out: bool
     stdout: str
     stderr: str
+
+
+FIRST_OUTPUT_S = 60      # every harness CLI prints an init event well inside this
 
 
 def run(
@@ -118,8 +122,28 @@ def run(
     else:
         t_err = None
 
+    # A CLI that started says SOMETHING within seconds — a session id, an init event,
+    # a hook response. Silence is not deep thought, it is a process that never came up:
+    # a wrapper that died before its first write, a provider handshake hanging, a
+    # binary waiting on a tty nobody attached. Waiting out the full body timeout to
+    # discover that costs the whole budget — and then the retry costs it again.
+    #
+    # So: nothing at all after FIRST_OUTPUT_S, and the attempt ends early with a
+    # failure that IS worth retrying, unlike a timeout at the far end.
+    silent_start = False
+    if timeout_s > FIRST_OUTPUT_S * 2:      # only where the budget makes it meaningful
+        deadline = time.monotonic() + FIRST_OUTPUT_S
+        while time.monotonic() < deadline:
+            if out_buf or err_buf or proc.poll() is not None:
+                break
+            time.sleep(0.25)
+        else:
+            silent_start = not (out_buf or err_buf)
+
     timed_out = False
     try:
+        if silent_start:
+            raise subprocess.TimeoutExpired(argv, FIRST_OUTPUT_S)
         proc.wait(timeout=timeout_s if timeout_s > 0 else 0.001)
     except subprocess.TimeoutExpired:
         timed_out = True
