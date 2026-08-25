@@ -87,3 +87,17 @@ def test_findings_keep_their_ids_across_the_file(tmp_path):
     # the SECOND finding of sonnet is cited; severity sorting puts it last
     assert "BLOCKING: F2" in out
     assert "F2. sonnet — (G) LOW — noisy log" in out
+
+
+def test_blocking_ids_are_sorted_and_deduplicated(tmp_path):
+    """They arrive grouped by panelist, so the raw order reads F2, F24, F3, F5 — a
+    list nobody can hold in their head. Seen on a live 44-finding round."""
+    out, _ = panel(tmp_path, [
+        ("sonnet", [CACHE, NOISE], "NO-GO — 2, 1 — both matter"),
+        ("gpt5", ["- (R) HIGH — no down migration — db/0142.sql — no rollback — FIX: write it"],
+         "NO-GO — 1 — irreversible"),
+    ])
+    blocking = next(l for l in out.splitlines() if l.startswith("BLOCKING:"))
+    ids = [int(t.strip(" F,")) for t in blocking.split(":")[1].split("—")[0].split(",")]
+    assert ids == sorted(ids), blocking
+    assert len(ids) == len(set(ids))

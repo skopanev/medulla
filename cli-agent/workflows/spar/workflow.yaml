@@ -213,6 +213,11 @@ nodes:
         # draw to be broken by counting — it is a list of findings to judge. A landing
         # went through on exactly that arithmetic.
         if [ -n "$blocking" ]; then
+          # Ascending, deduplicated: the ids arrive grouped by panelist, so the raw
+          # order reads F2, F24, F3, F5 — a list nobody can hold in their head or check
+          # off. Seen on a live 44-finding round.
+          blocking=$(printf '%s' "$blocking" | tr ',' '\n' | tr -d ' F' \
+                     | sort -n -u | sed 's/^/F/' | paste -sd, - | sed 's/,/, /g')
           printf 'BLOCKING: %s — judge each against its cited code before landing.\n' "$blocking"
           printf 'Clear one only by writing down what refutes it; unjudged means blocked.\n\n'
         else
