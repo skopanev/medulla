@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from medulla.v2.contract import load_workflow
 from medulla.v2.errors import EngineCrash
 

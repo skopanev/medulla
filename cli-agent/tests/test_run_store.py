@@ -8,10 +8,11 @@ import json
 import os
 from pathlib import Path
 
+from conftest import POOL_RESUME, runs_of, work_dir
+from conftest import write_workflow as setup
 from medulla.v2.cli import main as cli_main
 from medulla.v2.engine import find_resumable, run_workflow
 
-from conftest import POOL_RESUME, runs_of, work_dir, write_workflow as setup
 
 def test_find_resumable_selection(tmp_path):
     text = """

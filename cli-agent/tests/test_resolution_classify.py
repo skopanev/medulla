@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from conftest import WORKFLOW_BODY, _is_outside_workspace, engine_env, engine_yaml, resolve_or_raise, same_file, write
+
 
 def test_spelling_the_same_local_workflow_two_ways_classifies_it_the_same(world, dockerpy):
     """A local definition is inside /workspace however it is spelled. Classifying the

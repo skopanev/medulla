@@ -9,8 +9,8 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from conftest import WORKFLOW_BODY, engine_env, engine_yaml, resolve_or_raise, same_file
+
 
 def test_all_three_env_tiers_agree_across_both_paths(world, dockerpy):
     """Same command, same secrets, --docker or not (hard constraint 5). The project

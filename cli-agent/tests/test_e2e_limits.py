@@ -6,9 +6,9 @@ workflow that simply decided to fail.
 import json
 
 import pytest
+from conftest import read_run, setup_workflow
 from medulla.v2.engine import run_workflow
 
-from conftest import read_run, setup_workflow
 
 def test_deadline_exhaustion_is_e_deadline(tmp_path):
     text = """

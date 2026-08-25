@@ -2,9 +2,10 @@
 """
 import json
 
+from conftest import fake_script, read_run
+from conftest import write_workflow as setup
 from medulla.v2.engine import run_workflow
 
-from conftest import fake_script, read_run, write_workflow as setup
 
 def test_post_receives_current_harness(tmp_path):
     script = fake_script(tmp_path, "ok.sh", 'echo "<signal:ok>k</signal:ok>"\n')

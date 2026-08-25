@@ -5,9 +5,10 @@ what lands in it matters more than what was printed.
 """
 import json
 
+from conftest import fake_script, read_manifest, read_run
+from conftest import write_workflow as setup
 from medulla.v2.engine import run_workflow
 
-from conftest import fake_script, read_manifest, read_run, write_workflow as setup
 
 def test_manifest_env_and_key_stability(tmp_path):
     text = """

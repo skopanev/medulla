@@ -8,10 +8,10 @@ import json
 import os
 from pathlib import Path
 
+from conftest import write_workflow as setup
 from medulla.v2.cli import main as cli_main
 from medulla.v2.engine import find_resumable, run_workflow
 
-from conftest import write_workflow as setup
 
 def test_init_without_name_prints_usage(tmp_path, monkeypatch, capsys):
     import medulla.cli as shim

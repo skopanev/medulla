@@ -4,17 +4,9 @@ A body claiming success proves nothing; post is the shell the author committed t
 """
 import json
 
+from conftest import fake_script, read_run
+from conftest import write_workflow as setup
 from medulla.v2.engine import run_workflow
-
-from conftest import fake_script, read_run, write_workflow as setup
-
-
-
-
-
-
-
-
 
 # ── post ─────────────────────────────────────────────────────────────────────
 

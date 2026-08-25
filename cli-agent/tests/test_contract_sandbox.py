@@ -3,14 +3,9 @@
 A typo must fail --validate rather than surface as full access three hours into a run.
 """
 import pytest
+from conftest import load_err, write
 from medulla.v2.contract import load_workflow
 from medulla.v2.errors import EngineCrash
-
-from conftest import load_err, write
-
-from conftest import load_err, write
-
-from conftest import load_err, write
 
 # ── sandbox: enum validated at load, like every other agent field ────────────
 

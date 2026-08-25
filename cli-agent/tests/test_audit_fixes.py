@@ -7,10 +7,9 @@ import time
 from pathlib import Path
 
 import pytest
+from conftest import write
 from medulla.v2 import harness as H
 from medulla.v2.procrun import run as proc_run
-
-from conftest import write
 
 
 def test_interrupt_kills_child_group(tmp_path, monkeypatch):

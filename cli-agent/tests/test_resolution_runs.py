@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from conftest import WORKFLOW_BODY, _is_outside_workspace, engine_env, engine_yaml, resolve_or_raise, same_file, write
+
 
 def test_a_named_runs_folder_beats_every_other_rule(world, tmp_path):
     """The caller NAMED the place, so nothing else gets a say — not the shared-workflow

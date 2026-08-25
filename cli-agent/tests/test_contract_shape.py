@@ -4,10 +4,9 @@ Every rule here fails at LOAD time. A workflow is code, and code that parses but
 something other than it says is worse than code that refuses to load.
 """
 import pytest
+from conftest import MINIMAL, load_err, write
 from medulla.v2.contract import load_workflow
 from medulla.v2.errors import EngineCrash
-
-from conftest import MINIMAL, load_err, write
 
 
 def test_minimal_loads(tmp_path):

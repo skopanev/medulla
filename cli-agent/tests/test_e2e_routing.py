@@ -6,10 +6,8 @@ and can be routed to recovery like any other outcome.
 import json
 
 import pytest
-from medulla.v2.engine import run_workflow
-
 from conftest import read_run, setup_workflow
-
+from medulla.v2.engine import run_workflow
 
 
 def test_happy_path_vars_and_routing(tmp_path):

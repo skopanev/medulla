@@ -11,8 +11,9 @@ This is only about handing a value to a later, different step.
 """
 import json
 
+from conftest import fake_script, read_run
+from conftest import write_workflow as setup
 from medulla.v2.engine import run_workflow
-from conftest import fake_script, read_run, write_workflow as setup
 
 
 def test_agent_var_does_not_reach_the_next_step(tmp_path):

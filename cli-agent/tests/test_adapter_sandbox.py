@@ -9,11 +9,11 @@ import stat
 from pathlib import Path
 
 import pytest
+from conftest import write
 from medulla.v2 import harness as H
 from medulla.v2.errors import EngineCrash
 from medulla.v2.model import AgentSpec
 
-from conftest import write
 
 def test_claude_sandbox_read_only_is_plan_mode(tmp_path):
     a = H.ClaudeAdapter.__new__(H.ClaudeAdapter)

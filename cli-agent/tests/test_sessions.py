@@ -12,10 +12,11 @@ four CLIs disagree about the word, the shape, and even whether it is a flag.
 import json
 from pathlib import Path
 
+from conftest import fake_script, read_run
+from conftest import write_workflow as setup
 from medulla.v2.engine import run_workflow
 from medulla.v2.harness import resolve as resolve_harness
 from medulla.v2.model import AgentSpec
-from conftest import fake_script, read_run, write_workflow as setup
 
 # ── the adapters: id in, command out ─────────────────────────────────────────
 

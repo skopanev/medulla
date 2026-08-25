@@ -8,10 +8,11 @@ import json
 import os
 from pathlib import Path
 
+from conftest import DECISION_RESUME, POOL_RESUME, read_outcome, runs_of, work_dir
+from conftest import write_workflow as setup
 from medulla.v2.cli import main as cli_main
 from medulla.v2.engine import find_resumable, run_workflow
 
-from conftest import DECISION_RESUME, POOL_RESUME, read_outcome, runs_of, work_dir, write_workflow as setup
 
 def test_pool_resume_no_resource_no_rerun(tmp_path):
     # THE dangerous scenario: pool dies on deadline mid-flight; resume must

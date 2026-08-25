@@ -5,9 +5,10 @@ and effort render like anything else.
 """
 import json
 
+from conftest import fake_script, read_run
+from conftest import write_workflow as setup
 from medulla.v2.engine import run_workflow
 
-from conftest import fake_script, read_run, write_workflow as setup
 
 def test_agent_fields_are_templates(tmp_path):
     # contract: every scalar action field is a template — model via {{var:}}

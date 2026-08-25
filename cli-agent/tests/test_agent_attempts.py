@@ -5,17 +5,9 @@ budget inherits the primary's — including the prompt it was given.
 """
 import json
 
+from conftest import fake_script, read_run
+from conftest import write_workflow as setup
 from medulla.v2.engine import run_workflow
-
-from conftest import fake_script, read_run, write_workflow as setup
-
-
-
-
-
-
-
-
 
 # ── agent bodies via the fake harness ────────────────────────────────────────
 

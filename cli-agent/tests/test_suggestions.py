@@ -8,8 +8,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from conftest import _is_outside_workspace, read_run
+from conftest import write_workflow as setup
 from medulla.v2.engine import run_workflow
-from conftest import _is_outside_workspace, read_run, write_workflow as setup
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 

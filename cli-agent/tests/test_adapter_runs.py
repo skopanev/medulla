@@ -9,11 +9,10 @@ import stat
 from pathlib import Path
 
 import pytest
+from conftest import write
 from medulla.v2 import harness as H
 from medulla.v2.errors import EngineCrash
 from medulla.v2.model import AgentSpec
-
-from conftest import write
 
 
 @pytest.fixture(autouse=True)

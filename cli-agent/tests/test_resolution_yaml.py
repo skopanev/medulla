@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from conftest import WORKFLOW_BODY, engine_env, engine_yaml, same_file
 
 # A real, loadable definition: these layouts get validated by load_workflow in the

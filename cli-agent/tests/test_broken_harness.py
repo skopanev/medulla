@@ -7,7 +7,8 @@ hour went into quota dashboards.
 """
 import json
 
-from conftest import fake_script, read_run, write_workflow as setup
+from conftest import fake_script, read_run
+from conftest import write_workflow as setup
 from medulla.v2.engine import run_workflow
 from medulla.v2.harness import resolve as resolve_harness
 from medulla.v2.model import AgentSpec

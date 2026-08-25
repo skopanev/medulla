@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+
 def test_symlinked_workflow_target_is_mounted_at_the_same_path(dockerpy, tmp_path, monkeypatch):
     # A shared workflow lives outside the repo (~/.medulla/workflows/<name>) and only cwd
     # is mounted, so inside the container the link dangles: "workflow not found". Its

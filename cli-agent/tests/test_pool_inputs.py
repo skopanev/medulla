@@ -5,13 +5,9 @@ answer that routes (__empty__), not a failure.
 """
 import json
 
+from conftest import fake_script, read_run
+from conftest import write_workflow as setup
 from medulla.v2.engine import run_workflow
-
-from conftest import fake_script, read_run, write_workflow as setup
-
-
-
-
 
 
 def read_manifest(run, step_name):

@@ -4,10 +4,10 @@ An action is shell XOR agent, a fallback belongs to an agent, and a dunder is th
 engine's word — a workflow cannot mint one.
 """
 import pytest
+from conftest import MINIMAL, load_err, write
 from medulla.v2.contract import load_workflow
 from medulla.v2.errors import EngineCrash
 
-from conftest import MINIMAL, load_err, write
 
 def test_fallback_forbidden_on_shell(tmp_path):
     text = MINIMAL.replace(

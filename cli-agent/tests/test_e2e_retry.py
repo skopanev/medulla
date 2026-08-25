@@ -5,9 +5,9 @@ A timeout is rc 124 by contract, and silence is not a failure worth retrying.
 import json
 
 import pytest
+from conftest import read_run, setup_workflow
 from medulla.v2.engine import run_workflow
 
-from conftest import read_run, setup_workflow
 
 def test_timeout_becomes_rc_124_then_failed(tmp_path):
     text = """
