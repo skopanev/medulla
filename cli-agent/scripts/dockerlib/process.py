@@ -116,6 +116,10 @@ def run_docker(image, volumes, args, runs_under: str | None = None,
     pipeline rather than by --rm — a conversation lives in the CLI's own state inside
     $HOME, and a fresh container is a fresh conversation whatever id we hand it."""
     if keep_session:
+        # local: session_run imports build_run_command from here, and a top-level
+        # import either way closes the cycle — importing session_run first (a test
+        # does) then fails on a half-built module
+        from dockerlib.session_run import _run_kept
         return _run_kept(image, volumes, args, runs_under, run_dir_name)
     container_name = f"medulla-{uuid.uuid4().hex[:8]}"
     cmd = build_run_command(image, volumes, args, container_name,
@@ -161,57 +165,3 @@ def run_docker(image, volumes, args, runs_under: str | None = None,
     finally:
         signal.signal(signal.SIGINT, prev)
         _unlink_env_file()
-
-
-def _run_kept(image, volumes, args, runs_under, run_dir_name):
-    """The session path: reuse a named container, or start one that outlives this run.
-
-    Ownership decides who removes it. MEDULLA_RUN_ID is forwarded into every container,
-    so a nested `medulla --docker` started from a host node inherits the OUTER run's id
-    — that run owns the container and removes it on its way out. Without an outer id we
-    are the top of the pipeline and clean up here.
-    """
-    from dockerlib import keep
-
-    keep.sweep_stale()                     # belt: a pipeline that never came back
-    owner = keep.owner_id() or f"top-{uuid.uuid4().hex[:8]}"
-    mine = keep.owner_id() == ""           # nobody above us will clean up
-    name = keep.container_name(owner)
-
-    if keep.is_running(name):
-        cmd = ["docker", "exec"]
-        if sys.stdin.isatty():
-            cmd.append("-i")
-        if interactive_stdio():
-            cmd.append("-t")
-        cmd += ["-w", "/workspace"]
-        if runs_under is not None:
-            cmd += ["-e", f"MEDULLA_RUNS_UNDER={runs_under}"]
-        if run_dir_name:
-            cmd += ["-e", f"MEDULLA_RUN_DIR_NAME={run_dir_name}"]
-        cmd += [name, "medulla", *args]
-        print(f"[medulla] reusing session container {name}", file=sys.stderr)
-    else:
-        cmd = build_run_command(image, volumes, args, name,
-                                run_dir_name=run_dir_name, runs_under=runs_under)
-        # not --rm: the whole point is to survive this run. The label is what the
-        # owner filters on when it removes the container later.
-        cmd = [c for c in cmd if c != "--rm"]
-        at = cmd.index("--name")
-        cmd[at:at] = ["-d", "--label", f"{keep.LABEL}={owner}"]
-        started = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if started.returncode != 0:
-            print(started.stderr.strip(), file=sys.stderr)
-            return started.returncode
-        print(f"[medulla] session container {name} started", file=sys.stderr)
-        cmd = ["docker", "exec", "-w", "/workspace", name, "medulla", *args]
-
-    stdin = None if sys.stdin.isatty() else subprocess.DEVNULL
-    proc = subprocess.Popen(cmd, stdin=stdin, start_new_session=True)
-    try:
-        proc.wait()
-        return proc.returncode
-    finally:
-        _unlink_env_file()
-        if mine:
-            keep.remove(name)

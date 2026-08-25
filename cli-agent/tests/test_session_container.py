@@ -162,3 +162,46 @@ def test_a_nested_run_does_not_reap_the_pipeline(monkeypatch):
     monkeypatch.setenv("MEDULLA_PIPELINE_ID", "outer-1")
     engine_run._remove_session_containers("inner-2")
     assert calls == []
+
+
+def test_the_kept_container_starts_idle_and_waits_for_the_entrypoint(monkeypatch):
+    """The race that shipped: the container was started WITH the workflow as its
+    command and then `docker exec`-ed the same workflow into it. Two runs, and the
+    exec bypassed the entrypoint — so it ran the medulla the image was built with
+    while the entrypoint was still upgrading. Live: 4.27.4 answering inside a
+    container mid-upgrade to 4.39.1."""
+    from dockerlib import session_run
+
+    seen = []
+
+    class _R:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    class _Proc:
+        returncode = 0
+        def wait(self): return 0
+
+    monkeypatch.setattr(session_run.keep, "sweep_stale", lambda *a, **k: 0)
+    monkeypatch.setattr(session_run.keep, "is_running", lambda name: False)
+    monkeypatch.setattr(session_run.keep, "remove", lambda name: None)
+    monkeypatch.setattr(session_run, "_wait_ready", lambda name, **k: seen.append("waited") or True)
+    monkeypatch.setattr(session_run.subprocess, "run",
+                        lambda cmd, **kw: seen.append(cmd) or _R())
+    monkeypatch.setattr(session_run.subprocess, "Popen",
+                        lambda cmd, **kw: seen.append(cmd) or _Proc())
+
+    session_run._run_kept("img:1", ["-v", "/a:/a"], ["-w", "wf"], None, None)
+
+    run_cmd = next(c for c in seen if isinstance(c, list) and c[:2] == ["docker", "run"])
+    assert run_cmd[-2:] == ["sleep", "infinity"], "the container must start idle"
+    assert "--rm" not in run_cmd                     # it has to outlive this run
+    assert "-d" in run_cmd
+
+    assert seen.index("waited") < [i for i, c in enumerate(seen)
+                                   if isinstance(c, list) and c[:2] == ["docker", "exec"]][0]
+
+    execs = [c for c in seen if isinstance(c, list) and c[:2] == ["docker", "exec"]]
+    assert len(execs) == 1, "exactly one exec, or the workflow runs twice"
+    assert execs[0][-3:] == ["medulla", "-w", "wf"]

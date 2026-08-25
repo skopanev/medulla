@@ -156,4 +156,12 @@ if [ "${MEDULLA_UPGRADE_ON_START:-1}" != "0" ]; then
     fi
 fi
 
+# Readiness marker, written last: everything above — credentials copied into $HOME,
+# the version check, the upgrade — has finished by the time it exists. A kept session
+# container is started idle and then entered with `docker exec`, which bypasses this
+# script entirely; without a marker the exec raced the upgrade and ran the version the
+# image was built with, while the entrypoint kept going. Seen live: 4.27.4 answering
+# inside a container that was mid-upgrade to 4.39.1.
+: > /tmp/.medulla-ready
+
 exec "$@"
