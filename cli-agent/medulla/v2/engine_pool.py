@@ -194,9 +194,26 @@ class PoolMixin(InputsMixin):
                 raise first_crash
 
         if deadline_hit or (self._remaining() is not None and self._remaining() <= 0):
+            # Count what ALREADY succeeded before declaring the run lost. A pool waits
+            # for every input by design — the point of five panelists is five answers —
+            # but a deadline is not a reason to throw away an answer that is already on
+            # disk. Reported live: min_success was met, two artifacts were written, and
+            # the run still crashed E_DEADLINE with an empty journal, so nothing
+            # downstream ever saw the work.
+            done_keys = {(r.get("index"), r.get("key")) for r in rows if r.get("ok")}
+            done = sum(1 for i, v in enumerate(inputs, start=1)
+                       if (i, f"{i}:{_input_hash(v)}") in done_keys)
+            if done >= min_success:
+                log(f"  [{node.name}] deadline reached with {done}/{total} inputs ok "
+                    f"(min_success {min_success}) — concluding on what delivered")
+                return SIG_DONE, f"{done}/{total} inputs ok (deadline)", {
+                    "inputs_total": total, "inputs_ok": done,
+                    "min_success": min_success, "deadline": True,
+                }
             raise EngineCrash(E_DEADLINE,
                               f"workflow timeout ({self.p.timeout}s) exhausted mid-pool "
-                              f"({len(rows)}/{total} inputs concluded; manifest rows survive)",
+                              f"({len(rows)}/{total} inputs concluded, {done} ok, "
+                              f"min_success {min_success}; manifest rows survive)",
                               node=node.name)
 
         # join over old + new rows, keyed by input identity: an input is ok iff

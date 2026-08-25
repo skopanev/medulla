@@ -110,3 +110,56 @@ nodes:
     assert rows["cached"]["attempts"] == 0 and rows["cached"]["signal"] == "done_before"
 
 
+
+
+def test_a_deadline_concludes_on_what_delivered_when_quorum_is_met(tmp_path):
+    """A pool waits for every input by design — five panelists mean five answers. But
+    a deadline is not a reason to discard an answer already on disk. Reported live:
+    min_success was met, two artifacts were written, and the run still crashed
+    E_DEADLINE with an EMPTY journal, so nothing downstream saw the work."""
+    yaml, work = setup(tmp_path, """
+version: "2"
+timeout: 8
+start: p
+nodes:
+  p:
+    inputs: [fast1, fast2, hang]
+    max_parallel: all
+    min_success: 2
+    shell: |
+      if [ "$MEDULLA_INPUT" = hang ]; then sleep 300; fi
+      echo "<signal:ok>$MEDULLA_INPUT</signal:ok>"
+    timeout: 200
+    on_signal: {__done__: __exit_ok__, __failed__: __exit_fail__}
+""")
+    run_workflow(yaml, workdir=work)
+    _run, _out, journal = read_run(yaml.parent)
+    assert journal, "the pool must record what it concluded, deadline or not"
+    assert journal[0]["signal"] == "__done__"
+    assert "deadline" in journal[0]["message"]
+
+
+def test_a_deadline_below_quorum_still_crashes(tmp_path):
+    """Concluding on what delivered is not the same as pretending it was enough."""
+    from medulla.v2.errors import EngineCrash
+
+    yaml, work = setup(tmp_path, """
+version: "2"
+timeout: 8
+start: p
+nodes:
+  p:
+    inputs: [fast1, hang1, hang2]
+    max_parallel: all
+    min_success: 3
+    shell: |
+      case "$MEDULLA_INPUT" in hang*) sleep 300 ;; esac
+      echo "<signal:ok>$MEDULLA_INPUT</signal:ok>"
+    timeout: 200
+    on_signal: {__done__: __exit_ok__, __failed__: __exit_fail__}
+""")
+    rc = run_workflow(yaml, workdir=work)
+    assert rc == 1                                  # E_DEADLINE
+    _run, out, _j = read_run(yaml.parent)
+    assert out["error"]["code"] == "E_DEADLINE"
+    assert "min_success 3" in out["error"]["message"]

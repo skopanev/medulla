@@ -136,6 +136,37 @@ cmd_start() {
     echo "  spar-run.sh wait '$run'" >&2
 }
 
+panel_state() {
+    # What the run already knows, from the file the engine appends to as each input
+    # ends. `wait` used to report "nothing has finished" while two panelists were done
+    # and their artifacts on disk — true of the JOURNAL, which is written when the whole
+    # node ends, and false of the run. The manifest is the record of deliveries.
+    #
+    # Whole lines only: the last row can be caught half-written, and a truncated tail is
+    # not corruption, it is the next panelist still working.
+    local run="$1" m inputs
+    m=$(ls "$run"/steps/*panel*/manifest.jsonl 2>/dev/null | head -1)
+    [ -n "$m" ] || return 1
+    inputs=$(ls "$run"/steps/*panel*/inputs.json 2>/dev/null | head -1)
+    [ -n "$inputs" ] || return 1
+
+    grep '}$' "$m" 2>/dev/null | jq -s --slurpfile want "$inputs" -r '
+      (INDEX(.[]; .input.slug // (.index|tostring))) as $rows
+      | ($want[0] | map(.slug // tostring)) as $all
+      | ($all | map(select($rows[.].ok))) as $ok
+      | ($all | map(select($rows[.] == null))) as $running
+      | ($all | map(
+          $rows[.] as $r
+          | ((. + "          ")[0:10]) as $pad
+          | if   $r == null then "  \($pad) running"
+            elif $r.ok      then "  \($pad) ok       \((($r.duration_s // 0) / 60) | floor)m"
+            else                 "  \($pad) out      \($r.reason // "failed"): \(($r.message // "") | split(";")[0][0:60])"
+            end)
+        | .[])
+      , "@@ \($ok|length) \($all|length) \($running|join(" "))"
+    ' 2>/dev/null
+}
+
 cmd_wait() {
     local run="${1:-}"; shift || true
     local timeout=$DEFAULT_TIMEOUT
@@ -169,7 +200,16 @@ cmd_wait() {
             gone=0
         fi
         if [ "$waited" -ge "$timeout" ]; then
-            echo "spar-run: still running after ${timeout}s — nothing has finished." >&2
+            local state summary
+            state=$(panel_state "$run")
+            summary=$(printf '%s' "$state" | sed -n 's/^@@ //p')
+            if [ -n "$summary" ]; then
+                set -- $summary
+                echo "spar-run: still running after ${timeout}s — $1/$2 delivered${3:+, waiting on ${*:3}}." >&2
+                printf '%s\n' "$state" | grep -v '^@@' >&2
+            else
+                echo "spar-run: still running after ${timeout}s — nothing recorded yet." >&2
+            fi
             echo "  run dir: $run" >&2
             exit 3
         fi
