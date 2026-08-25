@@ -111,7 +111,24 @@ nodes:
       Only AFTER the file exists on disk, print exactly one line and stop:
 
       SUMMARY: <your one-sentence summary>
-    post: 'test -s "$ROUND_DIR/$MEDULLA_INPUT_SLUG.md"'
+    # The truth channel. `test -s` alone passed a 32-byte "NONE / GO" with no reason
+    # given — a file, not an answer. Checks the two sections the collector reads and
+    # that the verdict says something; a panelist that fails this gets its retry, and
+    # the reason travels in the manifest row rather than being guessed at later.
+    post: |
+      f="$ROUND_DIR/$MEDULLA_INPUT_SLUG.md"
+      test -s "$f" || { echo "no artifact written" >&2; exit 1; }
+      grep -q '^## FINDINGS' "$f" || { echo "no ## FINDINGS section" >&2; exit 1; }
+      grep -q '^## VERDICT'  "$f" || { echo "no ## VERDICT section" >&2; exit 1; }
+      v=$(awk '/^## VERDICT/{f=1; next} /^## /{f=0} f && NF {print; exit}' "$f")
+      printf '%s' "$v" | grep -qE '^(GO|NO-GO|INSUFFICIENT)' \
+        || { echo "VERDICT is not one of GO / NO-GO / INSUFFICIENT" >&2; exit 1; }
+      # And it must say WHY. A bare "GO" is a file, not an answer: it cannot be argued
+      # with, and a reader cannot tell a considered pass from a panelist that gave up.
+      # Anything after the word counts — including bare citations for a NO-GO — so this
+      # rejects only the truly empty verdict.
+      printf '%s' "$v" | sed -E 's/^(NO-GO|INSUFFICIENT|GO)//' | grep -q '[^ [:punct:]]' \
+        || { echo "VERDICT gives no reason (format: <WORD> — one line: why)" >&2; exit 1; }
     max_attempts: 2                       # a panelist that skips the file-write retries once
     timeout: 1800
     on_signal:
