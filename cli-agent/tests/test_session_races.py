@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+
 def test_every_caller_waits_for_readiness_not_just_the_creator(monkeypatch):
     """Three panelists found this independently: waiting only in the create branch
     left whoever arrives SECOND free to exec while the entrypoint was still upgrading

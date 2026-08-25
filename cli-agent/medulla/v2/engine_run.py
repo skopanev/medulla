@@ -20,8 +20,8 @@ from .model import TERMINALS
 from .rundir import (
     RunLocked,
     RunStore,
-    launch_dir_of,
     drop_pipeline_sessions,
+    launch_dir_of,
     prune_runs,
     sweep_pipeline_sessions,
 )

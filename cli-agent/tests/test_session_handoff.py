@@ -13,6 +13,7 @@ from medulla.v2.engine import run_workflow
 from medulla.v2.harness import resolve as resolve_harness
 from medulla.v2.model import AgentSpec
 
+
 def test_the_conversation_survives_into_the_next_run_of_the_pipeline(tmp_path, monkeypatch):
     """The handoff the whole feature exists for (F6/F10): a develop unit opens a
     conversation, a host node starts the LANDING run, and that run is a new directory
@@ -92,6 +93,7 @@ def test_the_pipeline_file_dies_with_the_pipeline(tmp_path, monkeypatch):
 def test_a_pipeline_that_never_came_back_is_swept_after_a_day(tmp_path, monkeypatch):
     import os
     import time
+
     from medulla.v2.rundir import sweep_pipeline_sessions
 
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))

@@ -156,185 +156,30 @@ nodes:
 
   synthesize:
     shell: |
-      # No model runs here — jq and awk, in the workflow itself, so there is no tool to
-      # mount and none to lose. What it answers that the per-panelist files cannot: WHO
-      # delivered (a dead panelist leaves no file), what the verdicts were TOGETHER, and
-      # WHICH findings a NO-GO actually rests on.
-      rows=$(jq -s 'group_by(.key) | map(.[-1])' "$MEDULLA_MANIFEST_PANEL")   # resume appends: latest row per input wins
+      # jq for the manifest, python for the panelist files. The parsing used to be awk
+      # in this block: six defects in one day, each a parser bug in a language with no
+      # parser. collect_verdict.py writes both channels from one pass.
+      rows=$(jq -s 'group_by(.key) | map(.[-1])' "$MEDULLA_MANIFEST_PANEL")
       total=$(echo "$rows" | jq length)
       ok=$(echo "$rows" | jq 'map(select(.ok)) | length')
       out="$MEDULLA_RUN_DIR/verdict.md"
-      body="$MEDULLA_RUN_DIR/.body"; raw="$MEDULLA_RUN_DIR/.raw"; map="$MEDULLA_RUN_DIR/.map"
-      : > "$body"; : > "$raw"; : > "$map"
 
-      panelists() {
-        for f in "$ROUND_DIR"/*.md; do
-          [ -e "$f" ] || continue
-          case "$(basename "$f")" in question.md|verdict.md|synthesized.md) continue ;; esac
-          printf '%s\n' "$f"
-        done
-      }
-
-      # FINDINGS first, because the verdicts below cite them by number. Each line keeps
-      # its severity key and its position in ITS OWN panelist's list, which is what a
-      # panelist can see when writing "NO-GO — 1, 3".
-      findings=0; quiet=""
-      for f in $(panelists); do
-        slug=$(basename "$f" .md)
-        n=$(awk '/^## FINDINGS/{flag=1; next} /^## /{flag=0} flag && /^[-*]/' "$f" | wc -l | tr -d ' ')
-        if [ "$n" -eq 0 ]; then quiet="$quiet${quiet:+, }$slug"; continue; fi
-        findings=$((findings + n))
-        awk -v who="$slug" '/^## FINDINGS/{flag=1; next} /^## /{flag=0}
-             flag && /^[-*]/ {
-               sub(/^[-*][ \t]*/, ""); local++
-               # From the SLOT, not from anywhere in the line: "(G) LOW — the HIGH
-               # watermark is cosmetic" sorted as HIGH under a substring match. That is
-               # the same mistake this repo already fixed once, when "agy" in a comment
-               # sent the runner into the Keychain.
-               slot = $0
-               sub(/^\(?[RG]\)?[ \t]*/, "", slot)
-               split(slot, parts, /[ \t]+/)
-               key = 4
-               if      (parts[1] == "HIGH") key = 1
-               else if (parts[1] == "MED")  key = 2
-               else if (parts[1] == "LOW")  key = 3
-               printf "%d\t%s\t%d\t%s\n", key, who, local, $0
-             }' "$f" >> "$raw"
-      done
-      {
-        printf '## Findings\n\n'
-        # -s keeps each panelist's own order inside a severity band. The map lets a
-        # verdict that says "1, 3" be printed as the F-numbers a reader can find.
-        sort -s -k1,1n "$raw" | awk -F'\t' -v map="$map" \
-          '{ printf "F%d. %s — %s\n", NR, $2, $4; printf "%s %s %d\n", $2, $3, NR >> map }'
-        [ -n "$quiet" ] && printf '\nNo findings reported by: %s\n' "$quiet"
-        printf '\n'
-      } >> "$body"
-
-      go=0; nogo=0; insuf=0; nover=0; blocking=""; unsupported=""
-      {
-        printf '## Verdicts\n\n'
-        for f in $(panelists); do
-          slug=$(basename "$f" .md)
-          word=$(awk '/^## VERDICT/{flag=1; next} /^## /{flag=0} flag && NF {print; exit}' "$f")
-          case "$word" in
-            GO*)           go=$((go + 1)) ;;
-            NO-GO*)        nogo=$((nogo + 1)) ;;
-            INSUFFICIENT*) insuf=$((insuf + 1)) ;;
-            *)             nover=$((nover + 1)); word="_no VERDICT section_" ;;
-          esac
-          if [ "${word#NO-GO}" != "$word" ]; then
-            # Translate "NO-GO — 1, 3 — reason" into the ids the reader sees. A NO-GO
-            # citing nothing is named as unsupported rather than silently counted: it
-            # cannot be checked, acted on, or cleared.
-            # Every integer in the citation clause, however it is written: "1, 3",
-            # "F1 and F3", "findings 1/3". The old character class stopped at the first
-            # unexpected character, so "NO-GO — F1, F2" cited only F1 and the rest were
-            # dropped from the reader's list without a word.
-            # The clause between the first and second dash, and ONLY if it looks like
-            # a citation: digits, F-prefixes, separators. "NO-GO — this breaks 3
-            # callers" used to cite a fabricated F3 — worse than reading nothing,
-            # because it points the reader at the wrong finding. Anything else leaves
-            # cited empty, and an empty citation fails closed below.
-            clause=$(printf '%s' "$word" | awk -F'—' '{print $2}')
-            if printf '%s' "$clause" | grep -qE '^[ ]*[Ff]?[0-9]+([ ]*(,|and|/|&)[ ]*[Ff]?[0-9]+)*[ ]*$'; then
-              cited=$(printf '%s' "$clause" | grep -oE '[0-9]+' | tr '\n' ' ')
-            else
-              cited=""
-            fi
-            ids=""
-            for c in $cited; do
-              g=$(awk -v s="$slug" -v l="$c" '$1==s && $2==l {print $3}' "$map")
-              [ -n "$g" ] && ids="$ids${ids:+, }F$g"
-            done
-            if [ -n "$ids" ]; then
-              blocking="$blocking${blocking:+, }$ids"
-              # drop the panelist's own numbering once translated: "NO-GO — 1 — reason"
-              # reads as a stray digit beside the ids the reader can actually act on
-              word=$(printf '%s' "$word" | sed "s/^NO-GO[^—]*—[ ]*[0-9, ]*—*[ ]*/NO-GO ($ids) — /")
-            else
-              # FAIL CLOSED. A NO-GO whose citation cannot be read is still a NO-GO: a
-              # panelist objected. Printing "an opinion, not a block" and clearing the
-              # BLOCKING line hands an automated reader a green light built out of a
-              # parsing failure — and a safety check that fails open is not a check.
-              unsupported="$unsupported${unsupported:+, }$slug"
-              blocking="$blocking${blocking:+, }UNREAD-$slug"
-              word="$word  _(citation unreadable — read $slug.md in full)_"
-            fi
-          fi
-          printf -- '- **%s** — %s\n' "$slug" "$word"
-        done
-        printf '\n'
-      } >> "$body"
-
-      {
-        printf '# Panel verdict — GO %s · NO-GO %s · INSUFFICIENT %s' "$go" "$nogo" "$insuf"
-        [ "$nover" -gt 0 ] && printf ' · no verdict %s' "$nover"
-        printf '\n\n%s findings from %s panelist(s).\n\n' "$findings" "$((go + nogo + insuf + nover))"
-        # The line the reader acts on. NOT a tally: two GO against two NO-GO is not a
-        # draw to be broken by counting — it is a list of findings to judge. A landing
-        # went through on exactly that arithmetic.
-        if [ -n "$blocking" ]; then
-          # Ascending, deduplicated: the ids arrive grouped by panelist, so the raw
-          # order reads F2, F24, F3, F5 — a list nobody can hold in their head or check
-          # off. Seen on a live 44-finding round.
-          # Numbers sort; the UNREAD-<slug> markers keep their own order at the end.
-          nums=$(printf '%s' "$blocking" | tr ',' '\n' | grep -E '^ *F?[0-9]+ *$' \
-                 | tr -d ' F' | sort -n -u | sed 's/^/F/' | paste -sd, - | sed 's/,/, /g')
-          marks=$(printf '%s' "$blocking" | tr ',' '\n' | grep -E 'UNREAD-' \
-                  | tr -d ' ' | sort -u | paste -sd, - | sed 's/,/, /g')
-          blocking="${nums}${nums:+${marks:+, }}${marks}"
-          printf 'BLOCKING: %s — judge each against its cited code before landing.\n' "$blocking"
-          printf 'Clear one only by writing down what refutes it; unjudged means blocked.\n\n'
-        else
-          printf 'BLOCKING: none cited.\n\n'
-        fi
-        [ -n "$unsupported" ] && printf 'Unsupported NO-GO (cites no finding): %s\n\n' "$unsupported"
-        if [ "$ok" -lt "$total" ]; then
-          printf '> **WARNING:** only %s of %s panelists delivered. This is a partial\n' "$ok" "$total"
-          printf '> panel — do not report it as a full one.\n\n'
-        fi
-        printf '%s\n' \
-          'HOW TO READ THIS (rules, not suggestions):' \
-          '' \
-          '- The verdicts are NOT a vote. GO 2 · NO-GO 2 is not a draw to break by' \
-          '  counting — it is a list of findings to judge. Work the BLOCKING line.' \
-          '- Carry EVERY finding forward by its id. A finding one panelist made is not' \
-          '  weak — it is the one nobody else saw. Merge two only if they are literally' \
-          '  the same claim, never because they feel similar.' \
-          '- Do NOT re-summarise this file. It is already the compression; the prose it' \
-          '  came from is in the per-panelist files beside it.' \
-          '- (R) means the panelist verified it — opened the file, ran the command.' \
-          '  (G) is a guess. Check a (G) before acting on it; do not discard it.' \
-          '- FIX: is the panelist'"'"'s proposed remedy, not an instruction. Judge it.' \
-          '- INSUFFICIENT means that panelist could not see enough — read what it says' \
-          '  it was missing, and decide whether the round covered the change at all.' \
-          ''
-        cat "$body"
-      } > "$out"
-      rm -f "$body" "$raw" "$map"
+      rc=0
+      python3 "$MEDULLA_WORKFLOW_DIR/scripts/collect_verdict.py" \
+        "$MEDULLA_RUN_DIR" "$ROUND_DIR" \
+        --expected "$total" --delivered "$ok" --min-decided "$MIN_DECIDED" || rc=$?
 
       [ "$ok" -lt "$total" ] && echo "<signal:update>only $ok/$total panelists delivered</signal:update>"
 
-      # A verdict needs panelists who could SEE. INSUFFICIENT is an honest answer and
-      # is kept in the file — but a round where fewer than min_success could form an
-      # opinion has not happened, whatever the delivery count says. Live: three of four
-      # said INSUFFICIENT because their workspace was empty, and the round still
-      # reported success on the strength of the fourth.
-      decided=$((go + nogo))
-      if [ "$decided" -lt "$MIN_DECIDED" ]; then
-        echo "only $decided panelist(s) could form an opinion (GO/NO-GO); $insuf said INSUFFICIENT" >&2
-        echo "<signal:no_quorum>$decided/$MIN_DECIDED decided — read $out and fix what they could not see</signal:no_quorum>"
-        exit 0
-      fi
-      [ -n "$blocking" ] && echo "<signal:update>BLOCKING: $blocking</signal:update>"
-
-      if [ ! -s "$out" ]; then
-        echo "verdict.md was not written; the panelists' own files are in $ROUND_DIR:"
+      if [ "$rc" = "3" ]; then
+        echo "<signal:no_quorum>too few panelists could form an opinion — read $out</signal:no_quorum>"
+      elif [ "$rc" != "0" ] || [ ! -s "$out" ]; then
+        echo "collector failed (rc=$rc); the panelists' own files are in $ROUND_DIR:"
         ls "$ROUND_DIR"/*.md 2>/dev/null || true
         echo "<signal:no_verdict>no $out — read $ROUND_DIR/*.md</signal:no_verdict>"
       else
-        echo "$ok/$total panelists, $findings finding(s) -> $out"
+        grep -m1 '^BLOCKING:' "$out" | sed 's/^/<signal:update>/; s/$/<\/signal:update>/'
+        echo "$ok/$total panelists -> $out and verdict.json"
         echo "<signal:ready>$out</signal:ready>"
       fi
     timeout: 30

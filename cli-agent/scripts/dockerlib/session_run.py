@@ -7,12 +7,11 @@ the caller has to wait for.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
 import uuid
-
-import os
 from pathlib import Path
 
 from dockerlib import env as dockerenv
