@@ -17,7 +17,14 @@ from .engine import Engine
 from .engine_scan import log
 from .errors import EngineCrash
 from .model import TERMINALS
-from .rundir import RunLocked, RunStore, launch_dir_of, prune_runs
+from .rundir import (
+    RunLocked,
+    RunStore,
+    launch_dir_of,
+    drop_pipeline_sessions,
+    prune_runs,
+    sweep_pipeline_sessions,
+)
 from .workflow_path import config_yaml
 
 
@@ -165,6 +172,11 @@ def run_workflow(
         if store is not None:
             store.close()                      # release the flock (same-process reruns/tests)
             _remove_session_containers(store.run_id)
+            if not os.environ.get("MEDULLA_PIPELINE_ID"):
+                # Top of the pipeline: its containers are gone, so the ids naming
+                # conversations inside them are gone with them.
+                drop_pipeline_sessions(store.run_id)
+                sweep_pipeline_sessions()      # and anything a dead pipeline left
 
 
 def _remove_session_containers(run_id: str) -> None:
