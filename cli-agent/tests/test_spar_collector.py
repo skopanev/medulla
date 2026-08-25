@@ -142,3 +142,50 @@ def test_the_sections_the_collector_reads_must_exist(tmp_path):
                             "not one of GO")):
         rc, err = _post(tmp_path, body)
         assert rc != 0 and expected in err, (body, err)
+
+
+# ── a round needs panelists who could SEE ────────────────────────────────────
+
+def _synthesize(tmp_path, panelists, min_decided="3"):
+    art = tmp_path / "artifacts"
+    art.mkdir(exist_ok=True)
+    for slug, body in panelists:
+        (art / f"{slug}.md").write_text(body)
+    manifest = tmp_path / "m.jsonl"
+    manifest.write_text("".join('{"key":"%d:x","ok":true}\n' % i
+                                for i in range(1, len(panelists) + 1)))
+    node = pyyaml.safe_load(WORKFLOW.read_text())["nodes"]["synthesize"]["shell"]
+    res = subprocess.run(["bash", "-c", node], capture_output=True, text=True, cwd=tmp_path,
+                         env={**os.environ, "MEDULLA_RUN_DIR": str(tmp_path),
+                              "ROUND_DIR": str(art), "MEDULLA_MANIFEST_PANEL": str(manifest),
+                              "MIN_DECIDED": min_decided}, check=False)
+    return res.stdout, (tmp_path / "verdict.md").read_text()
+
+
+EMPTY_WS = "## FINDINGS\nNONE\n\n## VERDICT\nINSUFFICIENT — /workspace was empty\n"
+
+
+def test_a_panel_of_insufficient_is_not_a_verdict(tmp_path):
+    """Live (workflows-omj8pb7iif): a --mount failed, the retry ran without it, three of
+    four panelists reported INSUFFICIENT because their workspace was empty — and a
+    verdict.md was produced anyway, looking like an answer because the fourth had
+    reconstructed part of the diff from git history."""
+    stdout, out = _synthesize(tmp_path, [
+        ("gemini", EMPTY_WS), ("glm5", EMPTY_WS), ("gpt5", EMPTY_WS),
+        ("sonnet", "## FINDINGS\n- (R) HIGH — x — a.py:1 — breaks — FIX: guard\n\n"
+                   "## VERDICT\nNO-GO — 1 — reconstructed from git\n"),
+    ])
+    assert "<signal:no_quorum>" in stdout
+    assert "<signal:ready>" not in stdout       # not an answer, whatever the file says
+    assert "INSUFFICIENT 3" in out              # and the file shows who could not see
+    assert "/workspace was empty" in out
+
+
+def test_enough_opinions_still_produce_a_verdict(tmp_path):
+    body = "## FINDINGS\n- (R) MED — x — f.py:1 — y — FIX: z\n\n## VERDICT\n%s\n"
+    stdout, _out = _synthesize(tmp_path, [
+        ("a", body % "GO — fine"), ("b", body % "GO — fine"),
+        ("c", body % "NO-GO — 1 — no"), ("d", EMPTY_WS),
+    ])
+    assert "<signal:ready>" in stdout
+    assert "no_quorum" not in stdout

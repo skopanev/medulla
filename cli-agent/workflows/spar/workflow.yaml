@@ -22,6 +22,12 @@
 version: "2"
 start: prepare
 
+vars:
+  # GO/NO-GO verdicts needed for the round to have HAPPENED. Delivery is not the same
+  # as an opinion: a panelist whose workspace was empty delivers an honest INSUFFICIENT,
+  # and a file full of those is not an answer to anything.
+  MIN_DECIDED: "3"
+
 timeout: 3600
 
 
@@ -36,6 +42,19 @@ nodes:
         echo "<signal:failed>provide a question via --var-file QUESTION=path</signal:failed>"
         exit 1
       fi
+      # The panel reviews a TREE. An empty /workspace means the mounts did not land —
+      # and the round that follows is five agents reasoning about nothing, which reads
+      # like an answer and is not one. Live: a --mount failed, the retry ran without
+      # it, three of four panelists reported INSUFFICIENT, and a verdict.md was still
+      # produced. Fail here, before spending twenty minutes on it.
+      visible=$(ls -A /workspace 2>/dev/null | grep -vcE '^(\.medulla|\.git|box)$' || true)
+      if [ "${visible:-0}" -eq 0 ]; then
+        echo "workspace is empty — nothing to review (mounts did not land?)" >&2
+        ls -A /workspace 2>&1 | head -5 >&2
+        echo "<signal:failed>empty workspace: the panel would review nothing</signal:failed>"
+        exit 1
+      fi
+
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       printf '%s\n' "$QUESTION" > "$MEDULLA_RUN_DIR/artifacts/question.md"
       echo "<signal:var key=ROUND_DIR>$MEDULLA_RUN_DIR/artifacts</signal:var>"
@@ -296,6 +315,18 @@ nodes:
       rm -f "$body" "$raw" "$map"
 
       [ "$ok" -lt "$total" ] && echo "<signal:update>only $ok/$total panelists delivered</signal:update>"
+
+      # A verdict needs panelists who could SEE. INSUFFICIENT is an honest answer and
+      # is kept in the file — but a round where fewer than min_success could form an
+      # opinion has not happened, whatever the delivery count says. Live: three of four
+      # said INSUFFICIENT because their workspace was empty, and the round still
+      # reported success on the strength of the fourth.
+      decided=$((go + nogo))
+      if [ "$decided" -lt "$MIN_DECIDED" ]; then
+        echo "only $decided panelist(s) could form an opinion (GO/NO-GO); $insuf said INSUFFICIENT" >&2
+        echo "<signal:no_quorum>$decided/$MIN_DECIDED decided — read $out and fix what they could not see</signal:no_quorum>"
+        exit 0
+      fi
       [ -n "$blocking" ] && echo "<signal:update>BLOCKING: $blocking</signal:update>"
 
       if [ ! -s "$out" ]; then
@@ -312,3 +343,6 @@ nodes:
       # A panel that answered but could not be collected is NOT a failed panel: the
       # artifacts are there and worth reading. It exits ok with the reason on record.
       no_verdict: __exit_ok__
+      # A panel that could not SEE is a failed round: the file exists, the answer does
+      # not, and a caller must not read it as one.
+      no_quorum: __exit_fail__
