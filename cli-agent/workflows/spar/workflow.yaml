@@ -28,6 +28,15 @@ vars:
   # and a file full of those is not an answer to anything.
   MIN_DECIDED: "3"
 
+  # What the caller knows about the thing under review. All optional: pass what you
+  # have (--var TICKET=... --var HEAD=...), and only what is passed appears in
+  # verdict.json. An empty field would read as an answer.
+  TICKET: ""
+  PURPOSE: ""
+  BASE: ""
+  HEAD: ""
+  PATCH_DIGEST: ""
+
 timeout: 3600
 
 
@@ -167,7 +176,10 @@ nodes:
       rc=0
       python3 "$MEDULLA_WORKFLOW_DIR/scripts/collect_verdict.py" \
         "$MEDULLA_RUN_DIR" "$ROUND_DIR" \
-        --expected "$total" --delivered "$ok" --min-decided "$MIN_DECIDED" || rc=$?
+        --expected "$total" --delivered "$ok" --min-decided "$MIN_DECIDED" \
+        --subject "ticket=$TICKET" --subject "purpose=$PURPOSE" \
+        --subject "base=$BASE" --subject "head=$HEAD" \
+        --subject "patch_digest=$PATCH_DIGEST" || rc=$?
 
       [ "$ok" -lt "$total" ] && echo "<signal:update>only $ok/$total panelists delivered</signal:update>"
 

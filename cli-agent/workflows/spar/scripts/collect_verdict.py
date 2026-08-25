@@ -177,6 +177,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--expected", type=int, default=0)
     ap.add_argument("--delivered", type=int, default=0)
     ap.add_argument("--min-decided", type=int, default=3)
+    # Whatever the caller knows about WHAT was reviewed. Absent stays absent: an empty
+    # string in a gate field is worse than no field, because it reads as an answer.
+    ap.add_argument("--subject", action="append", default=[], metavar="KEY=VALUE")
     a = ap.parse_args(argv)
 
     data = build(a.round_dir)
@@ -186,8 +189,10 @@ def main(argv: list[str]) -> int:
     (a.run_dir / "verdict.md").write_text(render(data, a.delivered, a.expected),
                                           encoding="utf-8")
     # written even when the round failed: why it failed is a fact a gate needs
+    subject = dict(kv.split("=", 1) for kv in a.subject if "=" in kv and kv.split("=", 1)[1])
     (a.run_dir / "verdict.json").write_text(json.dumps({
         "run_id": a.run_dir.name,
+        **({"subject": subject} if subject else {}),
         "quorum": {"expected": a.expected, "delivered": a.delivered,
                    "min_decided": a.min_decided, "decided": decided,
                    "met": decided >= a.min_decided},

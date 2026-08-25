@@ -119,6 +119,15 @@ sharpest one, since only one of them saw it.
 # Use the result
 
     <run-dir>/verdict.md     # written by the panel itself, as its last act
+    <run-dir>/verdict.json   # the same facts for a gate: quorum, counts, blocking ids
+
+**If something consumes this automatically, read `verdict.json`, not the Markdown.**
+It carries the same pass: quorum (expected, delivered, decided, met), the counts,
+blocking ids, each panelist's verdict with citations, and every finding with its
+confidence and severity. It is written even when the round fails, because why it failed
+is a fact too. Pass what you know about the subject and it comes back — `--var
+TICKET=…`, `PURPOSE`, `BASE`, `HEAD`, `PATCH_DIGEST`; what you do not pass is simply
+absent, never an empty string pretending to be an answer.
 
 **`BLOCKING:` is the line you act on.** It lists the findings every NO-GO actually
 rests on, by id. The verdict counts above it are NOT a vote: `GO 2 · NO-GO 2` is not a

@@ -240,3 +240,24 @@ def test_the_two_channels_agree(tmp_path):
     assert f"{len(data['findings'])} findings" in md
     for f in data["findings"]:
         assert f"{f['id']}. {f['panelist']}" in md
+
+
+def test_the_subject_is_optional_and_only_what_was_given_appears(tmp_path):
+    """A gate field holding an empty string reads as an answer. Absent stays absent."""
+    art = tmp_path / "artifacts"
+    art.mkdir()
+    (art / "x.md").write_text("## FINDINGS\nNONE\n\n## VERDICT\nGO — fine\n")
+
+    def run(*subject):
+        (tmp_path / "verdict.json").unlink(missing_ok=True)
+        subprocess.run([sys.executable, str(COLLECTOR), str(tmp_path), str(art),
+                        "--expected", "1", "--delivered", "1", "--min-decided", "1",
+                        *sum((["--subject", s] for s in subject), [])],
+                       capture_output=True, text=True, check=False)
+        return json.loads((tmp_path / "verdict.json").read_text())
+
+    assert "subject" not in run()
+    assert "subject" not in run("ticket=", "head=")          # passed but empty
+    assert run("ticket=", "head=abc123")["subject"] == {"head": "abc123"}
+    assert run("ticket=T-1", "purpose=review the cache")["subject"] == {
+        "ticket": "T-1", "purpose": "review the cache"}
