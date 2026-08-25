@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from medulla.v2.engine import run_workflow
-from test_hooks_agents import read_run, setup
+from conftest import _is_outside_workspace, read_run, write_workflow as setup
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 

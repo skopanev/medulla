@@ -15,7 +15,7 @@ from pathlib import Path
 from medulla.v2.engine import run_workflow
 from medulla.v2.harness import resolve as resolve_harness
 from medulla.v2.model import AgentSpec
-from test_hooks_agents import fake_script, read_run, setup
+from conftest import fake_script, read_run, write_workflow as setup
 
 # ── the adapters: id in, command out ─────────────────────────────────────────
 

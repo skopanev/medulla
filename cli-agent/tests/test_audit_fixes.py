@@ -10,6 +10,8 @@ import pytest
 from medulla.v2 import harness as H
 from medulla.v2.procrun import run as proc_run
 
+from conftest import write
+
 
 def test_interrupt_kills_child_group(tmp_path, monkeypatch):
     # audit R1: KeyboardInterrupt mid-wait must not orphan the child session
