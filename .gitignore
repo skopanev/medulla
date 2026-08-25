@@ -35,3 +35,10 @@ opencode.json
 .medulla/scripts
 build/
 *.egg-info/
+
+# Agent CLI state that belongs to a checkout, not to the project: skills deployed by
+# `medulla init --skill` (cli-agent/workflows holds the source), per-user settings,
+# and opencode's node_modules.
+.claude/
+.agents/
+.opencode/
