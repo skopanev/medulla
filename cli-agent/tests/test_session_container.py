@@ -114,8 +114,8 @@ def test_a_nested_run_keeps_the_pipeline_container(tmp_path, monkeypatch):
     `land` run, and land's agent must reach the SAME container. MEDULLA_RUN_ID is
     reset by every nested medulla, so anchoring to it split them in two."""
     from conftest import read_run, write_workflow
-    from medulla.v2.engine import run_workflow
     from dockerlib import keep
+    from medulla.v2.engine import run_workflow
 
     yaml, work = write_workflow(tmp_path, """
 version: "2"

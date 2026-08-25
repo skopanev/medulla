@@ -137,34 +137,9 @@ cmd_start() {
 }
 
 panel_state() {
-    # What the run already knows, from the file the engine appends to as each input
-    # ends. `wait` used to report "nothing has finished" while two panelists were done
-    # and their artifacts on disk — true of the JOURNAL, which is written when the whole
-    # node ends, and false of the run. The manifest is the record of deliveries.
-    #
-    # Whole lines only: the last row can be caught half-written, and a truncated tail is
-    # not corruption, it is the next panelist still working.
-    local run="$1" m inputs
-    m=$(ls "$run"/steps/*panel*/manifest.jsonl 2>/dev/null | head -1)
-    [ -n "$m" ] || return 1
-    inputs=$(ls "$run"/steps/*panel*/inputs.json 2>/dev/null | head -1)
-    [ -n "$inputs" ] || return 1
-
-    grep '}$' "$m" 2>/dev/null | jq -s --slurpfile want "$inputs" -r '
-      (INDEX(.[]; .input.slug // (.index|tostring))) as $rows
-      | ($want[0] | map(.slug // tostring)) as $all
-      | ($all | map(select($rows[.].ok))) as $ok
-      | ($all | map(select($rows[.] == null))) as $running
-      | ($all | map(
-          $rows[.] as $r
-          | ((. + "          ")[0:10]) as $pad
-          | if   $r == null then "  \($pad) running"
-            elif $r.ok      then "  \($pad) ok       \((($r.duration_s // 0) / 60) | floor)m"
-            else                 "  \($pad) out      \($r.reason // "failed"): \(($r.message // "") | split(";")[0][0:60])"
-            end)
-        | .[])
-      , "@@ \($ok|length) \($all|length) \($running|join(" "))"
-    ' 2>/dev/null
+    # The reader lives beside this script: python is guaranteed wherever medulla runs
+    # (medulla IS python), and jq is one more thing that can be missing on a host.
+    python3 "$(dirname "$0")/panel_state.py" "$1" 2>/dev/null
 }
 
 cmd_wait() {
