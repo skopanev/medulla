@@ -44,3 +44,28 @@ def test_a_short_budget_keeps_its_own_timeout(tmp_path, monkeypatch):
     res = procrun.run("sleep 10", tmp_path, timeout_s=2)
     assert res.timed_out
     assert time.monotonic() - started < 6      # its own timeout, not the watchdog
+
+
+def test_a_body_that_stops_talking_is_cut_short_too(tmp_path, monkeypatch):
+    """The live failure: three panelists each spoke, then went quiet for 10-14 minutes
+    and burned an 1800s timeout — twice, because the retry did the same. A healthy
+    round writes an event every few seconds (298 in 586s, longest pause 66s)."""
+    monkeypatch.setattr(procrun, "FIRST_OUTPUT_S", 1)
+    monkeypatch.setattr(procrun, "IDLE_OUTPUT_S", 2)
+    started = time.monotonic()
+    res = procrun.run('echo "working"; sleep 30', tmp_path, timeout_s=20)
+    elapsed = time.monotonic() - started
+
+    assert res.timed_out
+    assert "working" in res.stdout          # what it managed to say is kept
+    assert elapsed < 12, f"waited {elapsed:.0f}s for a body that stopped talking"
+
+
+def test_steady_output_is_never_cut(tmp_path, monkeypatch):
+    """The distinction: talking slowly is working, and must not be killed."""
+    monkeypatch.setattr(procrun, "FIRST_OUTPUT_S", 1)
+    monkeypatch.setattr(procrun, "IDLE_OUTPUT_S", 2)
+    res = procrun.run('for i in 1 2 3 4 5; do echo "step $i"; sleep 1; done',
+                      tmp_path, timeout_s=20)
+    assert not res.timed_out
+    assert "step 5" in res.stdout

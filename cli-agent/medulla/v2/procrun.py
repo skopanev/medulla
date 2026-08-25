@@ -43,6 +43,12 @@ class RunResult:
 
 
 FIRST_OUTPUT_S = 60      # every harness CLI prints an init event well inside this
+# And then it keeps talking. Measured on a healthy opencode round: 298 events in 586
+# seconds, median gap 0s, 90th percentile 3s, longest 66s — no pause over two minutes
+# in the whole run. Five minutes is generous by a factor of four and still catches a
+# body that died mid-work, which is what a live panel did: three panelists went quiet
+# for 10-14 minutes each and burned a 1800s timeout, then a retry burned another.
+IDLE_OUTPUT_S = 300
 
 
 def run(
@@ -130,20 +136,14 @@ def run(
     #
     # So: nothing at all after FIRST_OUTPUT_S, and the attempt ends early with a
     # failure that IS worth retrying, unlike a timeout at the far end.
-    silent_start = False
+    went_quiet = ""
     if timeout_s > FIRST_OUTPUT_S * 2:      # only where the budget makes it meaningful
-        deadline = time.monotonic() + FIRST_OUTPUT_S
-        while time.monotonic() < deadline:
-            if out_buf or err_buf or proc.poll() is not None:
-                break
-            time.sleep(0.25)
-        else:
-            silent_start = not (out_buf or err_buf)
+        went_quiet = _watch_output(proc, out_buf, err_buf, timeout_s)
 
     timed_out = False
     try:
-        if silent_start:
-            raise subprocess.TimeoutExpired(argv, FIRST_OUTPUT_S)
+        if went_quiet:
+            raise subprocess.TimeoutExpired(argv, timeout_s)
         proc.wait(timeout=timeout_s if timeout_s > 0 else 0.001)
     except subprocess.TimeoutExpired:
         timed_out = True
@@ -190,3 +190,33 @@ def _kill_group(proc: subprocess.Popen, sig) -> None:
             proc.send_signal(sig)
         except Exception:
             pass
+
+
+def _watch_output(proc, out_buf: list, err_buf: list, timeout_s: float) -> str:
+    """Wait for the child, but not through silence. Returns why we stopped, or "".
+
+    Two thresholds, because they mean different things. Nothing at all in the first
+    minute is a process that never came up — a wrapper dead before its first write, a
+    handshake hanging, a binary waiting on a tty. Output that STOPS for five minutes is
+    a body that died mid-work, and it will not resume: a healthy round writes an event
+    every few seconds.
+
+    Either way the caller sees a timeout, which is what it is — just discovered in
+    minutes rather than at the far end of a half-hour budget.
+    """
+    end = time.monotonic() + timeout_s
+    seen = 0
+    last = time.monotonic()
+    while time.monotonic() < end:
+        if proc.poll() is not None:
+            return ""                       # finished on its own
+        now_seen = len(out_buf) + len(err_buf)
+        if now_seen > seen:
+            seen, last = now_seen, time.monotonic()
+        quiet = time.monotonic() - last
+        if seen == 0 and quiet > FIRST_OUTPUT_S:
+            return f"no output at all in {FIRST_OUTPUT_S}s"
+        if seen > 0 and quiet > IDLE_OUTPUT_S:
+            return f"silent for {IDLE_OUTPUT_S}s after {seen} lines"
+        time.sleep(0.25)
+    return ""                               # the real timeout takes it from here
