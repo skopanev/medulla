@@ -107,3 +107,58 @@ def test_inside_a_container_it_reaps_nothing(monkeypatch):
     monkeypatch.setenv("MEDULLA_DOCKER", "1")
     engine_run._remove_session_containers("run-9")
     assert calls == []
+
+
+def test_a_nested_run_keeps_the_pipeline_container(tmp_path, monkeypatch):
+    """The develop handoff: `unit` opens a conversation, one of its nodes starts the
+    `land` run, and land's agent must reach the SAME container. MEDULLA_RUN_ID is
+    reset by every nested medulla, so anchoring to it split them in two."""
+    from conftest import read_run, write_workflow
+    from medulla.v2.engine import run_workflow
+    from dockerlib import keep
+
+    yaml, work = write_workflow(tmp_path, """
+version: "2"
+start: outer
+nodes:
+  outer:
+    shell: |
+      echo "RUN=$MEDULLA_RUN_ID PIPE=$MEDULLA_PIPELINE_ID" > ids.txt
+      echo "<signal:ok>k</signal:ok>"
+    on_signal: {ok: __exit_ok__}
+""")
+    run_workflow(yaml, workdir=work)
+    outer = dict(kv.split("=") for kv in (work / "ids.txt").read_text().split())
+    assert outer["PIPE"] == outer["RUN"]          # nothing above: the run IS the pipeline
+
+    # now the nested run, started with the pipeline's id in the environment
+    monkeypatch.setenv("MEDULLA_PIPELINE_ID", outer["PIPE"])
+    yaml2, work2 = write_workflow(tmp_path, """
+version: "2"
+start: inner
+nodes:
+  inner:
+    shell: |
+      echo "RUN=$MEDULLA_RUN_ID PIPE=$MEDULLA_PIPELINE_ID" > ids.txt
+      echo "<signal:ok>k</signal:ok>"
+    on_signal: {ok: __exit_ok__}
+""", name="inner-wf")
+    run_workflow(yaml2, workdir=work2)
+    inner = dict(kv.split("=") for kv in (work2 / "ids.txt").read_text().split())
+
+    assert inner["RUN"] != outer["RUN"]           # a different run, as it must be
+    assert inner["PIPE"] == outer["PIPE"]         # the same pipeline, which is the point
+    assert keep.container_name(inner["PIPE"]) == keep.container_name(outer["PIPE"])
+
+
+def test_a_nested_run_does_not_reap_the_pipeline(monkeypatch):
+    """Cleanup belongs to the top: `land` finishing must not remove a container the
+    unit run may still be using."""
+    import medulla.v2.engine  # noqa: F401
+    from medulla.v2 import engine_run
+    calls = []
+    monkeypatch.setattr(engine_run.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.delenv("MEDULLA_DOCKER", raising=False)
+    monkeypatch.setenv("MEDULLA_PIPELINE_ID", "outer-1")
+    engine_run._remove_session_containers("inner-2")
+    assert calls == []

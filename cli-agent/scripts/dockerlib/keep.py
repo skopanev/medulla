@@ -28,13 +28,16 @@ def container_name(owner: str) -> str:
 
 
 def owner_id() -> str:
-    """Who the container belongs to: the OUTER run when there is one.
+    """Who the container belongs to: the PIPELINE, not the run.
 
-    MEDULLA_RUN_ID is forwarded into the container, so a nested `medulla --docker`
-    launched from a host node inherits it — which is exactly the case this exists for.
-    Its absence means we are the top of the pipeline and clean up after ourselves.
+    MEDULLA_RUN_ID is reset by every nested medulla — anchoring to it gives the
+    landing run a different container than the unit run that opened the conversation,
+    which is precisely the handoff this exists to serve. MEDULLA_PIPELINE_ID is set
+    once by the outermost run and inherited by everything below it.
+
+    Empty means nothing above us: we are the top and clean up after ourselves.
     """
-    return os.environ.get("MEDULLA_RUN_ID", "")
+    return os.environ.get("MEDULLA_PIPELINE_ID") or os.environ.get("MEDULLA_RUN_ID", "")
 
 
 def is_running(name: str) -> bool:

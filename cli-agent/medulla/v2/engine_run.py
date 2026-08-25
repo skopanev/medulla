@@ -180,6 +180,8 @@ def _remove_session_containers(run_id: str) -> None:
     """
     if not run_id or os.environ.get("MEDULLA_DOCKER") == "1":
         return                                 # inside a container: not ours to reap
+    if os.environ.get("MEDULLA_PIPELINE_ID"):
+        return                                 # nested: the pipeline above us owns them
     try:
         found = subprocess.run(
             ["docker", "ps", "-aq", "--filter", f"label=medulla.session-owner={run_id}"],

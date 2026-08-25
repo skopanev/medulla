@@ -35,6 +35,13 @@ class VarsMixin:
                         f"({{{{var:{key}}}}}) and keep it out of shell bodies.")
         env = {**self.dotenv, **source}
         env["MEDULLA_RUN_ID"] = self.store.run_id
+        # The PIPELINE is the outermost run, and it is inherited rather than reset:
+        # every nested `medulla` overwrites MEDULLA_RUN_ID with its own, so anything
+        # anchored to it splits at the first nesting. A develop unit hands its agent
+        # session to a landing run started from one of its nodes — same pipeline, new
+        # run id — and the container that holds the conversation must be the same one.
+        env["MEDULLA_PIPELINE_ID"] = (
+            os.environ.get("MEDULLA_PIPELINE_ID") or self.store.run_id)
         env["MEDULLA_RUN_DIR"] = str(self.store.dir)
         # Where the workflow's own files live — prompts/, scripts/, anything it ships.
         # A node that wants to call its workflow's own script had no way to find it:

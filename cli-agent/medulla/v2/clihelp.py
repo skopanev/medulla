@@ -13,6 +13,9 @@ environment the engine provides to bodies and hooks (agents: read this, it is th
   always
     MEDULLA_RUN_ID          run id (settable from outside for correlation)
     MEDULLA_RUN_DIR         this run's directory; put deliverables in $MEDULLA_RUN_DIR/artifacts/
+    MEDULLA_PIPELINE_ID     the OUTERMOST run's id, inherited by every nested medulla
+                            (MEDULLA_RUN_ID is reset by each one); anchors a kept
+                            session container to the pipeline rather than to one run
     MEDULLA_WORKFLOW_DIR    where this workflow's own files live (prompts/, scripts/) —
                             the copy that actually resolved, at its path in THIS process
     <all workflow vars>     exported as-is, including <signal:var>-set ones
