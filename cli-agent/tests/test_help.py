@@ -179,3 +179,63 @@ def test_refresh_updates_machine_wide_skills_including_profiles(sandbox, monkeyp
         assert target.read_text() == "current skill\n", target
     assert not (home / ".claude-empty" / "skills").exists()
     assert capsys.readouterr().out.count("(machine-wide)") >= 5
+
+
+def test_codex_gets_the_skill_where_it_actually_reads(sandbox, monkeypatch):
+    """codex reads ~/.codex/skills. The list sent it to ~/.agents/skills instead, so
+    codex was the one harness of four that could not convene a panel — its skills
+    directory held only OpenAI's own .system/ entries."""
+    from medulla.init import skill_dests_global
+
+    home, _cwd = sandbox
+    for rel in (".claude/skills", ".agents/skills", ".codex/skills",
+                ".config/opencode/skills"):
+        (home / rel).mkdir(parents=True)
+
+    dests = [str(d).replace(str(home), "~") for d in skill_dests_global()]
+    assert "~/.codex/skills" in dests
+    assert "~/.claude/skills" in dests
+    assert "~/.config/opencode/skills" in dests
+
+
+def test_refresh_reaches_the_codex_copy(sandbox, monkeypatch, capsys):
+    from medulla.refresh import refresh_skill
+
+    home, cwd = sandbox
+    bundle = home / "bundle" / "spar"
+    bundle.mkdir(parents=True)
+    (bundle / "workflow.yaml").write_text("current\n")
+    (bundle / "SKILL.md").write_text("current skill\n")
+    monkeypatch.setattr("medulla.refresh._bundle_dir", lambda _n: bundle)
+
+    target = home / ".codex" / "skills" / "spar"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("stale\n")
+
+    assert refresh_skill("spar", str(cwd)) == 0
+    assert (target / "SKILL.md").read_text() == "current skill\n"
+
+
+def test_a_symlinked_skill_is_left_alone(sandbox, monkeypatch):
+    """Someone may prefer one copy and a link to it. refresh never writes THROUGH a
+    symlink (CWE-59), so that choice survives — and the target updates anyway."""
+    from medulla.refresh import refresh_skill
+
+    home, cwd = sandbox
+    bundle = home / "bundle" / "spar"
+    bundle.mkdir(parents=True)
+    (bundle / "workflow.yaml").write_text("current\n")
+    (bundle / "SKILL.md").write_text("current skill\n")
+    monkeypatch.setattr("medulla.refresh._bundle_dir", lambda _n: bundle)
+
+    real = home / ".medulla" / "workflows" / "spar"
+    real.mkdir(parents=True)
+    (real / "SKILL.md").write_text("stale\n")
+    (real / "workflow.yaml").write_text("stale\n")
+    link_parent = home / ".codex" / "skills"
+    link_parent.mkdir(parents=True)
+    (link_parent / "spar").symlink_to(real)
+
+    assert refresh_skill("spar", str(cwd)) == 0
+    assert not (link_parent / "spar").is_symlink() is False   # still a link
+    assert (real / "SKILL.md").read_text() == "current skill\n"   # target refreshed

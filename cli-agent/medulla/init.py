@@ -49,10 +49,12 @@ def _symlink(link: Path, target: Path) -> None:
 # The text init writes — medulla/templates.py.
 from .templates import GITIGNORE, SKILL_MD, WORKFLOW_README, WORKFLOW_YAML  # noqa: E402
 
-SKILL_DESTS = (          # every agent CLI that reads skills (main@dca7dbf)
+SKILL_DESTS = (          # every agent CLI that reads skills, per each one's docs
     Path(".claude") / "skills",      # claude-code
-    Path(".agents") / "skills",      # codex
+    Path(".agents") / "skills",      # the shared alias codex/opencode/agy also read
+    Path(".codex") / "skills",       # codex — the one IT reads
     Path(".opencode") / "skills",    # opencode
+    Path(".gemini") / "skills",      # agy
 )
 
 def skill_dests_global() -> tuple[Path, ...]:
@@ -64,9 +66,23 @@ def skill_dests_global() -> tuple[Path, ...]:
     opencode reads ~/.config/opencode — the per-user layout differs from per-project.
     """
     home = Path.home()
+    # One directory per CLI, from each one's own documentation — checked because the
+    # list was wrong: codex reads ~/.codex/skills, and this sent it to ~/.agents/skills
+    # instead, so codex was the one harness of four that could not convene a panel.
+    #
+    #   claude-code  ~/.claude/skills
+    #   codex        ~/.codex/skills
+    #   opencode     ~/.config/opencode/skills  (also reads ~/.claude, ~/.agents)
+    #   agy          ~/.gemini/skills, and ~/.gemini/antigravity/skills for the
+    #                Antigravity build
+    #   .agents/skills is the shared alias several of them also read — kept, because
+    #   costing one extra copy is better than guessing which CLI dropped it.
     dests = [home / ".claude" / "skills",
              home / ".agents" / "skills",
-             home / ".config" / "opencode" / "skills"]
+             home / ".codex" / "skills",
+             home / ".config" / "opencode" / "skills",
+             home / ".gemini" / "skills",
+             home / ".gemini" / "antigravity" / "skills"]
     # Claude Code profiles: CLAUDE_CONFIG_DIR points at ~/.claude-<name>, and a user
     # with several of them (work, personal, a client) has several skill directories.
     # Only EXISTING ones — this must not conjure a profile nobody uses. Found by a
