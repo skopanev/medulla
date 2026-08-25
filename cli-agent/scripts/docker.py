@@ -66,8 +66,6 @@ from dockerlib.env import (  # noqa: E402
     _collect_dotenv,
     _unlink_env_file,
 )
-
-# Which image, and making sure it exists — dockerlib/image.py.
 from dockerlib.image import (  # noqa: E402
     DEFAULT_IMAGE,
     _config_yaml,
@@ -85,6 +83,9 @@ from dockerlib.paths import (  # noqa: E402
     read_shadow_paths,
     runs_under_for,
 )
+
+# Which image, and making sure it exists — dockerlib/image.py.
+from dockerlib.probe import workflow_names_a_session  # noqa: E402
 
 # Starting the container and stopping it properly — dockerlib/process.py.
 from dockerlib.process import (  # noqa: E402,F401
@@ -224,8 +225,14 @@ def main():
     args, run_dir_name = announce.announce(args, workflow, runs_folder, image)
 
     try:
+        # A workflow that NAMES a session keeps its container: the conversation lives
+        # in the CLI's own state inside $HOME, so a fresh container would be a fresh
+        # conversation whatever id we resumed with. Blunt on purpose — no check for
+        # whether the session is actually used, because that check is one more thing
+        # to get wrong, and an unused name costs one idle container per pipeline.
         return run_docker(image, volumes, args, runs_under=shared_runs_under,
-                          run_dir_name=run_dir_name)
+                          run_dir_name=run_dir_name,
+                          keep_session=workflow_names_a_session(workflow))
     finally:
         _remove_made_mountpoints(made_mountpoints)
 

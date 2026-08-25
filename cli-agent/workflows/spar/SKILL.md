@@ -120,6 +120,13 @@ sharpest one, since only one of them saw it.
 
     <run-dir>/verdict.md     # written by the panel itself, as its last act
 
+**`BLOCKING:` is the line you act on.** It lists the findings every NO-GO actually
+rests on, by id. The verdict counts above it are NOT a vote: `GO 2 · NO-GO 2` is not a
+tie to break by counting — it is two findings to judge against their cited code. A
+landing went through on exactly that arithmetic, because nothing tied the two NO-GO
+verdicts to anything checkable. A NO-GO that cites no finding is printed as an opinion
+and blocks nothing; a cited one blocks until you write down what refutes it.
+
 Read `verdict.md` FIRST — the panel writes it as its last act, so it is there before
 you ask, and it is written by the workflow itself rather than by a tool that has to be
 found (a tool that has to be found is a tool that can be missing: it was, once, and the

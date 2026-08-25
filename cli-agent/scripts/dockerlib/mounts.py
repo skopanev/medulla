@@ -16,9 +16,9 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))   # source checkout: medulla lives one level up
 
-from dockerlib.image import _config_yaml
 from dockerlib.mountfiles import _mount_agy_keys, _mount_init_docker
 from dockerlib.paths import workspace_cwd
+from dockerlib.probe import workflow_names_a_session, workflow_uses_agy  # noqa: F401
 
 # Home of the NON-ROOT user INSIDE the container. Only the FALLBACK: docker.py probes
 # the resolved image (image_home) and assigns the real one here before mounts are
@@ -27,44 +27,6 @@ from dockerlib.paths import workspace_cwd
 CONTAINER_HOME = "/home/hltm"
 
 
-def workflow_uses_agy(workflow: str | None) -> bool:
-    """Does this workflow actually use the agy harness?
-
-    Only then are the Keychain-extracted agy keys mounted: a Keychain prompt on every
-    --docker run for workflows that never touch agy is noise, and scary noise.
-
-    Reads the HARNESS FIELDS, not the file text. The previous check was
-    `"agy" in yaml_path.read_text()` — a substring match, so the word appearing in a
-    prompt, a comment or a model name sent the runner into the macOS Keychain for
-    credentials the run never needed. Anything unreadable or unparseable keeps the old
-    permissive answer: missing credentials fail confusingly, a spurious prompt is merely
-    annoying.
-    """
-    if not workflow:
-        return True
-    yaml_path = _config_yaml(Path(workflow))
-    try:
-        import yaml
-        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return True
-
-    def mentions_agy(node) -> bool:
-        if isinstance(node, dict):
-            agent = node.get("agent")
-            if isinstance(agent, str) and agent.strip() == "agy":
-                return True
-            if isinstance(agent, dict) and str(agent.get("harness", "")).strip() == "agy":
-                return True
-            # pool inputs carry the harness as data: {slug: gemini, harness: agy, ...}
-            if str(node.get("harness", "")).strip() == "agy":
-                return True
-            return any(mentions_agy(v) for v in node.values())
-        if isinstance(node, list):
-            return any(mentions_agy(v) for v in node)
-        return False
-
-    return mentions_agy(data)
 
 
 def build_volumes(claude_home, mount_agy=True, *,

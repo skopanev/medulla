@@ -258,6 +258,16 @@ Rule of thumb: **data flows to shell via env** (quoting-safe — `"$MEDULLA_INPU
   did not answer. Each CLI's own way of continuing is the adapter's business —
   `--resume`, `exec resume`, `--session`, `--conversation`.
 
+  Under `--docker` a named session also keeps the CONTAINER: a conversation lives in
+  the CLI's own state inside `$HOME`, so a fresh container is a fresh conversation
+  whatever id we resume with. The container is named after the outer run
+  (`MEDULLA_RUN_ID`, which every node inherits), reused by later nested runs, and
+  removed when that run exits — crashed, interrupted or clean. A day-old container
+  with the label is swept as a belt for the pipeline that never came back. Two
+  consequences worth knowing: the environment stops being clean between nodes (caches
+  and installed packages persist, usually a plus), and two pipelines never share a
+  container, because their run ids differ.
+
 ## Examples
 
 ### Full workflow

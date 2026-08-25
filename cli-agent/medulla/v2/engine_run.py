@@ -8,6 +8,8 @@ happened.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 
 from .contract import load_workflow
@@ -162,3 +164,29 @@ def run_workflow(
                 pass
         if store is not None:
             store.close()                      # release the flock (same-process reruns/tests)
+            _remove_session_containers(store.run_id)
+
+
+def _remove_session_containers(run_id: str) -> None:
+    """Remove containers this pipeline kept alive for an agent session.
+
+    A workflow that names a session gets a container that outlives each nested
+    `medulla --docker` call — that is how a conversation survives a host step in
+    between. Ownership is this run's id, so the run that started them removes them,
+    and it happens in `finally`: crashed, interrupted or clean, the container goes.
+
+    Silent when docker is absent or nothing matches — a native run that never used a
+    container must not print anything, and a missing daemon is not this run's problem.
+    """
+    if not run_id or os.environ.get("MEDULLA_DOCKER") == "1":
+        return                                 # inside a container: not ours to reap
+    try:
+        found = subprocess.run(
+            ["docker", "ps", "-aq", "--filter", f"label=medulla.session-owner={run_id}"],
+            capture_output=True, text=True, timeout=30, check=False).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        return
+    for cid in found:
+        subprocess.run(["docker", "rm", "-f", cid], capture_output=True, check=False)
+    if found:
+        log(f"removed {len(found)} session container(s)")
