@@ -17,14 +17,32 @@ import subprocess
 import time
 
 LABEL = "medulla.session-owner"
+SPEC_LABEL = "medulla.session-spec"
 # Belt for the pipeline that never reached its own cleanup — a killed host, a lost
 # terminal. A day, because medulla removes its containers on exit in all but the rare
 # case, and a shorter sweep would start reaping containers of a pipeline still running.
 STALE_AFTER_S = 24 * 3600
 
 
-def container_name(owner: str) -> str:
-    return f"medulla-sess-{owner}"
+def container_name(owner: str, spec: str = "") -> str:
+    """One container per pipeline AND per execution spec.
+
+    Keying on the pipeline alone let a later nested workflow land in a container built
+    from another image, mounted on another workspace, or writable when it asked for
+    --cwd-ro. The spec digest is what the container IS; the owner is whose it is.
+    """
+    return f"medulla-sess-{owner}-{spec}" if spec else f"medulla-sess-{owner}"
+
+
+def spec_digest(image: str, volumes: list[str]) -> str:
+    """A short hash of everything that decides what the container can see and do.
+
+    Image and mounts, in the order they were built — a different order means a
+    different view of the world, so it is not normalised away.
+    """
+    import hashlib
+    payload = "\n".join([image, *volumes]).encode("utf-8", "surrogatepass")
+    return hashlib.sha256(payload).hexdigest()[:8]
 
 
 def owner_id() -> str:
@@ -100,16 +118,19 @@ def sweep_stale(now: float | None = None) -> int:
 def _remove_dead() -> int:
     """Remove session containers that are not RUNNING, whatever their age.
 
-    A live one is always Up — it holds `sleep infinity` while the pipeline works. So
-    Created or Exited means it never started or already finished, and in both cases
-    nothing is waiting on it. Found two Created ones left by interrupted probes: the
-    day-long sweep would have kept them until tomorrow for no reason.
+    A live one is always Up — it holds `sleep infinity` while the pipeline works, so
+    Exited or Dead means nothing is waiting on it. `created` is deliberately NOT here:
+    a container passes through that state while another process starts it, and reaping
+    it there deletes a container out from under a worker about to use it.
     """
+    # NOT status=created: that is the state a container passes through while another
+    # process is starting it, and reaping it there deletes a container out from under
+    # a worker that is about to use it. Exited and dead are finished, whoever started
+    # them; a creation that genuinely stalled is left to the day-long sweep.
     try:
         out = subprocess.run(
             ["docker", "ps", "-aq", "--filter", f"label={LABEL}",
-             "--filter", "status=created", "--filter", "status=exited",
-             "--filter", "status=dead"],
+             "--filter", "status=exited", "--filter", "status=dead"],
             capture_output=True, text=True, timeout=30, check=False).stdout
     except (OSError, subprocess.SubprocessError):
         return 0

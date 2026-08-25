@@ -2,8 +2,7 @@
 
 A conversation lives in the CLI's own state inside $HOME — claude keeps a jsonl file,
 opencode a SQLite database, agy a database plus a protobuf. Copying that out is four
-different problems; not throwing the container away is one. So: named session → the
-container is reused across nested `medulla --docker` calls and removed at the end.
+different problems; not throwing the container away is one.
 """
 import subprocess
 import sys
@@ -207,10 +206,14 @@ def test_the_kept_container_starts_idle_and_waits_for_the_entrypoint(monkeypatch
     assert execs[0][-3:] == ["medulla", "-w", "wf"]
 
 
-def test_a_container_that_never_ran_is_swept_immediately(monkeypatch):
+def test_a_finished_container_is_swept_immediately(monkeypatch):
     """A live session container is always Up — it holds `sleep infinity` while the
-    pipeline works. Created or Exited means nothing is waiting on it, so the day-long
-    sweep would be keeping rubbish until tomorrow."""
+    pipeline works. Exited or Dead means nothing is waiting on it, so the day-long
+    sweep would be keeping rubbish until tomorrow.
+
+    `created` is NOT swept: a container passes through that state while another
+    process starts it, and reaping it there deletes a container out from under a
+    worker that is about to use it."""
     from dockerlib import keep
 
     calls = []
@@ -221,6 +224,9 @@ def test_a_container_that_never_ran_is_swept_immediately(monkeypatch):
     assert keep._remove_dead() == 2
 
     query = calls[0]
-    assert "status=created" in query and "status=exited" in query
+    assert "status=exited" in query and "status=dead" in query
+    assert "status=created" not in query        # someone may be starting it right now
     assert f"label={keep.LABEL}" in query           # ours only: the daemon is shared
     assert sum(1 for c in calls if c[:3] == ["docker", "rm", "-f"]) == 2
+
+

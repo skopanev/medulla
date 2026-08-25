@@ -37,30 +37,47 @@ def _run_kept(image, volumes, args, runs_under, run_dir_name):
     keep.sweep_stale()                     # belt: a pipeline that never came back
     owner = keep.owner_id() or f"top-{uuid.uuid4().hex[:8]}"
     mine = keep.owner_id() == ""           # nobody above us will clean up
-    name = keep.container_name(owner)
+    # The spec joins the name: a pipeline that runs two workflows with different
+    # images, mounts or --cwd-ro gets a container each, instead of the second silently
+    # inheriting the first one's world.
+    spec = keep.spec_digest(image, volumes)
+    name = keep.container_name(owner, spec)
 
     if not keep.is_running(name):
         # `sleep infinity` as the command: the entrypoint still runs (tini execs it),
-        # does its credential copy and its upgrade, writes the marker, and only then
-        # hands over to the idle process. Nothing of the workflow runs here.
+        # copies credentials, upgrades medulla, writes the marker, and only then hands
+        # over to the idle process. Nothing of the workflow runs here.
         cmd = build_run_command(image, volumes, ["--version"], name,
                                 run_dir_name=run_dir_name, runs_under=runs_under)
         cmd = [c for c in cmd if c not in ("--rm", "-i", "-t")]
         at = cmd.index("--name")
-        cmd[at:at] = ["-d", "--label", f"{keep.LABEL}={owner}"]
+        cmd[at:at] = ["-d", "--label", f"{keep.LABEL}={owner}",
+                      "--label", f"{keep.SPEC_LABEL}={spec}"]
         tail = cmd.index(image)
         cmd[tail:] = [image, "sleep", "infinity"]
         started = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if started.returncode != 0:
-            print(started.stderr.strip(), file=sys.stderr)
-            return started.returncode
-        print(f"[medulla] session container {name} starting", file=sys.stderr)
-        if not _wait_ready(name):
-            print(f"[medulla] {name} never became ready — removing it", file=sys.stderr)
-            keep.remove(name)
-            return 1
+            # Losing the election is not an error. Two first callers can both see the
+            # container absent and both try to create it; the loser gets "name already
+            # in use" and should JOIN rather than fail the pipeline.
+            if not keep.is_running(name):
+                print(started.stderr.strip(), file=sys.stderr)
+                return started.returncode
+            print(f"[medulla] joining session container {name}", file=sys.stderr)
+        else:
+            print(f"[medulla] session container {name} starting", file=sys.stderr)
     else:
         print(f"[medulla] reusing session container {name}", file=sys.stderr)
+
+    # EVERY caller waits, not just the one that created it. Waiting only in the create
+    # branch left the second caller free to exec while the entrypoint was still
+    # upgrading — the exact race the idle-start rewrite existed to remove, reintroduced
+    # for anyone who arrives second. A warm container answers on the first probe, so
+    # this costs one `docker exec test`.
+    if not _wait_ready(name):
+        print(f"[medulla] {name} never became ready — removing it", file=sys.stderr)
+        keep.remove(name)
+        return 1
 
     cmd = ["docker", "exec"]
     if sys.stdin.isatty():

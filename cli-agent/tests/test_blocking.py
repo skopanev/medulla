@@ -55,15 +55,41 @@ def test_a_cited_no_go_becomes_a_blocking_id(tmp_path):
     assert "BLOCKING" in stdout                        # and surfaced as an update signal
 
 
-def test_an_uncited_no_go_is_named_as_an_opinion(tmp_path):
-    """The half of the tie nobody could act on."""
+def test_an_unreadable_no_go_fails_closed(tmp_path):
+    """A NO-GO whose citation cannot be read is still a NO-GO — a panelist objected.
+    Printing "an opinion, not a block" and clearing the BLOCKING line hands an
+    automated reader a green light built out of a parsing failure."""
     out, _ = panel(tmp_path, [
         ("gpt5", [CACHE], "NO-GO — the change feels rushed"),
         ("gemini", [], "GO — fine"),
     ])
-    assert "cites no finding" in out
-    assert "Unsupported NO-GO (cites no finding): gpt5" in out
-    assert "BLOCKING: none cited." in out
+    assert "citation unreadable" in out
+    assert "UNREAD-gpt5" in out
+    assert "BLOCKING: none cited." not in out
+
+
+def test_citations_are_read_however_they_are_written(tmp_path):
+    """"F1, F2", "1 and 3", "findings 1/3" — the old character class stopped at the
+    first unexpected character and dropped the rest silently."""
+    out, _ = panel(tmp_path, [
+        ("sonnet", [CACHE, NOISE], "NO-GO — F1 and F2 — both matter"),
+    ])
+    blocking = next(l for l in out.splitlines() if l.startswith("BLOCKING:"))
+    assert "F1" in blocking and "F2" in blocking
+
+
+def test_severity_comes_from_the_slot_not_a_substring(tmp_path):
+    """"(G) LOW — the HIGH watermark is cosmetic" sorted as HIGH under a substring
+    match — the same mistake this repo fixed once when "agy" in a comment sent the
+    runner into the Keychain."""
+    out, _ = panel(tmp_path, [
+        ("sonnet", ["- (G) LOW — the HIGH watermark line is cosmetic — a.py:1 — noise — FIX: drop it",
+                    "- (R) HIGH — real one — b.py:2 — breaks — FIX: guard it"],
+         "GO — nothing blocking"),
+    ])
+    order = [l for l in out.splitlines() if l.startswith("F")]
+    assert "real one" in order[0]          # the actual HIGH sorts first
+    assert "watermark" in order[1]
 
 
 def test_the_reported_tie_now_says_what_to_do(tmp_path):
