@@ -78,3 +78,36 @@ def test_a_different_image_or_mount_gets_its_own_container():
     c = keep.spec_digest("img:1", ["-v", "/repo:/workspace"])       # writable
     assert len({a, b, c}) == 3
     assert keep.container_name("pipe1", a) != keep.container_name("pipe1", c)
+
+
+def test_a_joining_exec_carries_this_calls_environment(monkeypatch, tmp_path):
+    """A joining exec inherited the FIRST caller's keys and .env tiers, so a later
+    nested run could authenticate as the earlier one — or find nothing at all, if the
+    first call had no key and this one does."""
+    from dockerlib import env as dockerenv
+    from dockerlib import session_run
+
+    envfile = tmp_path / "merged.env"
+    envfile.write_text("# a comment\nPROJECT_TIER=from-dotenv\n\n")
+    monkeypatch.setattr(dockerenv, "env_file_for_run", str(envfile))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "this-calls-key")
+
+    execs = []
+
+    class _Proc:
+        returncode = 0
+        def wait(self): return 0
+
+    monkeypatch.setattr(session_run.keep, "sweep_stale", lambda *a, **k: 0)
+    monkeypatch.setattr(session_run.keep, "is_running", lambda name: True)
+    monkeypatch.setattr(session_run.keep, "remove", lambda name: None)
+    monkeypatch.setattr(session_run, "_wait_ready", lambda name, **k: True)
+    monkeypatch.setattr(session_run.subprocess, "Popen",
+                        lambda cmd, **kw: execs.append(cmd) or _Proc())
+
+    session_run._run_kept("img:1", [], ["-w", "wf"], None, None)
+
+    flat = " ".join(execs[0])
+    assert "ANTHROPIC_API_KEY=this-calls-key" in flat
+    assert "PROJECT_TIER=from-dotenv" in flat
+    assert "# a comment" not in flat            # comments are not variables

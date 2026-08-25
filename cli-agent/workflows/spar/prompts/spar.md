@@ -85,15 +85,16 @@ Close with this section, verbatim heading, exactly two lines:
 
 ```
 ## VERDICT
-GO | NO-GO — F<n>, F<n> | INSUFFICIENT — one line: why
+GO | NO-GO — <n>, <n> | INSUFFICIENT — one line: why
 ```
 
 Pick ONE word:
 
 - **GO** — ship it. Findings may still exist; none of them is a reason to stop.
 - **NO-GO** — do not ship until named findings are addressed, and NAME THEM by their
-  position in your own FINDINGS list: `NO-GO — 1, 3 — the cache defect leaks across
-  tenants`. A NO-GO that cites nothing is an opinion: nobody can check it, act on it,
+  position in your own FINDINGS list — bare numbers, nothing else in that clause:
+  `NO-GO — 1, 3 — the cache defect leaks across tenants`. Prose there ("NO-GO — this
+  breaks 3 callers") is not a citation and will be treated as none. A NO-GO that cites nothing is an opinion: nobody can check it, act on it,
   or clear it, and it will be printed as unsupported. If what stops you is not in your
   findings, it is not written down yet — put it there first.
 - **INSUFFICIENT** — you could not see enough to answer. Say what you were missing.

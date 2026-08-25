@@ -12,9 +12,13 @@ import sys
 import time
 import uuid
 
+import os
+from pathlib import Path
+
+from dockerlib import env as dockerenv
 from dockerlib import keep
 from dockerlib.env import _unlink_env_file
-from dockerlib.process import build_run_command, interactive_stdio
+from dockerlib.process import HARNESS_ENV_KEYS, build_run_command, interactive_stdio
 
 
 def _run_kept(image, volumes, args, runs_under, run_dir_name):
@@ -85,6 +89,22 @@ def _run_kept(image, volumes, args, runs_under, run_dir_name):
     if interactive_stdio():
         cmd.append("-t")
     cmd += ["-w", "/workspace"]
+    # THIS call's environment, not the one the container was created with. A joining
+    # exec inherited the first caller's keys and .env tiers, so a later nested run
+    # could authenticate as the earlier one — or find nothing at all, if the first
+    # call had no key and this one does.
+    for key in HARNESS_ENV_KEYS:
+        val = os.environ.get(key)
+        if val:
+            cmd += ["-e", f"{key}={val}"]
+    if dockerenv.env_file_for_run:
+        for line in Path(dockerenv.env_file_for_run).read_text(
+                encoding="utf-8", errors="replace").splitlines():
+            # docker exec has no --env-file; pass the merged tiers one by one. Values
+            # on the command line are visible in `ps` for the length of the exec, which
+            # is the price of entering a container that already exists.
+            if line.strip() and not line.lstrip().startswith("#"):
+                cmd += ["-e", line]
     if runs_under is not None:
         cmd += ["-e", f"MEDULLA_RUNS_UNDER={runs_under}"]
     if run_dir_name:

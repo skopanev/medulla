@@ -195,7 +195,17 @@ nodes:
             # "F1 and F3", "findings 1/3". The old character class stopped at the first
             # unexpected character, so "NO-GO — F1, F2" cited only F1 and the rest were
             # dropped from the reader's list without a word.
-            cited=$(printf '%s' "$word" | awk -F'—' '{print $2}' | grep -oE '[0-9]+' | tr '\n' ' ')
+            # The clause between the first and second dash, and ONLY if it looks like
+            # a citation: digits, F-prefixes, separators. "NO-GO — this breaks 3
+            # callers" used to cite a fabricated F3 — worse than reading nothing,
+            # because it points the reader at the wrong finding. Anything else leaves
+            # cited empty, and an empty citation fails closed below.
+            clause=$(printf '%s' "$word" | awk -F'—' '{print $2}')
+            if printf '%s' "$clause" | grep -qE '^[ ]*[Ff]?[0-9]+([ ]*(,|and|/|&)[ ]*[Ff]?[0-9]+)*[ ]*$'; then
+              cited=$(printf '%s' "$clause" | grep -oE '[0-9]+' | tr '\n' ' ')
+            else
+              cited=""
+            fi
             ids=""
             for c in $cited; do
               g=$(awk -v s="$slug" -v l="$c" '$1==s && $2==l {print $3}' "$map")

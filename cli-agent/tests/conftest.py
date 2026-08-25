@@ -9,6 +9,9 @@ from medulla.v2.contract import load_workflow
 from medulla.v2.errors import EngineCrash
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # cli-agent/
+# scripts/ too: dockerlib is imported by the container-side tests, and putting it here
+# rather than in each file is why splitting a test file stopped breaking them.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 os.environ["MEDULLA_RETRY_DELAY_S"] = "0"   # retry backoff off in tests
 os.environ["MEDULLA_STREAM"] = "0"          # operator streaming off in tests
