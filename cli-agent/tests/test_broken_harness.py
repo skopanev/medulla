@@ -20,17 +20,37 @@ ModuleNotFoundError: No module named 'hltm'
 '''
 
 
-def test_the_signature_is_recognised_on_stdout_and_stderr():
+def test_the_signature_is_recognised_on_stderr():
+    """STDERR only. Reading stdout too cost a panelist 36 minutes of finished work:
+    an agent reading a repository writes "No such file or directory" all day, and the
+    detector called that a broken launcher."""
     a = resolve_harness(AgentSpec(harness="codex"))
-    assert "failed to start" in (a.broken_launch(TRACEBACK) or "")
     assert "failed to start" in (a.broken_launch("", TRACEBACK) or "")
-    assert "hltm" in a.broken_launch(TRACEBACK)
+    assert "hltm" in a.broken_launch("", TRACEBACK)
+    assert a.broken_launch(TRACEBACK, "") is None       # stdout is the agent's, not the launcher's
+
+
+def test_an_agents_own_output_is_never_a_broken_launch():
+    """The regression, verbatim: 11 of these in one healthy claude run."""
+    a = resolve_harness(AgentSpec(harness="claude-code"))
+    real = ('{"type":"system","subtype":"hook_response","output":'
+            '"cat: /workspace/nope.md: No such file or directory"}')
+    assert a.broken_launch(real, "") is None
+    assert a.broken_launch("", real) is None            # JSON on stderr is output too
+    assert a.broken_launch("", "cat: nope.md: No such file or directory") is None
 
 
 def test_a_missing_binary_counts_too():
     a = resolve_harness(AgentSpec(harness="codex"))
     assert a.broken_launch("", "cx: command not found") is not None
-    assert a.broken_launch("", "bash: /usr/local/bin/cx: No such file or directory") is not None
+    assert a.broken_launch("", "bash: cx: cannot execute binary file") is not None
+
+
+def test_only_the_head_of_stderr_is_read():
+    """A launcher dies immediately or not at all; later noise is the agent's."""
+    a = resolve_harness(AgentSpec(harness="codex"))
+    late = "\n".join(["warning"] * 60 + ["ModuleNotFoundError: No module named x"])
+    assert a.broken_launch("", late) is None
 
 
 def test_an_ordinary_model_failure_is_not_a_broken_launch():
