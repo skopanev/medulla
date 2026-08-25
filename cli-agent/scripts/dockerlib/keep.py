@@ -76,6 +76,7 @@ def sweep_stale(now: float | None = None) -> int:
     container disappearing without explanation is its own kind of confusing.
     """
     now = time.time() if now is None else now
+    _remove_dead()
     try:
         out = subprocess.run(
             ["docker", "ps", "-a", "--filter", f"label={LABEL}",
@@ -94,6 +95,28 @@ def sweep_stale(now: float | None = None) -> int:
             subprocess.run(["docker", "rm", "-f", cid], capture_output=True, check=False)
             removed += 1
     return removed
+
+
+def _remove_dead() -> int:
+    """Remove session containers that are not RUNNING, whatever their age.
+
+    A live one is always Up — it holds `sleep infinity` while the pipeline works. So
+    Created or Exited means it never started or already finished, and in both cases
+    nothing is waiting on it. Found two Created ones left by interrupted probes: the
+    day-long sweep would have kept them until tomorrow for no reason.
+    """
+    try:
+        out = subprocess.run(
+            ["docker", "ps", "-aq", "--filter", f"label={LABEL}",
+             "--filter", "status=created", "--filter", "status=exited",
+             "--filter", "status=dead"],
+            capture_output=True, text=True, timeout=30, check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    ids = [i for i in out.split() if i]
+    for cid in ids:
+        subprocess.run(["docker", "rm", "-f", cid], capture_output=True, check=False)
+    return len(ids)
 
 
 def _age_seconds(created: str, now: float) -> float | None:

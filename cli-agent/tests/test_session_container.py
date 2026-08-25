@@ -205,3 +205,22 @@ def test_the_kept_container_starts_idle_and_waits_for_the_entrypoint(monkeypatch
     execs = [c for c in seen if isinstance(c, list) and c[:2] == ["docker", "exec"]]
     assert len(execs) == 1, "exactly one exec, or the workflow runs twice"
     assert execs[0][-3:] == ["medulla", "-w", "wf"]
+
+
+def test_a_container_that_never_ran_is_swept_immediately(monkeypatch):
+    """A live session container is always Up — it holds `sleep infinity` while the
+    pipeline works. Created or Exited means nothing is waiting on it, so the day-long
+    sweep would be keeping rubbish until tomorrow."""
+    from dockerlib import keep
+
+    calls = []
+
+    class _R:
+        stdout = "dead1 dead2"
+    monkeypatch.setattr(keep.subprocess, "run", lambda cmd, **kw: calls.append(cmd) or _R())
+    assert keep._remove_dead() == 2
+
+    query = calls[0]
+    assert "status=created" in query and "status=exited" in query
+    assert f"label={keep.LABEL}" in query           # ours only: the daemon is shared
+    assert sum(1 for c in calls if c[:3] == ["docker", "rm", "-f"]) == 2
