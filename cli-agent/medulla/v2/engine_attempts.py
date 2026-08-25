@@ -116,7 +116,11 @@ class AttemptsMixin(BodyMixin):
                 # "body died: rc=1"), but let a declared fallback take its turn — that
                 # is exactly the case fallback exists for. Not fatal_error: crashing the
                 # whole run would take the healthy panelists with it.
-                pointless = adapter.retry_pointless(result.stdout)
+                # Checked BEFORE retry_pointless: a launcher that never ran cannot
+                # have hit a quota, and saying "plan limit" about a missing module
+                # sends the reader to the provider's dashboard for an hour.
+                pointless = (adapter.broken_launch(result.stdout, result.stderr)
+                             or adapter.retry_pointless(result.stdout))
                 if pointless:
                     log(f"attempt {attempt_id}: {pointless}")
                     phase_budget = attempt          # no further attempts in this phase

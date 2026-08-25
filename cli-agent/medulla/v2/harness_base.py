@@ -154,6 +154,39 @@ class HarnessAdapter:
             return None
         return line
 
+    # A wrapper that cannot start is not a model failure, and it does not clear on a
+    # second try. Reported live: `cx` (a credential-refreshing wrapper the container
+    # installs) died with ModuleNotFoundError before reviewing a line, twice per run,
+    # across two consecutive rounds — read at the time as a provider problem, because
+    # the only thing the manifest said was rc=1. These signatures are the launcher's,
+    # not the model's: an interpreter that could not import, or a binary that is not
+    # there. Checked on STDERR as well as stdout, since that is where a Python
+    # traceback and a shell's "command not found" go.
+    _BROKEN_LAUNCH = (
+        "ModuleNotFoundError",
+        "ImportError:",
+        "command not found",
+        "No such file or directory",
+        "cannot execute binary file",
+        "Traceback (most recent call last)",
+    )
+
+    def broken_launch(self, stdout: str, stderr: str = "") -> str | None:
+        """The harness itself failed to start. Retrying repeats it exactly.
+
+        Kept separate from retry_pointless (a quota that will clear later) and from
+        fatal_error (an environment fault worth crashing the whole run for): a broken
+        wrapper belongs to THIS input — the other panelists are fine — but it must not
+        burn a second identical attempt, and the manifest must say what it was rather
+        than "body died: rc=1".
+        """
+        text = f"{stdout}\n{stderr}"
+        for sig in self._BROKEN_LAUNCH:
+            if sig in text:
+                line = next((l.strip() for l in text.splitlines() if sig in l), sig)
+                return f"{self.name} failed to start: {line[:160]}"
+        return None
+
     def retry_pointless(self, stdout: str) -> str | None:
         """A failure that WILL repeat until something outside the run changes — a plan
         limit, an exhausted quota. Distinct from fatal_error: that one crashes the whole
