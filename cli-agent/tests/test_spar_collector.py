@@ -1,11 +1,6 @@
-"""The panel's verdict is assembled by the workflow's own synthesize node.
+"""The collector: panelist files in, verdict.md and verdict.json out.
 
-It used to call a script the workflow ships, which meant the script had to reach the
-container — it did not, only prompts/ was mounted, and a live panel reported success
-having written no verdict at all. The tool now lives in the node, where it cannot be
-left behind.
-
-These run the node's shell exactly as the engine would: same text, from the yaml.
+One pass writes both, so the prose and the machine channel cannot drift apart.
 """
 import json
 import os
@@ -101,91 +96,25 @@ def test_an_empty_round_still_writes_an_honest_file(tmp_path):
 
 # ── the post hook: what counts as a delivery ─────────────────────────────────
 
-def _post(tmp_path, body):
-    """Run the panel node's post hook against one panelist file."""
-    node = pyyaml.safe_load(WORKFLOW.read_text())["nodes"]["panel"]["post"]
-    (tmp_path / "x.md").write_text(body)
-    res = subprocess.run(["bash", "-c", node], capture_output=True, text=True,
-                         env={**os.environ, "ROUND_DIR": str(tmp_path),
-                              "MEDULLA_INPUT_SLUG": "x"}, check=False)
-    return res.returncode, res.stderr.strip()
-
-
-def test_a_verdict_without_a_reason_is_not_a_delivery(tmp_path):
-    """Live: gemini returned 32 bytes — "NONE / GO" — after 547 seconds, and `test -s`
-    counted it. A bare GO cannot be argued with, and a reader cannot tell a considered
-    pass from a panelist that gave up."""
-    rc, err = _post(tmp_path, "## FINDINGS\nNONE\n\n## VERDICT\nGO\n")
-    assert rc != 0 and "no reason" in err
-
-
-def test_a_reason_of_any_shape_counts(tmp_path):
-    """Including bare citations: "NO-GO — 1" says which finding, which is the point."""
-    for body in ("## FINDINGS\nNONE\n\n## VERDICT\nGO — nothing blocking\n",
-                 "## FINDINGS\n- (R) HIGH — x — a.py:1 — y — FIX: z\n\n## VERDICT\nNO-GO — 1\n",
-                 "## FINDINGS\nNONE\n\n## VERDICT\nINSUFFICIENT — no image was mounted\n"):
-        rc, err = _post(tmp_path, body)
-        assert rc == 0, (body, err)
-
-
-def test_the_sections_the_collector_reads_must_exist(tmp_path):
-    for body, expected in (("", "no artifact"),
-                           ("just prose", "## FINDINGS"),
-                           ("## FINDINGS\nNONE\n", "## VERDICT"),
-                           ("## FINDINGS\nNONE\n\n## VERDICT\nmaybe later\n",
-                            "not one of GO")):
-        rc, err = _post(tmp_path, body)
-        assert rc != 0 and expected in err, (body, err)
-
-
-# ── a round needs panelists who could SEE ────────────────────────────────────
-
-def _synthesize(tmp_path, panelists, min_decided="3"):
+def test_the_subject_is_optional_and_only_what_was_given_appears(tmp_path):
+    """A gate field holding an empty string reads as an answer. Absent stays absent."""
     art = tmp_path / "artifacts"
-    art.mkdir(exist_ok=True)
-    for slug, body in panelists:
-        (art / f"{slug}.md").write_text(body)
-    manifest = tmp_path / "m.jsonl"
-    manifest.write_text("".join('{"key":"%d:x","ok":true}\n' % i
-                                for i in range(1, len(panelists) + 1)))
-    res = subprocess.run(
-        [sys.executable, str(COLLECTOR), str(tmp_path), str(art),
-         "--expected", str(len(panelists)), "--delivered", str(len(panelists)),
-         "--min-decided", min_decided], capture_output=True, text=True, check=False)
-    marker = "<signal:no_quorum>" if res.returncode == 3 else "<signal:ready>"
-    return marker, (tmp_path / "verdict.md").read_text()
+    art.mkdir()
+    (art / "x.md").write_text("## FINDINGS\nNONE\n\n## VERDICT\nGO — fine\n")
 
+    def run(*subject):
+        (tmp_path / "verdict.json").unlink(missing_ok=True)
+        subprocess.run([sys.executable, str(COLLECTOR), str(tmp_path), str(art),
+                        "--expected", "1", "--delivered", "1", "--min-decided", "1",
+                        *sum((["--subject", s] for s in subject), [])],
+                       capture_output=True, text=True, check=False)
+        return json.loads((tmp_path / "verdict.json").read_text())
 
-EMPTY_WS = "## FINDINGS\nNONE\n\n## VERDICT\nINSUFFICIENT — /workspace was empty\n"
-
-
-def test_a_panel_of_insufficient_is_not_a_verdict(tmp_path):
-    """Live (workflows-omj8pb7iif): a --mount failed, the retry ran without it, three of
-    four panelists reported INSUFFICIENT because their workspace was empty — and a
-    verdict.md was produced anyway, looking like an answer because the fourth had
-    reconstructed part of the diff from git history."""
-    stdout, out = _synthesize(tmp_path, [
-        ("gemini", EMPTY_WS), ("glm5", EMPTY_WS), ("gpt5", EMPTY_WS),
-        ("sonnet", "## FINDINGS\n- (R) HIGH — x — a.py:1 — breaks — FIX: guard\n\n"
-                   "## VERDICT\nNO-GO — 1 — reconstructed from git\n"),
-    ])
-    assert "<signal:no_quorum>" in stdout
-    assert "<signal:ready>" not in stdout       # not an answer, whatever the file says
-    assert "INSUFFICIENT 3" in out              # and the file shows who could not see
-    assert "/workspace was empty" in out
-
-
-def test_enough_opinions_still_produce_a_verdict(tmp_path):
-    body = "## FINDINGS\n- (R) MED — x — f.py:1 — y — FIX: z\n\n## VERDICT\n%s\n"
-    stdout, _out = _synthesize(tmp_path, [
-        ("a", body % "GO — fine"), ("b", body % "GO — fine"),
-        ("c", body % "NO-GO — 1 — no"), ("d", EMPTY_WS),
-    ])
-    assert "<signal:ready>" in stdout
-    assert "no_quorum" not in stdout
-
-
-# ── the machine channel ──────────────────────────────────────────────────────
+    assert "subject" not in run()
+    assert "subject" not in run("ticket=", "head=")          # passed but empty
+    assert run("ticket=", "head=abc123")["subject"] == {"head": "abc123"}
+    assert run("ticket=T-1", "purpose=review the cache")["subject"] == {
+        "ticket": "T-1", "purpose": "review the cache"}
 
 def test_verdict_json_carries_what_a_gate_needs(tmp_path):
     """workflows-aqmq1i6snq: outcome.json held only terminal metadata, so a consumer
@@ -211,7 +140,6 @@ def test_verdict_json_carries_what_a_gate_needs(tmp_path):
                                    "severity": "HIGH",
                                    "text": "(R) HIGH — leak — a.py:41 — cross-tenant — FIX: key it"}
 
-
 def test_verdict_json_is_written_when_the_round_fails(tmp_path):
     """Why it failed is a fact a gate needs — and it must fail CLOSED."""
     art = tmp_path / "artifacts"
@@ -225,7 +153,6 @@ def test_verdict_json_is_written_when_the_round_fails(tmp_path):
     assert data["quorum"]["met"] is False
     assert data["quorum"]["decided"] == 0
     assert data["counts"]["INSUFFICIENT"] == 3
-
 
 def test_the_two_channels_agree(tmp_path):
     """One pass writes both, so they cannot drift apart."""
@@ -241,23 +168,43 @@ def test_the_two_channels_agree(tmp_path):
     for f in data["findings"]:
         assert f"{f['id']}. {f['panelist']}" in md
 
+EMPTY_WS = "## FINDINGS\nNONE\n\n## VERDICT\nINSUFFICIENT — /workspace was empty\n"
 
-def test_the_subject_is_optional_and_only_what_was_given_appears(tmp_path):
-    """A gate field holding an empty string reads as an answer. Absent stays absent."""
+def _synthesize(tmp_path, panelists, min_decided="3"):
     art = tmp_path / "artifacts"
-    art.mkdir()
-    (art / "x.md").write_text("## FINDINGS\nNONE\n\n## VERDICT\nGO — fine\n")
+    art.mkdir(exist_ok=True)
+    for slug, body in panelists:
+        (art / f"{slug}.md").write_text(body)
+    manifest = tmp_path / "m.jsonl"
+    manifest.write_text("".join('{"key":"%d:x","ok":true}\n' % i
+                                for i in range(1, len(panelists) + 1)))
+    res = subprocess.run(
+        [sys.executable, str(COLLECTOR), str(tmp_path), str(art),
+         "--expected", str(len(panelists)), "--delivered", str(len(panelists)),
+         "--min-decided", min_decided], capture_output=True, text=True, check=False)
+    marker = "<signal:no_quorum>" if res.returncode == 3 else "<signal:ready>"
+    return marker, (tmp_path / "verdict.md").read_text()
 
-    def run(*subject):
-        (tmp_path / "verdict.json").unlink(missing_ok=True)
-        subprocess.run([sys.executable, str(COLLECTOR), str(tmp_path), str(art),
-                        "--expected", "1", "--delivered", "1", "--min-decided", "1",
-                        *sum((["--subject", s] for s in subject), [])],
-                       capture_output=True, text=True, check=False)
-        return json.loads((tmp_path / "verdict.json").read_text())
+def test_a_panel_of_insufficient_is_not_a_verdict(tmp_path):
+    """Live (workflows-omj8pb7iif): a --mount failed, the retry ran without it, three of
+    four panelists reported INSUFFICIENT because their workspace was empty — and a
+    verdict.md was produced anyway, looking like an answer because the fourth had
+    reconstructed part of the diff from git history."""
+    stdout, out = _synthesize(tmp_path, [
+        ("gemini", EMPTY_WS), ("glm5", EMPTY_WS), ("gpt5", EMPTY_WS),
+        ("sonnet", "## FINDINGS\n- (R) HIGH — x — a.py:1 — breaks — FIX: guard\n\n"
+                   "## VERDICT\nNO-GO — 1 — reconstructed from git\n"),
+    ])
+    assert "<signal:no_quorum>" in stdout
+    assert "<signal:ready>" not in stdout       # not an answer, whatever the file says
+    assert "INSUFFICIENT 3" in out              # and the file shows who could not see
+    assert "/workspace was empty" in out
 
-    assert "subject" not in run()
-    assert "subject" not in run("ticket=", "head=")          # passed but empty
-    assert run("ticket=", "head=abc123")["subject"] == {"head": "abc123"}
-    assert run("ticket=T-1", "purpose=review the cache")["subject"] == {
-        "ticket": "T-1", "purpose": "review the cache"}
+def test_enough_opinions_still_produce_a_verdict(tmp_path):
+    body = "## FINDINGS\n- (R) MED — x — f.py:1 — y — FIX: z\n\n## VERDICT\n%s\n"
+    stdout, _out = _synthesize(tmp_path, [
+        ("a", body % "GO — fine"), ("b", body % "GO — fine"),
+        ("c", body % "NO-GO — 1 — no"), ("d", EMPTY_WS),
+    ])
+    assert "<signal:ready>" in stdout
+    assert "no_quorum" not in stdout

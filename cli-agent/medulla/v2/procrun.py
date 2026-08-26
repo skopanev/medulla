@@ -61,6 +61,7 @@ def run(
     env_remove: list[str] | None = None,
     merge_stderr: bool = False,
     echo=None,   # callable(tag, line) for live operator streaming
+    watch_output: bool = False,   # only for agent CLIs — see _watch_output
 ) -> RunResult:
     if isinstance(command, str):
         # bash, not $SHELL — same reason as engine.py: hooks are workflow code and must not
@@ -137,7 +138,7 @@ def run(
     # So: nothing at all after FIRST_OUTPUT_S, and the attempt ends early with a
     # failure that IS worth retrying, unlike a timeout at the far end.
     went_quiet = ""
-    if timeout_s > FIRST_OUTPUT_S * 2:      # only where the budget makes it meaningful
+    if watch_output and timeout_s > FIRST_OUTPUT_S * 2:
         went_quiet = _watch_output(proc, out_buf, err_buf, timeout_s)
 
     timed_out = False
@@ -194,6 +195,12 @@ def _kill_group(proc: subprocess.Popen, sig) -> None:
 
 def _watch_output(proc, out_buf: list, err_buf: list, timeout_s: float) -> str:
     """Wait for the child, but not through silence. Returns why we stopped, or "".
+
+    ONLY for agent CLIs, which announce themselves and then narrate: claude a
+    session_id, codex thread.started, opencode step_start, agy init. A shell body is
+    any program at all — curl, tar, a compiler, an API client that speaks once it is
+    done — and silence there is not a symptom of anything. Applying this to shell
+    killed a fetcher at 60 seconds that normally runs 140-180 and was working fine.
 
     Two thresholds, because they mean different things. Nothing at all in the first
     minute is a process that never came up — a wrapper dead before its first write, a

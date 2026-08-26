@@ -104,6 +104,7 @@ class AttemptsMixin(BodyMixin):
                    **invoke.env}
 
             result = proc_run(invoke.argv, self.workdir, eff, extra_env=env,
+                              watch_output=(current.kind == "agent"),
                               log_path=step_dir / f"attempt-{total}-{tag}.txt",
                               stdin_data=invoke.stdin, env_remove=invoke.env_remove,
                               merge_stderr=invoke.merge_stderr, echo=echo)

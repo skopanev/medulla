@@ -107,3 +107,19 @@ Nothing else goes in this section. If you think something must be fixed before
 anything else, or that fixing X will expose Y, those are FINDINGS — write them up
 there, with a file and a FIX, where they will be carried forward. The verdict is
 your answer to "can this ship", and that is one line.
+
+---
+
+## Data the caller passed, and data going back
+
+Anything the caller knows about the subject travels with the round and comes back in
+`verdict.json` beside your file — ticket, purpose, base and head, a patch digest:
+
+    medulla launch spar start q.md --var TICKET=T-1 --var HEAD=abc123
+    -> "subject": {"ticket": "T-1", "head": "abc123"}
+
+Whatever was not passed is simply absent, never an empty field pretending to be an
+answer. If your review depends on something the brief does not name and the subject
+does not carry — the ticket, the base commit, which tree this is — say so in your
+verdict as INSUFFICIENT and name what was missing. That is a finding about the round,
+and it is more useful than a confident answer about the wrong thing.
