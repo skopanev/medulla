@@ -51,6 +51,14 @@ environment the engine provides to bodies and hooks (agents: read this, it is th
     Translating a value is the caller's job — medulla does not guess which strings
     are paths. Inside the container your workspace is /workspace.
 
+re-entering a run:
+    --run <dir>                 continue an interrupted or crashed run
+    --run <dir> --node <name>   re-enter a FINISHED run at that node — for when the
+                                answer was rejected outside the run (a protected
+                                branch, a rebase conflict) and the agent that produced
+                                it should try again rather than a fresh one. Both
+                                passes stay in the journal.
+
 agent nodes (fields beyond harness/model/effort/sandbox/args):
     sets: [K, ...]          vars this agent may set from stdout; empty (default) = none
     session: <name>         name a conversation: the first node with the name opens it,

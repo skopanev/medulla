@@ -104,11 +104,19 @@ def run_workflow(
                     prior = json.loads(outcome_path.read_text(encoding="utf-8"))
                 except json.JSONDecodeError:
                     prior = {}
-                if prior.get("outcome") not in RESUMABLE_OUTCOMES:
+                if prior.get("outcome") not in RESUMABLE_OUTCOMES and not start_override:
                     log(f"run {resume_dir.name} already finished "
                         f"(outcome={prior.get('outcome', '?')}); "
-                        f"delete outcome.json to force a re-run")
+                        f"re-enter it at a node with --run <dir> --node <name>")
                     return 1
+                if prior.get("outcome") not in RESUMABLE_OUTCOMES:
+                    # A FINISHED run, re-entered on purpose at a named node. The case
+                    # this exists for: a landing was rejected outside the run — a
+                    # protected branch, a rebase conflict — and the answer is to go
+                    # back to the node that produced it, not to start over and lose
+                    # what the agent already knows. The journal keeps both passes.
+                    log(f"re-entering finished run {resume_dir.name} "
+                        f"(was {prior.get('outcome', '?')}) at node '{start_override}'")
                 outcome_path.unlink()           # resuming: the run is live again
             # the SNAPSHOT is the run's config — the live workflow.yaml may have moved on
             workflow = load_workflow(config_yaml(resume_dir))
@@ -121,8 +129,12 @@ def run_workflow(
             engine = Engine(workflow, store, workdir,
                             launch_dir=launch_dir_of(store.dir))
             current = engine.replay()
-            outcome = (engine.synthesize_terminal(current) if current in TERMINALS
-                       else engine.run(start_override=current))
+            # An explicit node outranks the journal, terminal or not: re-entering a
+            # finished run IS the request. Without this the replay saw __exit_ok__ and
+            # finalized the old outcome again, running nothing.
+            outcome = (engine.synthesize_terminal(current)
+                       if current in TERMINALS and not start_override
+                       else engine.run(start_override=start_override or current))
             outcome["duration_s"] = round(
                 (__import__("datetime").datetime.now() - store.started_at).total_seconds(), 2)
             store.write_outcome(_normalize_outcome(outcome, store, engine))

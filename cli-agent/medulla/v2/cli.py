@@ -38,7 +38,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--var-file", action="append", default=[], metavar="KEY=PATH",
                         help="set a var from a FILE — for prompts too long or too "
                              "multiline to survive a shell argument")
-    parser.add_argument("--node", default=None, help="start from a specific node (dev, fresh runs)")
+    parser.add_argument("--node", default=None,
+                        help="start from this node; with --run, re-enter a finished "
+                             "run there (a rejected landing goes back to the agent)")
     parser.add_argument("--resume", action="store_true", help="continue the latest resumable run")
     parser.add_argument("--run", type=Path, default=None, metavar="DIR",
                         help="continue a specific run directory")
