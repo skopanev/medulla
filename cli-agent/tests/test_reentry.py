@@ -62,3 +62,33 @@ def test_an_interrupted_run_resumes_as_before(tmp_path):
     (run / "outcome.json").write_text(json.dumps(outcome))
 
     assert run_workflow(yaml, workdir=work, resume_dir=run) == 0
+
+
+def test_the_cli_accepts_run_with_node(tmp_path, monkeypatch, capsys):
+    """The help documented `--run <dir> --node <name>` while the validator refused any
+    combination — the feature was reachable from the engine and not from the CLI."""
+    import sys
+
+    from medulla.v2.cli import main
+
+    yaml, work = write_workflow(tmp_path, TWO_STEPS)
+    run_workflow(yaml, workdir=work)
+    run, _out, _j = read_run(yaml.parent)
+
+    monkeypatch.chdir(work)
+    rc = main(["-w", str(yaml), "--run", str(run), "--node", "work"])
+    assert rc == 0
+    _run, out, journal = read_run(yaml.parent)
+    assert out["outcome"] == "succeeded"
+    assert len(journal) == 4                   # the first pass plus the re-entry
+
+
+def test_resume_with_node_says_which_run_it_needs(tmp_path, capsys):
+    """--resume picks the latest resumable run, so naming a node there is ambiguous."""
+    import pytest
+    from medulla.v2.cli import main
+
+    yaml, _work = write_workflow(tmp_path, TWO_STEPS)
+    with pytest.raises(SystemExit):
+        main(["-w", str(yaml), "--resume", "--node", "work"])
+    assert "--run <dir> --node <name>" in capsys.readouterr().err

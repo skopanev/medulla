@@ -34,6 +34,24 @@ def run_dir(tmp_path):
     return tmp_path
 
 
+def collect(tmp_path, panelists, *, expected=None, delivered=None, min_decided=3):
+    """Run the collector over a round: returns (markdown, parsed json, result)."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    art = tmp_path / "artifacts"
+    art.mkdir(exist_ok=True)
+    for slug, body in panelists:
+        (art / f"{slug}.md").write_text(body)
+    n = len(panelists)
+    res = subprocess.run(
+        [sys.executable, str(COLLECTOR), str(tmp_path), str(art),
+         "--expected", str(n if expected is None else expected),
+         "--delivered", str(n if delivered is None else delivered),
+         "--min-decided", str(min_decided)],
+        capture_output=True, text=True, check=False)
+    return ((tmp_path / "verdict.md").read_text(),
+            json.loads((tmp_path / "verdict.json").read_text()), res)
+
+
 COLLECTOR = Path(__file__).resolve().parent.parent / "workflows/spar/scripts/collect_verdict.py"
 
 
@@ -208,3 +226,5 @@ def test_enough_opinions_still_produce_a_verdict(tmp_path):
     ])
     assert "<signal:ready>" in stdout
     assert "no_quorum" not in stdout
+
+

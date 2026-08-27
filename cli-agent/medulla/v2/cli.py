@@ -89,8 +89,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--resume and --run are mutually exclusive")
     if resuming and ns.var:
         parser.error("--var is for fresh runs only (a resumed run's vars live in vars.yaml)")
-    if resuming and ns.node:
-        parser.error("--node is for fresh runs only (resume continues from the journal)")
+    if ns.resume and ns.node:
+        # --resume picks the latest resumable run; naming a node there is ambiguous
+        # about WHICH run you meant. --run <dir> --node is the explicit form.
+        parser.error("--node needs an explicit run: --run <dir> --node <name>")
 
     cli_vars: dict[str, str] = {}
     # One key, one source. Silent last-wins hides a real mistake: two flags disagreeing

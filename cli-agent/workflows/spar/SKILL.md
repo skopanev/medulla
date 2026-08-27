@@ -122,9 +122,11 @@ sharpest one, since only one of them saw it.
     <run-dir>/verdict.json   # the same facts for a gate: quorum, counts, blocking ids
 
 **If something consumes this automatically, read `verdict.json`, not the Markdown.**
-It carries the same pass: quorum (expected, delivered, decided, met), the counts,
-blocking ids, each panelist's verdict with citations, and every finding with its
-confidence and severity. It is written even when the round fails, because why it failed
+It carries the same pass: `state` (`CLEAR` or `REVIEW_REQUIRED` — branch on this),
+quorum (expected, delivered, decided, met), the counts, blocking ids, verified HIGH
+findings, each panelist's verdict with citations, every finding with its confidence and
+severity, and `parser.malformed` naming any panelist whose file could not be read
+properly — a delivered model is never silently omitted. It is written even when the round fails, because why it failed
 is a fact too. Pass what you know about the subject and it comes back — `--var
 TICKET=…`, `PURPOSE`, `BASE`, `HEAD`, `PATCH_DIGEST`; what you do not pass is simply
 absent, never an empty string pretending to be an answer.

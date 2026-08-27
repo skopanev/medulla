@@ -22,11 +22,16 @@ CITATION = re.compile(r"^\s*[Ff]?\d+(\s*(?:,|and|/|&)\s*[Ff]?\d+)*\s*$")
 
 
 def _section(text: str, heading: str) -> list[str]:
-    """Lines under `## HEADING`, to the next heading."""
+    """Lines under `## HEADING`, to the next heading. Case-insensitive.
+
+    A panelist wrote `## Findings` and its whole list was dropped without a word —
+    exact matching turns a model's formatting into silent data loss.
+    """
+    want = heading.strip("# ").upper()
     out, inside = [], False
     for line in text.splitlines():
-        if line.startswith("## "):
-            inside = line.strip() == heading
+        if line.startswith("#"):
+            inside = line.strip("# \t").upper().startswith(want)
             continue
         if inside:
             out.append(line)
@@ -55,6 +60,12 @@ def read_panelist(path: Path) -> dict:
         })
 
     verdict_line = next((l.strip() for l in _section(text, "## VERDICT") if l.strip()), "")
+    # What the parser could not make sense of, kept as a fact rather than a silence.
+    malformed = []
+    if not re.search(r"(?im)^#+\s*FINDINGS\b", text):
+        malformed.append("no FINDINGS heading")
+    if not re.search(r"(?im)^#+\s*VERDICT\b", text):
+        malformed.append("no VERDICT heading")
     word = next((w for w in VERDICT_WORDS if verdict_line.startswith(w)), "")
     cites, unreadable = [], False
     if word == "NO-GO":
@@ -63,8 +74,11 @@ def read_panelist(path: Path) -> dict:
             cites = [int(n) for n in re.findall(r"\d+", clause)]
         else:
             unreadable = True
+    if verdict_line and not word:
+        malformed.append(f"verdict not one of GO/NO-GO/INSUFFICIENT: {verdict_line[:40]!r}")
     return {
         "slug": path.stem,
+        "malformed": malformed,
         "verdict": word or None,
         "line": verdict_line,
         "cites_local": cites,
@@ -102,6 +116,11 @@ def build(round_dir: Path) -> dict:
     counts = {w: sum(1 for p in panelists if p["verdict"] == w)
               for w in ("GO", "NO-GO", "INSUFFICIENT")}
     counts["none"] = sum(1 for p in panelists if not p["verdict"])
+    # Unresolved (R) HIGH findings weigh the same as a NO-GO for a gate: a verified
+    # defect at a cited line is what the contract's blocker test is about, whatever
+    # verdict word the panelist chose around it.
+    verified_high = [f["id"] for f in numbered
+                     if f["severity"] == "HIGH" and f["confidence"] == "R"]
     return {
         "panelists": panelists,
         "findings": numbered,
@@ -110,6 +129,8 @@ def build(round_dir: Path) -> dict:
                                {b for b in blocking if not b.startswith("F")}),
         "unsupported": unsupported,
         "counts": counts,
+        "verified_high": verified_high,
+        "malformed": {p["slug"]: p["malformed"] for p in panelists if p["malformed"]},
     }
 
 
@@ -147,6 +168,10 @@ def render(data: dict, delivered: int, expected: int) -> str:
     if data["unsupported"]:
         out += [f"Unsupported NO-GO (citation unreadable): {', '.join(data['unsupported'])}",
                 ""]
+    if data["malformed"]:
+        out += ["Parsed with difficulty — read these files in full:"]
+        out += [f"  {slug}: {'; '.join(why)}" for slug, why in data["malformed"].items()]
+        out += [""]
     if expected and delivered < expected:
         out += [f"> **WARNING:** only {delivered} of {expected} panelists delivered. This is a",
                 "> partial panel — do not report it as a full one.", ""]
@@ -199,6 +224,13 @@ def main(argv: list[str]) -> int:
         "counts": c,
         "blocking": data["blocking"],
         "unsupported_no_go": data["unsupported"],
+        # One field a caller can branch on, so nothing has to re-derive readiness from
+        # counts: any NO-GO, any unresolved verified HIGH, or a round without quorum.
+        "state": ("REVIEW_REQUIRED"
+                  if (c["NO-GO"] or data["verified_high"] or decided < a.min_decided)
+                  else "CLEAR"),
+        "verified_high": data["verified_high"],
+        "parser": {"malformed": data["malformed"]},
         "panelists": [{"slug": p["slug"], "verdict": p["verdict"], "reason": p["line"],
                        "cites": p["cites"], "findings": len(p["findings"])}
                       for p in data["panelists"]],
