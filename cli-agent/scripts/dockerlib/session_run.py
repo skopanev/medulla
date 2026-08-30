@@ -7,17 +7,19 @@ the caller has to wait for.
 """
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import time
 import uuid
-from pathlib import Path
 
-from dockerlib import env as dockerenv
 from dockerlib import keep
-from dockerlib.env import _unlink_env_file
-from dockerlib.process import HARNESS_ENV_KEYS, build_run_command, interactive_stdio
+from dockerlib import paths as dockerpaths
+from dockerlib.process import (
+    build_run_command,
+    docker_client_env,
+    forwarded_env_values,
+    interactive_stdio,
+)
 
 
 def _run_kept(image, volumes, args, runs_under, run_dir_name):
@@ -43,22 +45,29 @@ def _run_kept(image, volumes, args, runs_under, run_dir_name):
     # The spec joins the name: a pipeline that runs two workflows with different
     # images, mounts or --cwd-ro gets a container each, instead of the second silently
     # inheriting the first one's world.
-    spec = keep.spec_digest(image, volumes)
+    spec = keep.spec_digest(image, volumes, dockerpaths.shadow_paths_for_run)
     name = keep.container_name(owner, spec)
 
     if not keep.is_running(name):
         # `sleep infinity` as the command: the entrypoint still runs (tini execs it),
-        # copies credentials, upgrades medulla, writes the marker, and only then hands
-        # over to the idle process. Nothing of the workflow runs here.
-        cmd = build_run_command(image, volumes, ["--version"], name,
-                                run_dir_name=run_dir_name, runs_under=runs_under)
+        # upgrades medulla, writes the marker, and only then hands over to the idle
+        # process. No caller credentials or workflow code run here.
+        cmd = build_run_command(
+            image, volumes, ["--version"], name, forward_env=False,
+        )
         cmd = [c for c in cmd if c not in ("--rm", "-i", "-t")]
         at = cmd.index("--name")
         cmd[at:at] = ["-d", "--label", f"{keep.LABEL}={owner}",
                       "--label", f"{keep.SPEC_LABEL}={spec}"]
         tail = cmd.index(image)
         cmd[tail:] = [image, "sleep", "infinity"]
-        started = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        started = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=docker_client_env(),
+        )
         if started.returncode != 0:
             # Losing the election is not an error. Two first callers can both see the
             # container absent and both try to create it; the loser gets "name already
@@ -88,35 +97,28 @@ def _run_kept(image, volumes, args, runs_under, run_dir_name):
     if interactive_stdio():
         cmd.append("-t")
     cmd += ["-w", "/workspace"]
-    # THIS call's environment, not the one the container was created with. A joining
-    # exec inherited the first caller's keys and .env tiers, so a later nested run
-    # could authenticate as the earlier one — or find nothing at all, if the first
-    # call had no key and this one does.
-    for key in HARNESS_ENV_KEYS:
-        val = os.environ.get(key)
-        if val:
-            cmd += ["-e", f"{key}={val}"]
-    if dockerenv.env_file_for_run:
-        for line in Path(dockerenv.env_file_for_run).read_text(
-                encoding="utf-8", errors="replace").splitlines():
-            # docker exec has no --env-file; pass the merged tiers one by one. Values
-            # on the command line are visible in `ps` for the length of the exec, which
-            # is the price of entering a container that already exists.
-            if line.strip() and not line.lstrip().startswith("#"):
-                cmd += ["-e", line]
-    if runs_under is not None:
-        cmd += ["-e", f"MEDULLA_RUNS_UNDER={runs_under}"]
+    # THIS call supplies only names; docker reads values from the child environment.
+    # `docker exec --env-file` exists, but no temp file is needed. Creation-time
+    # values would remain clear in Config.Env, so the idle container gets none.
+    for key in forwarded_env_values():
+        cmd += ["-e", key]
+    if runs_under:
+        cmd += ["-e", "MEDULLA_RUNS_UNDER"]
     if run_dir_name:
-        cmd += ["-e", f"MEDULLA_RUN_DIR_NAME={run_dir_name}"]
+        cmd += ["-e", "MEDULLA_RUN_DIR_NAME"]
     cmd += [name, "medulla", *args]
 
     stdin = None if sys.stdin.isatty() else subprocess.DEVNULL
-    proc = subprocess.Popen(cmd, stdin=stdin, start_new_session=True)
+    proc = subprocess.Popen(
+        cmd,
+        stdin=stdin,
+        start_new_session=True,
+        env=docker_client_env(runs_under, run_dir_name),
+    )
     try:
         proc.wait()
         return proc.returncode
     finally:
-        _unlink_env_file()
         if mine:
             keep.remove(name)
 

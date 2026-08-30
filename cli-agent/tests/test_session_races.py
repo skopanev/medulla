@@ -5,7 +5,6 @@ name, and an identity that ignored what the container actually IS.
 """
 import subprocess
 import sys
-from pathlib import Path
 
 
 def test_every_caller_waits_for_readiness_not_just_the_creator(monkeypatch):
@@ -69,7 +68,7 @@ def test_losing_the_creation_race_joins_instead_of_failing(monkeypatch):
     assert session_run._run_kept("img:1", [], ["-w", "wf"], None, None) == 0
 
 
-def test_a_different_image_or_mount_gets_its_own_container():
+def test_a_different_image_mount_or_shadow_gets_its_own_container():
     """Keying on the pipeline alone let a later nested workflow land in a container
     built from another image, or writable when it asked for --cwd-ro."""
     from dockerlib import keep
@@ -77,20 +76,62 @@ def test_a_different_image_or_mount_gets_its_own_container():
     a = keep.spec_digest("img:1", ["-v", "/repo:/workspace:ro"])
     b = keep.spec_digest("img:2", ["-v", "/repo:/workspace:ro"])
     c = keep.spec_digest("img:1", ["-v", "/repo:/workspace"])       # writable
-    assert len({a, b, c}) == 3
+    d = keep.spec_digest("img:1", ["-v", "/repo:/workspace:ro"], ["secrets"])
+    assert len({a, b, c, d}) == 4
     assert keep.container_name("pipe1", a) != keep.container_name("pipe1", c)
 
 
-def test_a_joining_exec_carries_this_calls_environment(monkeypatch, tmp_path):
+def test_idle_container_is_created_without_forwarded_environment(monkeypatch):
+    """The long-lived sleep process has no use for caller credentials."""
+    from dockerlib import env as dockerenv
+    from dockerlib import session_run
+
+    monkeypatch.setattr(dockerenv, "env_values_for_run", {
+        "PROJECT_TIER": "dotenv-sentinel",
+    })
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "host-sentinel")
+    starts = []
+
+    class _R:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    class _Proc:
+        returncode = 0
+
+        def wait(self):
+            return 0
+
+    def run(cmd, **kwargs):
+        starts.append((cmd, kwargs))
+        return _R()
+
+    monkeypatch.setattr(session_run.keep, "sweep_stale", lambda *a, **k: 0)
+    monkeypatch.setattr(session_run.keep, "is_running", lambda name: False)
+    monkeypatch.setattr(session_run.keep, "remove", lambda name: None)
+    monkeypatch.setattr(session_run, "_wait_ready", lambda name, **k: True)
+    monkeypatch.setattr(session_run.subprocess, "run", run)
+    monkeypatch.setattr(session_run.subprocess, "Popen", lambda cmd, **kw: _Proc())
+
+    assert session_run._run_kept("img:1", [], ["-w", "wf"], None, None) == 0
+
+    argv, _kwargs = starts[0]
+    assert "ANTHROPIC_API_KEY" not in argv
+    assert "PROJECT_TIER" not in argv
+    assert all("sentinel" not in token for token in argv)
+
+
+def test_a_joining_exec_carries_values_only_in_child_environment(monkeypatch):
     """A joining exec inherited the FIRST caller's keys and .env tiers, so a later
     nested run could authenticate as the earlier one — or find nothing at all, if the
     first call had no key and this one does."""
     from dockerlib import env as dockerenv
     from dockerlib import session_run
 
-    envfile = tmp_path / "merged.env"
-    envfile.write_text("# a comment\nPROJECT_TIER=from-dotenv\n\n")
-    monkeypatch.setattr(dockerenv, "env_file_for_run", str(envfile))
+    monkeypatch.setattr(dockerenv, "env_values_for_run", {
+        "PROJECT_TIER": "from-dotenv",
+    })
     monkeypatch.setenv("ANTHROPIC_API_KEY", "this-calls-key")
 
     execs = []
@@ -104,11 +145,14 @@ def test_a_joining_exec_carries_this_calls_environment(monkeypatch, tmp_path):
     monkeypatch.setattr(session_run.keep, "remove", lambda name: None)
     monkeypatch.setattr(session_run, "_wait_ready", lambda name, **k: True)
     monkeypatch.setattr(session_run.subprocess, "Popen",
-                        lambda cmd, **kw: execs.append(cmd) or _Proc())
+                        lambda cmd, **kw: execs.append((cmd, kw)) or _Proc())
 
     session_run._run_kept("img:1", [], ["-w", "wf"], None, None)
 
-    flat = " ".join(execs[0])
-    assert "ANTHROPIC_API_KEY=this-calls-key" in flat
-    assert "PROJECT_TIER=from-dotenv" in flat
-    assert "# a comment" not in flat            # comments are not variables
+    argv, kwargs = execs[0]
+    assert all("this-calls-key" not in token for token in argv)
+    assert all("from-dotenv" not in token for token in argv)
+    assert kwargs["env"]["ANTHROPIC_API_KEY"] == "this-calls-key"
+    assert kwargs["env"]["PROJECT_TIER"] == "from-dotenv"
+    assert argv[argv.index("ANTHROPIC_API_KEY") - 1] == "-e"
+    assert argv[argv.index("PROJECT_TIER") - 1] == "-e"

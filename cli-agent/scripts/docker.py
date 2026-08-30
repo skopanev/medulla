@@ -48,7 +48,7 @@ except ImportError:                                   # running from a source ch
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-# Secrets: the three .env tiers, the Claude token fallback, the transient 0600 env-file.
+# Secrets: the three .env tiers and the Claude token fallback.
 from dockerlib import (
     announce,  # noqa: E402
     cliargs,  # noqa: E402
@@ -64,7 +64,6 @@ from dockerlib import paths as dockerpaths  # noqa: E402
 from dockerlib.env import (  # noqa: E402
     _add_claude_token_fallback,
     _collect_dotenv,
-    _unlink_env_file,
 )
 from dockerlib.image import (  # noqa: E402
     DEFAULT_IMAGE,
@@ -162,16 +161,7 @@ def main():
 
     dotenv = _collect_dotenv(workflow)
     _add_claude_token_fallback(dotenv)
-    if dotenv:
-        import atexit
-        import tempfile
-        fd, dockerenv.env_file_for_run = tempfile.mkstemp(prefix="medulla-env-")
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w") as f:
-            for k, v in dotenv.items():
-                f.write(f"{k}={v}\n")
-        # belt for exits that never reach run_docker (bad mount → return 1)
-        atexit.register(_unlink_env_file)
+    dockerenv.env_values_for_run = dotenv
     volumes = build_volumes(claude_home, mount_agy=workflow_uses_agy(workflow),
                             cwd_ro=cwd_ro, runs_folder=runs_folder)
 

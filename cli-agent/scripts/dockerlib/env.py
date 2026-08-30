@@ -1,4 +1,4 @@
-"""Secrets for a containerised run: the three .env tiers and the transient env-file.
+"""Secrets for a containerised run: the three .env tiers and token fallback.
 
 Split out of docker.py under the project's 250-line rule. This is the only part of the
 wrapper that handles values nobody should see — keeping it apart makes "who can read a
@@ -21,7 +21,7 @@ except ImportError:                                   # running from a source ch
     from medulla.v2.workflow_path import workflow_dir_for
 
 CLAUDE_TOKEN_KEY = "CLAUDE_CODE_OAUTH_TOKEN"
-env_file_for_run: str | None = None
+env_values_for_run: dict[str, str] = {}
 
 
 def _parse_env_file(path: Path) -> dict:
@@ -80,21 +80,4 @@ def _add_claude_token_fallback(env: dict) -> None:
     if "\n" in token or "\r" in token:
         raise SystemExit(f"error: Claude OAuth token must be one line: {token_path}")
     env[CLAUDE_TOKEN_KEY] = token
-
-
-
-
-def _unlink_env_file() -> None:
-    """The env-file holds merged provider tokens (0600 in $TMPDIR). Docker's
-    client reads --env-file at startup, so the file is only needed until the
-    run ends — remove it on EVERY exit path (finally + atexit belt): a timer
-    thread dies with the process and leaks secrets on Ctrl-C / early return."""
-    global env_file_for_run
-    if env_file_for_run:
-        try:
-            os.unlink(env_file_for_run)
-        except OSError:
-            pass
-        env_file_for_run = None
-
 

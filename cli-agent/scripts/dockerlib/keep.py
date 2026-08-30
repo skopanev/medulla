@@ -34,14 +34,16 @@ def container_name(owner: str, spec: str = "") -> str:
     return f"medulla-sess-{owner}-{spec}" if spec else f"medulla-sess-{owner}"
 
 
-def spec_digest(image: str, volumes: list[str]) -> str:
+def spec_digest(image: str, volumes: list[str], shadow_paths: list[str] | None = None) -> str:
     """A short hash of everything that decides what the container can see and do.
 
-    Image and mounts, in the order they were built — a different order means a
-    different view of the world, so it is not normalised away.
+    Image, mounts and shadow tmpfs paths, in the order they were built — a different
+    order means a different view of the world, so it is not normalised away.
     """
     import hashlib
-    payload = "\n".join([image, *volumes]).encode("utf-8", "surrogatepass")
+    payload = "\n".join([image, *volumes, "--shadow", *(shadow_paths or [])]).encode(
+        "utf-8", "surrogatepass",
+    )
     return hashlib.sha256(payload).hexdigest()[:8]
 
 
@@ -107,7 +109,7 @@ def sweep_stale(now: float | None = None) -> int:
         parts = line.split("\t")
         if len(parts) < 3:
             continue
-        cid, created, name = parts[0], parts[1], parts[2]
+        cid, created = parts[0], parts[1]
         age = _age_seconds(created, now)
         if age is not None and age > STALE_AFTER_S:
             subprocess.run(["docker", "rm", "-f", cid], capture_output=True, check=False)

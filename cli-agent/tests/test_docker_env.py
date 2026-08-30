@@ -1,6 +1,6 @@
 """What the container gets in its environment.
 
-The .env tiers forward whole via --env-file while the host shell is filtered by an
+The .env tiers forward whole while the host shell is filtered by an
 allowlist — a shell carries hundreds of unrelated variables and forwarding it leaks.
 """
 import importlib.util
@@ -99,16 +99,37 @@ def test_shadow_escape_fails_fast_and_reads_legacy_name(dockerpy, tmp_path):
         dockerpy.read_shadow_paths(str(wdir))
 
 
-def test_env_file_unlinked_on_every_exit_path(dockerpy, tmp_path):
-    # panel FIX-FIRST #3: the old 5s timer thread died with the process on
-    # Ctrl-C / early return and leaked merged tokens in $TMPDIR forever.
-    # cleanup is now finally + atexit — must be idempotent (both fire).
-    f = tmp_path / "medulla-env-x"
-    f.write_text("TOKEN=secret\n", encoding="utf-8")
-    dockerpy.dockerenv.env_file_for_run = str(f)   # it lives in dockerlib.env now
-    dockerpy._unlink_env_file()
-    assert not f.exists() and dockerpy.dockerenv.env_file_for_run is None
-    dockerpy._unlink_env_file()                               # second call is a no-op
+def test_docker_run_carries_values_only_in_child_environment(dockerpy, monkeypatch):
+    from dockerlib import process
+
+    monkeypatch.setattr(dockerpy.dockerenv, "env_values_for_run", {
+        "PROJECT_TOKEN": "dotenv-sentinel",
+    })
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "host-sentinel")
+    captured = {}
+
+    class _Proc:
+        pid = 123
+        returncode = 0
+
+        def wait(self):
+            return 0
+
+    def popen(cmd, **kwargs):
+        captured.update(argv=cmd, kwargs=kwargs)
+        return _Proc()
+
+    monkeypatch.setattr(process.subprocess, "Popen", popen)
+    monkeypatch.setattr(process.signal, "signal", lambda *args: None)
+
+    assert dockerpy.run_docker("img", [], ["-w", "wf"]) == 0
+    argv, child_env = captured["argv"], captured["kwargs"]["env"]
+    assert all("sentinel" not in token for token in argv)
+    assert "--env-file" not in argv
+    assert child_env["ANTHROPIC_API_KEY"] == "host-sentinel"
+    assert child_env["PROJECT_TOKEN"] == "dotenv-sentinel"
+    assert argv[argv.index("ANTHROPIC_API_KEY") - 1] == "-e"
+    assert argv[argv.index("PROJECT_TOKEN") - 1] == "-e"
 
 
 def test_workflow_may_be_a_yaml_file_not_only_a_dir(dockerpy, tmp_path):
@@ -147,5 +168,4 @@ def test_image_tag_drops_the_yaml_extension_but_keeps_dir_names_whole(dockerpy, 
     dotted = tmp_path / "my.workflows"       # a DIRECTORY with a dot keeps its full name
     dotted.mkdir()
     assert dockerpy.image_tag_for(str(dotted), df).startswith("medulla-my.workflows:")
-
 

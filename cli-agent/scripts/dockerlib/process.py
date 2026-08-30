@@ -15,7 +15,6 @@ import uuid
 
 from dockerlib import env as dockerenv
 from dockerlib import paths as dockerpaths
-from dockerlib.env import _unlink_env_file
 
 
 def terminate_process_group(proc: subprocess.Popen, force: bool = False) -> None:
@@ -50,7 +49,7 @@ def interactive_stdio() -> bool:
 
 # env keys harnesses need — filters the HOST SHELL env only (a shell carries
 # hundreds of unrelated vars; forwarding it whole would leak). The .env tiers
-# are the user's zone and forward WHOLE via --env-file, no filter.
+# are the user's zone and forward WHOLE, no filter.
 HARNESS_ENV_KEYS = (
     "ANTHROPIC_API_KEY",
     "CLAUDE_CODE_OAUTH_TOKEN",
@@ -68,27 +67,47 @@ HARNESS_ENV_KEYS = (
     "MEDULLA_BRIDGE",
 )
 
+
+def forwarded_env_values() -> dict[str, str]:
+    """Values explicitly forwarded into a workflow container."""
+    values = {
+        key: value for key in HARNESS_ENV_KEYS
+        if (value := os.environ.get(key))
+    }
+    if not os.environ.get("GEMINI_API_KEY") and os.environ.get("GOOGLE_API_KEY"):
+        values["GEMINI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
+    values.update(dockerenv.env_values_for_run)
+    return values
+
+
+def docker_client_env(runs_under: str | None = None,
+                      run_dir_name: str | None = None) -> dict[str, str]:
+    """Docker client env: forwarded values stay here, never in its argv."""
+    env = os.environ.copy()
+    env.update(forwarded_env_values())
+    env["MEDULLA_DOCKER"] = "1"
+    if runs_under:
+        env["MEDULLA_RUNS_UNDER"] = runs_under
+    if run_dir_name:
+        env["MEDULLA_RUN_DIR_NAME"] = run_dir_name
+    return env
+
 def build_run_command(image, volumes, args, container_name: str,
                       run_dir_name: str | None = None,
-                      runs_under: str | None = None) -> list[str]:
+                      runs_under: str | None = None,
+                      forward_env: bool = True) -> list[str]:
     cmd = ["docker", "run", "--init", "--rm", "--name", container_name]
     if sys.stdin.isatty():
         cmd.append("-i")
     if interactive_stdio():
         cmd.append("-t")
 
-    for key in HARNESS_ENV_KEYS:
-        val = os.environ.get(key)
-        if val:
-            cmd.extend(["-e", f"{key}={val}"])
-
-    if not os.environ.get("GEMINI_API_KEY") and os.environ.get("GOOGLE_API_KEY"):
-        cmd.extend(["-e", f"GEMINI_API_KEY={os.environ['GOOGLE_API_KEY']}"])
-
-    # Forward the merged .env tiers via --env-file, not -e: values on the
-    # command line leak into `ps` during start and `docker inspect` forever.
-    if dockerenv.env_file_for_run:
-        cmd.extend(["--env-file", dockerenv.env_file_for_run])
+    # Put only names in argv; docker reads their values from its child environment.
+    # This keeps values out of `ps`, but Docker still stores creation-time values in
+    # Config.Env for the life of the container — inspect is not a secret boundary.
+    if forward_env:
+        for key in forwarded_env_values():
+            cmd.extend(["-e", key])
 
     cmd.extend(volumes)
     # shadow: an empty tmpfs mounted OVER a workspace subpath — the more
@@ -99,11 +118,11 @@ def build_run_command(image, volumes, args, container_name: str,
     cmd.extend(["-w", "/workspace"])
     # inside the container the sandbox IS the isolation: adapters (agy trust
     # preflight) key off this
-    cmd.extend(["-e", "MEDULLA_DOCKER=1"])
+    cmd.extend(["-e", "MEDULLA_DOCKER"])
     if runs_under:
-        cmd.extend(["-e", f"MEDULLA_RUNS_UNDER={runs_under}"])
+        cmd.extend(["-e", "MEDULLA_RUNS_UNDER"])
     if run_dir_name:
-        cmd.extend(["-e", f"MEDULLA_RUN_DIR_NAME={run_dir_name}"])
+        cmd.extend(["-e", "MEDULLA_RUN_DIR_NAME"])
     cmd.extend([image, "medulla"])
     cmd.extend(args)
     return cmd
@@ -129,7 +148,12 @@ def run_docker(image, volumes, args, runs_under: str | None = None,
     # single subprocess path (no execvp): the temp env-file must outlive the
     # docker client's startup read; stdio inheritance keeps -it interactive
     stdin = None if sys.stdin.isatty() else subprocess.DEVNULL
-    proc = subprocess.Popen(cmd, stdin=stdin, start_new_session=True)
+    proc = subprocess.Popen(
+        cmd,
+        stdin=stdin,
+        start_new_session=True,
+        env=docker_client_env(runs_under, run_dir_name),
+    )
     interrupted = {"count": 0}
 
     def run_sigint(signum, frame):
@@ -164,4 +188,3 @@ def run_docker(image, volumes, args, runs_under: str | None = None,
         return proc.returncode
     finally:
         signal.signal(signal.SIGINT, prev)
-        _unlink_env_file()
