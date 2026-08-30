@@ -19,7 +19,7 @@ PANELIST = """Prose above.
 - (R) {sev} — {claim} — {slug}.py:1 — it breaks — FIX: change {slug}(), the only caller
 
 ## VERDICT
-{verdict} — because {claim}
+{verdict} — 1
 """
 
 
@@ -148,7 +148,11 @@ def test_verdict_json_carries_what_a_gate_needs(tmp_path):
     synthesize(tmp_path, delivered=3, expected=5, min_decided=2)
     data = json.loads((tmp_path / "verdict.json").read_text())
 
-    assert data["counts"] == {"GO": 1, "NO-GO": 1, "INSUFFICIENT": 1, "none": 0}
+    assert data["counts"] == {"GO": 1, "NO-GO": 1, "INSUFFICIENT": 1, "none": 0,
+                              # an objection whose citation cannot be read is out of
+                              # the arithmetic and into `blocking` — counted here so a
+                              # gate can see it was set aside rather than never made
+                              "unsupported": 0}
     assert data["quorum"] == {"expected": 5, "delivered": 3, "min_decided": 2,
                               "decided": 2, "met": True}
     assert data["blocking"] == ["F1"]

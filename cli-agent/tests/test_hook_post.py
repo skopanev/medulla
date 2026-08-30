@@ -94,3 +94,53 @@ nodes:
     assert (work / "post-env.txt").read_text().strip() == "0 go"
 
 
+
+
+def test_post_veto_does_not_report_the_body_as_dead(tmp_path):
+    """A body that exited 0 did not die. The manifest used to say "body died: rc=0"
+    whenever post vetoed — a contradiction that sent readers hunting a crash that
+    never happened while the complete artifact sat on disk. A full-store sweep found
+    43 delivered artifacts recorded ok=false, 35 of them carrying rc=0.
+    """
+    text = """
+version: "2"
+start: a
+nodes:
+  a:
+    shell: 'echo "<signal:ok>k</signal:ok>"'
+    post: 'echo "artifact has no VERDICT" >&2; exit 1'
+    on_signal: {ok: __exit_ok__}
+"""
+    path, work = setup(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 2
+    _, outcome, journal = read_run(path.parent)
+    msg = journal[0]["message"]
+    assert "body died" not in msg, msg
+    assert "post hook vetoed" in msg, msg
+    assert "body rc=0" in msg, msg
+    assert "artifact has no VERDICT" in msg, msg
+
+
+def test_a_dead_body_keeps_its_own_stderr_in_the_message(tmp_path):
+    """When the body itself died, ITS stderr is the evidence — a credential broker's
+    stack trace, an OAuth prompt that timed out. The post hook only noticed the missing
+    artifact afterwards, so naming the hook there would replace the cause with its
+    symptom. Live: three panelists failed this way in one round, and the broker trace
+    in the message is the only thing that said why.
+    """
+    text = """
+version: "2"
+start: a
+nodes:
+  a:
+    shell: 'echo "cannot reach the broker: SSL EOF" >&2; exit 1'
+    post: 'echo "no artifact written" >&2; exit 1'
+    ignore_exit_code: false
+    on_signal: {ok: __exit_ok__}
+"""
+    path, work = setup(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 2
+    _, outcome, journal = read_run(path.parent)
+    msg = journal[0]["message"]
+    assert "cannot reach the broker" in msg, msg
+    assert "post hook vetoed" not in msg, msg

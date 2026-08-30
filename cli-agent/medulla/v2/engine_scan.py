@@ -189,7 +189,8 @@ def load_dotenv(workflow_dir: Path, launch_dir: Path | None = None) -> dict[str,
 
 
 def conclusion_message(signal, action, result, total, limit_reason, fallback_used,
-                       post_signal, post_scan, body_scan, known, *, agent_spec=None):
+                       post_signal, post_scan, body_scan, known, *, agent_spec=None,
+                       post_rc=None, post_stderr=""):
     """The human-facing sentence for how an attempt ended.
 
     Lives beside scan_stdout because every branch here is explaining what the scanner
@@ -198,6 +199,17 @@ def conclusion_message(signal, action, result, total, limit_reason, fallback_use
     """
     from .harness import resolve as resolve_harness
     if signal == SIG_FAILED:
+        if post_rc and not result.rc and not result.timed_out:
+            # Only when the body SURVIVED. When the body itself died, its stderr is
+            # the evidence — a credential broker's stack trace, an OAuth prompt that
+            # timed out — and the hook merely noticed the missing artifact afterwards.
+            # Reporting the hook there would replace the cause with its symptom.
+            # This branch is for the other case: the body delivered and exited 0, and
+            # saying "body died: rc=0" is a contradiction that sent readers hunting a
+            # crash that never happened while the artifact sat on disk, complete.
+            return (f"post hook vetoed the attempt: rc={post_rc}, {total} attempt(s)"
+                    f"{' (fallback tried)' if fallback_used else ''}; "
+                    f"body rc={result.rc}; stderr: {_tail(post_stderr)}")
         if limit_reason:
             # Name the wall. "body died: rc=1" for an exhausted plan sent a
             # panel round down the wrong path more than once.

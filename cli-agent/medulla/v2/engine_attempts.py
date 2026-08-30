@@ -153,6 +153,7 @@ class AttemptsMixin(BodyMixin):
             body_scan = scan_stdout(raw_text, known, strict=(current.kind == "shell"))
 
             post_rc = post_signal = None
+            post_stderr = ""
             post_scan = ScanResult()
             if post_rendered is not None:
                 hook_timeout = self._clamp(HOOK_TIMEOUT_S)
@@ -165,6 +166,7 @@ class AttemptsMixin(BodyMixin):
                                     log_path=step_dir / f"post-{total}.txt")
                 post_scan = scan_stdout(post_res.stdout, known, strict=True)  # hooks are shell
                 post_rc, post_signal = post_res.rc, post_scan.first_known
+                post_stderr = post_res.stderr
 
             # Pool conjunction law: ok = rc==0 AND no timeout AND no post veto.
             # Signals are DATA in pools — they are recorded, they never classify
@@ -224,7 +226,7 @@ class AttemptsMixin(BodyMixin):
             message = conclusion_message(
                 signal, current, result, total, limit_reason, fallback_used,
                 post_signal, post_scan, body_scan, known,
-                agent_spec=agent_spec)
+                agent_spec=agent_spec, post_rc=post_rc, post_stderr=post_stderr)
             return AttemptsOutcome(
                 signal=signal, message=message, attempts=total,
                 attempts_primary=n_primary, attempts_fallback=n_fallback,

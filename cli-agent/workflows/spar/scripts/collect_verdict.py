@@ -13,78 +13,7 @@ import re
 import sys
 from pathlib import Path
 
-NOT_PANELISTS = {"question.md", "verdict.md", "synthesized.md", "all-findings.md"}
-SEVERITY_ORDER = {"HIGH": 1, "MED": 2, "LOW": 3}
-VERDICT_WORDS = ("NO-GO", "INSUFFICIENT", "GO")     # NO-GO first: it is a prefix trap
-
-# digits and separators only: "NO-GO — this breaks 3 callers" must not yield F3
-CITATION = re.compile(r"^\s*[Ff]?\d+(\s*(?:,|and|/|&)\s*[Ff]?\d+)*\s*$")
-
-
-def _section(text: str, heading: str) -> list[str]:
-    """Lines under `## HEADING`, to the next heading. Case-insensitive.
-
-    A panelist wrote `## Findings` and its whole list was dropped without a word —
-    exact matching turns a model's formatting into silent data loss.
-    """
-    want = heading.strip("# ").upper()
-    out, inside = [], False
-    for line in text.splitlines():
-        if line.startswith("#"):
-            inside = line.strip("# \t").upper().startswith(want)
-            continue
-        if inside:
-            out.append(line)
-    return out
-
-
-def _severity(rest: str) -> str:
-    """The slot after (R)/(G), not a substring of the line."""
-    slot = re.sub(r"^\(?[RG]\)?\s*", "", rest).split()
-    return slot[0] if slot and slot[0] in SEVERITY_ORDER else ""
-
-
-def read_panelist(path: Path) -> dict:
-    text = path.read_text(encoding="utf-8", errors="replace")
-    findings = []
-    for line in _section(text, "## FINDINGS"):
-        if not line.strip().startswith(("-", "*")):
-            continue
-        rest = re.sub(r"^\s*[-*]\s*", "", line)
-        m = re.match(r"\(([RG])\)", rest)
-        findings.append({
-            "panelist": path.stem,
-            "confidence": m.group(1) if m else "",
-            "severity": _severity(rest),
-            "text": rest.strip(),
-        })
-
-    verdict_line = next((l.strip() for l in _section(text, "## VERDICT") if l.strip()), "")
-    # What the parser could not make sense of, kept as a fact rather than a silence.
-    malformed = []
-    if not re.search(r"(?im)^#+\s*FINDINGS\b", text):
-        malformed.append("no FINDINGS heading")
-    if not re.search(r"(?im)^#+\s*VERDICT\b", text):
-        malformed.append("no VERDICT heading")
-    word = next((w for w in VERDICT_WORDS if verdict_line.startswith(w)), "")
-    cites, unreadable = [], False
-    if word == "NO-GO":
-        clause = verdict_line.split("—")[1] if "—" in verdict_line else ""
-        if CITATION.match(clause):
-            cites = [int(n) for n in re.findall(r"\d+", clause)]
-        else:
-            unreadable = True
-    if verdict_line and not word:
-        malformed.append(f"verdict not one of GO/NO-GO/INSUFFICIENT: {verdict_line[:40]!r}")
-    return {
-        "slug": path.stem,
-        "malformed": malformed,
-        "verdict": word or None,
-        "line": verdict_line,
-        "cites_local": cites,
-        "citation_unreadable": unreadable,
-        "findings": findings,
-    }
+from verdict_parse import NOT_PANELISTS, SEVERITY_ORDER, read_panelist
 
 
 def build(round_dir: Path) -> dict:
@@ -110,12 +39,20 @@ def build(round_dir: Path) -> dict:
             if ids:
                 blocking.extend(ids)
             else:
-                unsupported.append(p["slug"])      # fail closed: an objection is still one
+                unsupported.append(p["slug"])
                 blocking.append(f"UNREAD-{p['slug']}")
 
-    counts = {w: sum(1 for p in panelists if p["verdict"] == w)
+    # An objection nobody can check does not VOTE, but it still BLOCKS. Counting it
+    # as a NO-GO let a gate read "2 GO vs 2 NO-GO" from an opinion with nothing behind
+    # it; dropping it outright would have been worse — the round would have gone CLEAR
+    # with a non-empty blocking list. So: out of the arithmetic, into blocking, and
+    # blocking alone is enough to hold the change (see `state` below).
+    unsup = set(unsupported)
+    counts = {w: sum(1 for p in panelists
+                     if p["verdict"] == w and p["slug"] not in unsup)
               for w in ("GO", "NO-GO", "INSUFFICIENT")}
     counts["none"] = sum(1 for p in panelists if not p["verdict"])
+    counts["unsupported"] = len(unsupported)
     # Unresolved (R) HIGH findings weigh the same as a NO-GO for a gate: a verified
     # defect at a cited line is what the contract's blocker test is about, whatever
     # verdict word the panelist chose around it.
@@ -210,24 +147,35 @@ def main(argv: list[str]) -> int:
     data = build(a.round_dir)
     c = data["counts"]
     decided = c["GO"] + c["NO-GO"]
-
-    (a.run_dir / "verdict.md").write_text(render(data, a.delivered, a.expected),
+    # ONE source of participant state. `--delivered` came from the manifest, which
+    # records what the ENGINE concluded; the artifacts on disk record what actually
+    # arrived. They disagreed — a post hook vetoed a complete file and the round
+    # reported 3 delivered beside 4 decided. Whatever a gate reads, it now reads it
+    # from the same files the verdicts were parsed from.
+    delivered = len(data["panelists"])
+    (a.run_dir / "verdict.md").write_text(render(data, delivered, a.expected),
                                           encoding="utf-8")
     # written even when the round failed: why it failed is a fact a gate needs
     subject = dict(kv.split("=", 1) for kv in a.subject if "=" in kv and kv.split("=", 1)[1])
     (a.run_dir / "verdict.json").write_text(json.dumps({
         "run_id": a.run_dir.name,
         **({"subject": subject} if subject else {}),
-        "quorum": {"expected": a.expected, "delivered": a.delivered,
+        "quorum": {"expected": a.expected, "delivered": delivered,
                    "min_decided": a.min_decided, "decided": decided,
-                   "met": decided >= a.min_decided},
+                   "met": decided >= a.min_decided,
+                   # kept only as a witness when the engine and the disk disagree
+                   **({"manifest_delivered": a.delivered}
+                      if a.delivered and a.delivered != delivered else {})},
         "counts": c,
         "blocking": data["blocking"],
         "unsupported_no_go": data["unsupported"],
-        # One field a caller can branch on, so nothing has to re-derive readiness from
-        # counts: any NO-GO, any unresolved verified HIGH, or a round without quorum.
+        # One field a gate branches on. A NON-EMPTY blocking list is enough on its
+        # own: an objection whose citation could not be read is out of the vote, so
+        # without this clause the round would go CLEAR while still naming something
+        # that holds it — fail-open, exactly backwards.
         "state": ("REVIEW_REQUIRED"
-                  if (c["NO-GO"] or data["verified_high"] or decided < a.min_decided)
+                  if (data["blocking"] or c["NO-GO"] or data["verified_high"]
+                      or decided < a.min_decided)
                   else "CLEAR"),
         "verified_high": data["verified_high"],
         "parser": {"malformed": data["malformed"]},

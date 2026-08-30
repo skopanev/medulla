@@ -32,8 +32,8 @@ def test_a_reason_of_any_shape_counts(tmp_path):
 
 def test_the_sections_the_collector_reads_must_exist(tmp_path):
     for body, expected in (("", "no artifact"),
-                           ("just prose", "## FINDINGS"),
-                           ("## FINDINGS\nNONE\n", "## VERDICT"),
+                           ("just prose", "no FINDINGS section"),
+                           ("## FINDINGS\nNONE\n", "no VERDICT section"),
                            ("## FINDINGS\nNONE\n\n## VERDICT\nmaybe later\n",
                             "not one of GO")):
         rc, err = _post(tmp_path, body)
@@ -56,3 +56,22 @@ def _post(tmp_path, body):
     return res.returncode, res.stderr.strip()
 
 
+
+
+def test_the_hook_reads_a_verdict_at_any_heading_level(tmp_path):
+    """Gemini wrote `### VERDICT`. The hook demanded exactly two hashes, failed a
+    complete artifact for it, and the round then reported one fewer delivered than it
+    held — `artifacts=4, quorum.delivered=3, decided=4` as seen from the field.
+    """
+    body = ("### FINDINGS\n(R) HIGH — inverted text passes — a.test.ts:250 — why — "
+            "FIX: assert equality\n\n### VERDICT\nNO-GO — 1\n")
+    rc, err = _post(tmp_path, body)
+    assert rc == 0, err
+
+
+def test_a_fenced_verdict_passes_the_hook_too(tmp_path):
+    """The collector and the hook must agree on what a verdict is: the hook vetoing a
+    file the collector can read is how a delivered artifact became ok=false."""
+    rc, err = _post(tmp_path, "## FINDINGS\nNONE\n\n## VERDICT\n\n```\n## VERDICT\n"
+                              "GO — nothing blocks it\n```\n")
+    assert rc == 0, err

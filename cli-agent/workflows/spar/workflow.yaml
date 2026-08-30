@@ -146,9 +146,16 @@ nodes:
     post: |
       f="$ROUND_DIR/$MEDULLA_INPUT_SLUG.md"
       test -s "$f" || { echo "no artifact written" >&2; exit 1; }
-      grep -q '^## FINDINGS' "$f" || { echo "no ## FINDINGS section" >&2; exit 1; }
-      grep -q '^## VERDICT'  "$f" || { echo "no ## VERDICT section" >&2; exit 1; }
-      v=$(awk '/^## VERDICT/{f=1; next} /^## /{f=0} f && NF {print; exit}' "$f")
+      # Any heading level. A panelist wrote `### VERDICT`, the hook rejected a complete
+      # artifact for it, and the round reported one fewer delivered than it had.
+      grep -qE '^#+ *FINDINGS' "$f" || { echo "no FINDINGS section" >&2; exit 1; }
+      grep -qE '^#+ *VERDICT'  "$f" || { echo "no VERDICT section" >&2; exit 1; }
+      # skip fences: a panelist that copied the prompt's example verbatim wraps the
+      # verdict in ``` and repeats the heading inside it — the first non-empty line
+      # was the fence, and a delivered artifact was failed for "no verdict"
+      v=$(awk '/^#+ *VERDICT/{f=1; next} /^#/{f=0} f && /^```/{next} f && NF {print; exit}' "$f")
+      # `**NO-GO**.` is a verdict; emphasis is the model decorating, not deciding
+      v=$(printf '%s' "$v" | tr -d '*_`')
       printf '%s' "$v" | grep -qE '^(GO|NO-GO|INSUFFICIENT)' \
         || { echo "VERDICT is not one of GO / NO-GO / INSUFFICIENT" >&2; exit 1; }
       # And it must say WHY. A bare "GO" is a file, not an answer: it cannot be argued

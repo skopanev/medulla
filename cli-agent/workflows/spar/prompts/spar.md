@@ -81,12 +81,11 @@ Rules:
 
 ## VERDICT
 
-Close with this section, verbatim heading, exactly two lines:
+Close with this section, verbatim heading, exactly two lines. Write it as plain
+text — NOT inside a code block, and do not repeat the heading inside itself:
 
-```
-## VERDICT
-GO | NO-GO — <n>, <n> | INSUFFICIENT — one line: why
-```
+    ## VERDICT
+    GO | NO-GO — <n>, <n> | INSUFFICIENT — one line: why
 
 Pick ONE word:
 
