@@ -47,21 +47,7 @@ def interactive_stdio() -> bool:
 
 
 
-# env keys harnesses need — filters the HOST SHELL env only (a shell carries
-# hundreds of unrelated vars; forwarding it whole would leak). The .env tiers
-# are the user's zone and forward WHOLE, no filter.
-HARNESS_ENV_KEYS = (
-    "ANTHROPIC_API_KEY",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "OPENAI_API_KEY",
-    "ZHIPU_API_KEY",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-    "GOOGLE_CLOUD_PROJECT",
-    "GOOGLE_APPLICATION_CREDENTIALS",
-    "VERTEX_LOCATION",
-    "INTERCOM_TOKEN",
-    "INTERCOM_ADMIN_ID",
+ORCHESTRATION_ENV_KEYS = (
     "MEDULLA_RUN_ID",
     "MEDULLA_PIPELINE_ID",
     "MEDULLA_BRIDGE",
@@ -70,13 +56,9 @@ HARNESS_ENV_KEYS = (
 
 def forwarded_env_values() -> dict[str, str]:
     """Values explicitly forwarded into a workflow container."""
-    values = {
-        key: value for key in HARNESS_ENV_KEYS
-        if (value := os.environ.get(key))
-    }
-    if not os.environ.get("GEMINI_API_KEY") and os.environ.get("GOOGLE_API_KEY"):
-        values["GEMINI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
-    values.update(dockerenv.env_values_for_run)
+    values = dict(dockerenv.env_values_for_run)
+    values.update({key: os.environ[key] for key in ORCHESTRATION_ENV_KEYS
+                   if os.environ.get(key)})
     return values
 
 

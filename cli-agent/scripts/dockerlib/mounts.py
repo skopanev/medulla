@@ -30,16 +30,19 @@ CONTAINER_HOME = "/home/hltm"
 
 
 def build_volumes(claude_home, mount_agy=True, *,
-                  cwd_ro: bool = False, runs_folder: Path | None = None):
+                  cwd_ro: bool = False, runs_folder: Path | None = None,
+                  credential_bundles=(), credential_env=None):
     home = Path.home()
     cwd = workspace_cwd()
     vols = []
+    bundles = set(credential_bundles)
+    credential_env = credential_env or {}
 
     def add(src, dst, ro=False):
         suffix = ":ro" if ro else ""
         vols.extend(["-v", f"{src}:{dst}{suffix}"])
 
-    if claude_home.is_dir():
+    if "claude" in bundles and claude_home.is_dir():
         add(claude_home.resolve(), "/mnt/claude", ro=True)
         # settings.json may be a symlink outside the mounted dir — resolve and
         # mount the real file so init-docker.sh can copy it into the container
@@ -96,15 +99,15 @@ def build_volumes(claude_home, mount_agy=True, *,
         add(target, f"/workspace/{rel}", ro=True)
 
     codex_dir = home / ".codex"
-    if codex_dir.is_dir():
+    if "codex" in bundles and codex_dir.is_dir():
         add(codex_dir.resolve(), "/mnt/codex", ro=True)
 
     gemini_dir = home / ".gemini"
-    if gemini_dir.is_dir():
+    if "gemini" in bundles and gemini_dir.is_dir():
         add(gemini_dir.resolve(), "/mnt/gemini", ro=True)
 
     opencode_dir = home / ".config" / "opencode"
-    if opencode_dir.is_dir():
+    if "opencode" in bundles and opencode_dir.is_dir():
         add(opencode_dir.resolve(), f"{CONTAINER_HOME}/.config/opencode", ro=True)
 
     ntk_dir = home / ".config" / "ntk"
@@ -139,8 +142,17 @@ def build_volumes(claude_home, mount_agy=True, *,
             add(target, f"{dest_root}/{rel}", ro=True)
 
     opencode_auth = home / ".local" / "share" / "opencode" / "auth.json"
-    if opencode_auth.exists():
+    if "opencode" in bundles and opencode_auth.exists():
         add(opencode_auth.resolve(), "/mnt/opencode-auth.json", ro=True)
+
+    google_creds = credential_env.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if "google-application-credentials" in bundles and google_creds:
+        google_path = Path(google_creds).expanduser().resolve()
+        if not google_path.is_file():
+            raise SystemExit(
+                f"error: GOOGLE_APPLICATION_CREDENTIALS is not a file: {google_path}")
+        credential_env["GOOGLE_APPLICATION_CREDENTIALS"] = str(google_path)
+        add(google_path, str(google_path), ro=True)
 
     gitconfig = home / ".gitconfig"
     if gitconfig.exists():
@@ -151,7 +163,7 @@ def build_volumes(claude_home, mount_agy=True, *,
 
     # agy (Antigravity CLI) keys — extract from macOS Keychain and mount as temp
     # files, but ONLY for workflows that use agy (Keychain prompts are not free)
-    if mount_agy:
+    if "agy-keychain" in bundles:
         _mount_agy_keys(vols)
 
     # host-builder bridge for macOS native builds. Per-run bridge dir so

@@ -56,6 +56,7 @@ from .contract_node import (  # noqa: E402,F401
 )
 from .contract_warn import _warn_dead_budgets
 from .contract_yaml import _StrictLoader
+from .secret_policy import validate_docker_block as _validate_docker_block
 
 
 def _validate_var_name(key: str, where: str) -> None:
@@ -63,28 +64,6 @@ def _validate_var_name(key: str, where: str) -> None:
         raise _err(f"{where}: invalid var name {key!r}")
     if key in ENV_BLACKLIST_EXACT or any(key.startswith(p) for p in ENV_BLACKLIST_PREFIX):
         raise _err(f"{where}: var name {key!r} is reserved (vars are exported to child env)")
-
-
-def _validate_docker_block(raw) -> None:
-    """Shape-check only — scripts/docker.py is the consumer and re-checks
-    standalone (it runs before the engine and imports nothing from it)."""
-    if raw is None:
-        return
-    if not isinstance(raw, dict):
-        raise _err("docker: must be a mapping")
-    unknown = set(raw) - {"shadow"}
-    if unknown:
-        raise _err(f"docker: unknown fields: {sorted(unknown)} (only 'shadow' exists)")
-    shadow = raw.get("shadow")
-    if shadow is None:
-        return
-    if not isinstance(shadow, list) or not all(isinstance(p, str) for p in shadow):
-        raise _err("docker.shadow must be a list of workspace-relative paths")
-    for p in shadow:
-        parts = [s for s in p.split("/") if s not in ("", ".")]
-        if not parts or p.startswith("/") or ".." in parts:
-            raise _err("docker.shadow: path must stay inside the workspace "
-                       f"(relative, no '..'): {p!r}")
 
 
 def load_workflow(path: Path) -> Workflow:
@@ -134,7 +113,7 @@ def load_workflow(path: Path) -> Workflow:
     # docker: — host-side container policy (consumed by scripts/docker.py, the
     # engine only validates the shape). Law of the block: a workflow may only
     # SHRINK its container's exposure here, never enlarge it.
-    _validate_docker_block(data.get("docker"))
+    _validate_docker_block(data.get("docker"), _err)
 
     nodes_raw = data.get("nodes")
     if not isinstance(nodes_raw, dict) or not nodes_raw:

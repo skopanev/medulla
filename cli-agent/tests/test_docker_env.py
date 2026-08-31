@@ -1,7 +1,7 @@
 """What the container gets in its environment.
 
-The .env tiers forward whole while the host shell is filtered by an
-allowlist — a shell carries hundreds of unrelated variables and forwarding it leaks.
+The .env tiers are collected whole, then docker.secrets must explicitly grant every
+key that crosses the container boundary.
 """
 import importlib.util
 import os
@@ -20,6 +20,7 @@ def dockerpy():
 
 
 def test_tier_merge_nearest_wins_all_tiers_whole(dockerpy, tmp_path, monkeypatch):
+    # Collection stays whole; the later policy gate rejects undeclared keys explicitly.
     home = tmp_path / "home"
     (home / ".medulla").mkdir(parents=True)
     (home / ".medulla" / ".env").write_text(
@@ -101,11 +102,13 @@ def test_shadow_escape_fails_fast_and_reads_legacy_name(dockerpy, tmp_path):
 
 def test_docker_run_carries_values_only_in_child_environment(dockerpy, monkeypatch):
     from dockerlib import process
+    from medulla.v2.secret_policy import POLICY_ENV
 
     monkeypatch.setattr(dockerpy.dockerenv, "env_values_for_run", {
+        "ANTHROPIC_API_KEY": "host-sentinel",
         "PROJECT_TOKEN": "dotenv-sentinel",
+        POLICY_ENV: '{"all_env":["ANTHROPIC_API_KEY","PROJECT_TOKEN"]}',
     })
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "host-sentinel")
     captured = {}
 
     class _Proc:
@@ -130,6 +133,83 @@ def test_docker_run_carries_values_only_in_child_environment(dockerpy, monkeypat
     assert child_env["PROJECT_TOKEN"] == "dotenv-sentinel"
     assert argv[argv.index("ANTHROPIC_API_KEY") - 1] == "-e"
     assert argv[argv.index("PROJECT_TOKEN") - 1] == "-e"
+
+
+def test_literal_pool_harnesses_build_a_finite_policy(tmp_path):
+    from medulla.v2.secret_policy import resolve_policy
+    workflow = tmp_path / "workflow.yaml"
+    workflow.write_text('''version: "2"
+nodes:
+  panel:
+    inputs:
+      - {harness: codex}
+      - {harness: claude-code}
+    agent: {harness: "{{input.harness}}"}
+''', encoding="utf-8")
+    policy = resolve_policy(str(workflow))
+    assert set(policy["harnesses"]) == {"claude-code", "codex"}
+    assert "OPENAI_API_KEY" in policy["all_env"]
+    assert "GEMINI_API_KEY" not in policy["all_env"]
+
+
+def test_dynamic_and_unknown_harnesses_fail_before_docker(tmp_path):
+    from medulla.v2.secret_policy import SecretPolicyError, resolve_policy
+    workflow = tmp_path / "workflow.yaml"
+    workflow.write_text('''version: "2"
+nodes:
+  panel:
+    inputs: {shell: "printf codex"}
+    agent: {harness: "{{input.harness}}"}
+''', encoding="utf-8")
+    with pytest.raises(SecretPolicyError, match="finite list"):
+        resolve_policy(str(workflow))
+    workflow.write_text('''version: "2"
+nodes: {one: {agent: {harness: private-cli}}}
+''', encoding="utf-8")
+    with pytest.raises(SecretPolicyError, match="unknown harness"):
+        resolve_policy(str(workflow))
+
+
+def test_undeclared_dotenv_fails_and_agents_remove_rival_env(tmp_path):
+    from medulla.v2.secret_policy import (
+        SecretPolicyError,
+        encoded_policy,
+        env_keys_to_remove,
+        resolve_policy,
+        select_env_values,
+    )
+    workflow = tmp_path / "workflow.yaml"
+    workflow.write_text('''version: "2"
+docker:
+  secrets:
+    harnesses: [claude-code, codex]
+    grants: {claude-code: {env: [SLACK_TOKEN]}}
+nodes: {}
+''', encoding="utf-8")
+    policy = resolve_policy(str(workflow))
+    with pytest.raises(SecretPolicyError, match="UNDECLARED_TOKEN"):
+        select_env_values(policy, {"UNDECLARED_TOKEN": "secret"}, {})
+    assert select_env_values(policy, {"SLACK_TOKEN": "ok"}, {})["SLACK_TOKEN"] == "ok"
+    assert "OPENAI_API_KEY" in env_keys_to_remove("claude-code", encoded_policy(policy))
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in env_keys_to_remove(
+        "claude-code", encoded_policy(policy))
+
+
+def test_credential_mounts_follow_selected_bundles(dockerpy, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    for path in (home / ".claude", home / ".codex", home / ".gemini"):
+        path.mkdir(parents=True)
+    auth = home / ".local" / "share" / "opencode" / "auth.json"
+    auth.parent.mkdir(parents=True)
+    auth.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    mounts = " ".join(dockerpy.build_volumes(
+        home / ".claude", credential_bundles={"codex"},
+    ))
+    assert "/mnt/codex" in mounts
+    assert "/mnt/claude" not in mounts
+    assert "/mnt/gemini" not in mounts
+    assert "/mnt/opencode-auth.json" not in mounts
 
 
 def test_workflow_may_be_a_yaml_file_not_only_a_dir(dockerpy, tmp_path):
@@ -168,4 +248,3 @@ def test_image_tag_drops_the_yaml_extension_but_keeps_dir_names_whole(dockerpy, 
     dotted = tmp_path / "my.workflows"       # a DIRECTORY with a dot keeps its full name
     dotted.mkdir()
     assert dockerpy.image_tag_for(str(dotted), df).startswith("medulla-my.workflows:")
-

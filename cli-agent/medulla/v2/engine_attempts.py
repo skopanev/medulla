@@ -23,6 +23,7 @@ from .errors import E_HARNESS, EngineCrash
 from .harness import resolve as resolve_harness
 from .model import HOOK_TIMEOUT_S, SIG_FAILED, Node
 from .procrun import run as proc_run
+from .secret_policy import env_keys_to_remove
 
 
 class AttemptsMixin(BodyMixin):
@@ -102,11 +103,15 @@ class AttemptsMixin(BodyMixin):
                    "MEDULLA_ATTEMPT_ID": attempt_id,
                    "MEDULLA_HARNESS": tag,
                    **invoke.env}
+            env_remove = list(invoke.env_remove)
+            if current.kind == "agent" and agent_spec is not None:
+                env_remove.extend(env_keys_to_remove(agent_spec.harness))
 
             result = proc_run(invoke.argv, self.workdir, eff, extra_env=env,
                               watch_output=(current.kind == "agent"),
                               log_path=step_dir / f"attempt-{total}-{tag}.txt",
-                              stdin_data=invoke.stdin, env_remove=invoke.env_remove,
+                              stdin_data=invoke.stdin,
+                              env_remove=sorted(set(env_remove)),
                               merge_stderr=invoke.merge_stderr, echo=echo)
 
             raw_text = result.stdout
@@ -239,4 +244,3 @@ class AttemptsMixin(BodyMixin):
                 recorded_body=post_scan.first_body or body_scan.first_body,
                 pending_vars=pending, updates=updates, signals=events,
             )
-

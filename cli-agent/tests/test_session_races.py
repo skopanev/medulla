@@ -87,6 +87,7 @@ def test_idle_container_is_created_without_forwarded_environment(monkeypatch):
     from dockerlib import session_run
 
     monkeypatch.setattr(dockerenv, "env_values_for_run", {
+        "ANTHROPIC_API_KEY": "host-sentinel",
         "PROJECT_TIER": "dotenv-sentinel",
     })
     monkeypatch.setenv("ANTHROPIC_API_KEY", "host-sentinel")
@@ -130,6 +131,7 @@ def test_a_joining_exec_carries_values_only_in_child_environment(monkeypatch):
     from dockerlib import session_run
 
     monkeypatch.setattr(dockerenv, "env_values_for_run", {
+        "ANTHROPIC_API_KEY": "this-calls-key",
         "PROJECT_TIER": "from-dotenv",
     })
     monkeypatch.setenv("ANTHROPIC_API_KEY", "this-calls-key")
@@ -156,3 +158,46 @@ def test_a_joining_exec_carries_values_only_in_child_environment(monkeypatch):
     assert kwargs["env"]["PROJECT_TIER"] == "from-dotenv"
     assert argv[argv.index("ANTHROPIC_API_KEY") - 1] == "-e"
     assert argv[argv.index("PROJECT_TIER") - 1] == "-e"
+
+
+def test_agent_child_removes_another_harness_environment(monkeypatch, tmp_path):
+    from conftest import fake_script, write_workflow
+    from medulla.v2.engine import run_workflow
+    from medulla.v2.secret_policy import POLICY_ENV, encoded_policy
+
+    agent = fake_script(tmp_path, "agent.sh", '''
+test "$OWN_TOKEN" = "own" || exit 7
+test -z "${RIVAL_TOKEN:-}" || exit 8
+echo "<signal:ok>isolated</signal:ok>"
+''')
+    workflow, work = write_workflow(tmp_path, f'''
+version: "2"
+start: one
+nodes:
+  one:
+    agent: {{harness: fake, model: "{agent}"}}
+    prompt: test
+    on_signal: {{ok: __exit_ok__}}
+''')
+    policy = {"version": 1, "bundles": [], "all_env": ["OWN_TOKEN", "RIVAL_TOKEN"],
+              "harnesses": {"fake": {"env": ["OWN_TOKEN"], "bundles": []}}}
+    monkeypatch.setenv(POLICY_ENV, encoded_policy(policy))
+    monkeypatch.setenv("OWN_TOKEN", "own")
+    monkeypatch.setenv("RIVAL_TOKEN", "rival")
+
+    assert run_workflow(workflow, workdir=work) == 0
+
+
+def test_google_application_credentials_mount_keeps_forwarded_path(dockerpy, tmp_path):
+    credentials = tmp_path / "google.json"
+    credentials.write_text("{}", encoding="utf-8")
+    values = {"GOOGLE_APPLICATION_CREDENTIALS": str(credentials)}
+
+    mounts = dockerpy.build_volumes(
+        tmp_path / "no-claude",
+        credential_bundles={"google-application-credentials"},
+        credential_env=values,
+    )
+
+    assert f"{credentials}:{credentials}:ro" in mounts
+    assert values["GOOGLE_APPLICATION_CREDENTIALS"] == str(credentials.resolve())

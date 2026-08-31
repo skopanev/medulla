@@ -34,12 +34,14 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 # "which yaml does -w mean?" BEFORE the engine starts, and its answer picks the image
 # and the tmpfs isolation policy — so a second hand-written copy meant the right
 # workflow could run under another one's image, or without the isolation it declared.
-# Import works in both layouts: installed, docker.py runs on the venv interpreter that
-# already has medulla importable; from source, PROJECT_ROOT is cli-agent/.
-try:
-    from medulla.v2.workflow_path import resolve_workflow_yaml  # noqa: F401
-except ImportError:                                   # running from a source checkout
+# Imports work in both layouts: installed has medulla on sys.path; in a source checkout
+# PROJECT_ROOT is cli-agent/.
+if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+from medulla.v2.secret_policy import (  # noqa: E402,I001
+    SecretPolicyError,
+    prepare_run_secrets,
+)
 
 
 # The pieces below sit in dockerlib/, beside this file. That directory is on sys.path
@@ -74,7 +76,7 @@ from dockerlib.image import (  # noqa: E402
     read_workflow_vars,
     resolve_dockerfile,
 )
-from dockerlib.mounts import build_volumes, workflow_uses_agy  # noqa: E402
+from dockerlib.mounts import build_volumes, workflow_uses_agy  # noqa: E402,F401
 from dockerlib.paths import (  # noqa: E402
     _remove_made_mountpoints,
     assert_runs_folder_reaches_the_container,
@@ -159,11 +161,20 @@ def main():
 
     dockerpaths.shadow_paths_for_run = read_shadow_paths(workflow)
 
-    dotenv = _collect_dotenv(workflow)
-    _add_claude_token_fallback(dotenv)
-    dockerenv.env_values_for_run = dotenv
-    volumes = build_volumes(claude_home, mount_agy=workflow_uses_agy(workflow),
-                            cwd_ro=cwd_ro, runs_folder=runs_folder)
+    try:
+        secret_policy, selected_env = prepare_run_secrets(
+            workflow, _collect_dotenv, _add_claude_token_fallback,
+        )
+    except SecretPolicyError as exc:
+        raise SystemExit(f"error: {exc}") from exc
+    dockerenv.env_values_for_run = selected_env
+    volumes = build_volumes(
+        claude_home,
+        cwd_ro=cwd_ro,
+        runs_folder=runs_folder,
+        credential_bundles=secret_policy["bundles"],
+        credential_env=selected_env,
+    )
 
     # A SHARED definition lives outside the workspace (~/.medulla/workflows/<name>), and
     # only cwd is mounted — so the container would not find it. Mount it OUTSIDE
