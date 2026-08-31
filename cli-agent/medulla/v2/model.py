@@ -42,6 +42,7 @@ class AgentSpec:
     harness: str
     model: str | None = None
     effort: str | None = None
+    idle_timeout: int | None = None      # output silence seconds; None -> env -> 900
     sandbox: str | None = None          # "read-only"; None/"danger" -> today's behavior
     args: list[str] = field(default_factory=list)
     # Vars this agent is ALLOWED to set from its own stdout. Empty (the default) means

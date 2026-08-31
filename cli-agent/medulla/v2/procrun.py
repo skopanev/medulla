@@ -47,8 +47,7 @@ class RunResult:
 
 
 def _env_seconds(name: str, default: int) -> int:
-    """A workflow with long deliberation sets its own threshold, rather than
-    patching the engine — which is what the fixed 300 forced."""
+    """Read a positive-seconds machine fallback; invalid values use the default."""
     raw = os.environ.get(name, "").strip()
     if not raw.isdigit() or int(raw) <= 0:
         return default
@@ -65,7 +64,7 @@ FIRST_OUTPUT_S = _env_seconds("MEDULLA_FIRST_OUTPUT_S", 60)
 # panel of four models was killed mid-generation, each after ~279s of output and
 # exactly 300s of thought. A model deliberating on a hard review is not a dead one.
 # 900 still catches the 10-14 minute silences this exists for.
-IDLE_OUTPUT_S = _env_seconds("MEDULLA_IDLE_OUTPUT_S", 900)
+IDLE_OUTPUT_S = _env_seconds("MEDULLA_IDLE_OUTPUT_S", 900)  # agent field overrides
 
 
 def run(
@@ -79,6 +78,7 @@ def run(
     merge_stderr: bool = False,
     echo=None,   # callable(tag, line) for live operator streaming
     watch_output: bool = False,   # only for agent CLIs — see _watch_output
+    idle_timeout_s: float | None = None,  # declared agent value; None -> env/default
 ) -> RunResult:
     if isinstance(command, str):
         # bash, not $SHELL — same reason as engine.py: hooks are workflow code and must not
@@ -156,7 +156,8 @@ def run(
     # failure that IS worth retrying, unlike a timeout at the far end.
     went_quiet = ""
     if watch_output and timeout_s > FIRST_OUTPUT_S * 2:
-        went_quiet = _watch_output(proc, out_buf, err_buf, timeout_s)
+        idle = IDLE_OUTPUT_S if idle_timeout_s is None else idle_timeout_s
+        went_quiet = _watch_output(proc, out_buf, err_buf, timeout_s, idle)
 
     timed_out = False
     try:
@@ -211,7 +212,8 @@ def _kill_group(proc: subprocess.Popen, sig) -> None:
             pass
 
 
-def _watch_output(proc, out_buf: list, err_buf: list, timeout_s: float) -> str:
+def _watch_output(proc, out_buf: list, err_buf: list, timeout_s: float,
+                  idle_timeout_s: float) -> str:
     """Wait for the child, but not through silence. Returns why we stopped, or "".
 
     ONLY for agent CLIs, which announce themselves and then narrate: claude a
@@ -241,7 +243,7 @@ def _watch_output(proc, out_buf: list, err_buf: list, timeout_s: float) -> str:
         quiet = time.monotonic() - last
         if seen == 0 and quiet > FIRST_OUTPUT_S:
             return f"no output at all in {FIRST_OUTPUT_S}s"
-        if seen > 0 and quiet > IDLE_OUTPUT_S:
-            return f"silent for {IDLE_OUTPUT_S}s after {seen} lines"
+        if seen > 0 and quiet > idle_timeout_s:
+            return f"silent for {idle_timeout_s}s after {seen} lines"
         time.sleep(0.25)
     return ""                               # the real timeout takes it from here

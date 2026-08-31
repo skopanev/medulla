@@ -49,7 +49,8 @@ class BodyMixin:
                    if spec.session else "")
         from .model import AgentSpec
         rendered_spec = AgentSpec(harness=harness, model=model or None,
-                                  effort=effort or None, sandbox=sandbox or None,
+                                  effort=effort or None, idle_timeout=spec.idle_timeout,
+                                  sandbox=sandbox or None,
                                   args=args, sets=spec.sets, session=session or None)
 
         adapter = resolve_harness(rendered_spec)

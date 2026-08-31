@@ -60,6 +60,8 @@ re-entering a run:
                                 passes stay in the journal.
 
 agent nodes (fields beyond harness/model/effort/sandbox/args):
+    idle_timeout: N         kill after N seconds without output; node value wins over
+                            MEDULLA_IDLE_OUTPUT_S, then the built-in default (900)
     sets: [K, ...]          vars this agent may set from stdout; empty (default) = none
     session: <name>         name a conversation: the first node with the name opens it,
                             every later one continues it. Recorded in <run>/sessions.json;
@@ -76,6 +78,7 @@ docker (host-side, handled by scripts/docker.py before the engine starts):
 subcommands: init <name> [--skill] (deploy a bundled template or scaffold a new workflow; --skill registers it with Claude Code), upgrade
 
 environment the engine reads:
+    MEDULLA_IDLE_OUTPUT_S   agent silence fallback when idle_timeout is absent (default 900)
     MEDULLA_RETRY_DELAY_S   pause between attempts / before fallback (default 2)
     MEDULLA_RUN_ID          pre-seed the run id
     MEDULLA_DOCKER=1        set by scripts/docker.py: container is the sandbox
