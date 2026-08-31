@@ -56,10 +56,14 @@ nodes:
       # like an answer and is not one. Live: a --mount failed, the retry ran without
       # it, three of four panelists reported INSUFFICIENT, and a verdict.md was still
       # produced. Fail here, before spending twenty minutes on it.
-      visible=$(ls -A /workspace 2>/dev/null | grep -vcE '^(\.medulla|\.git|box)$' || true)
+      # The tree under review is the working directory. In a container that IS
+      # /workspace; natively it is wherever the caller ran from. Hardcoding the
+      # container path made the panel unrunnable without docker — which is the only
+      # thing that kept it down when the container runtime failed.
+      visible=$(ls -A . 2>/dev/null | grep -vcE '^(\.medulla|\.git|box)$' || true)
       if [ "${visible:-0}" -eq 0 ]; then
         echo "workspace is empty — nothing to review (mounts did not land?)" >&2
-        ls -A /workspace 2>&1 | head -5 >&2
+        pwd >&2; ls -A . 2>&1 | head -5 >&2
         echo "<signal:failed>empty workspace: the panel would review nothing</signal:failed>"
         exit 1
       fi

@@ -30,11 +30,33 @@ DEFAULT_TIMEOUT=2700          # 45 min: a panel is 10-20, so this is "something 
 
 die() { echo "spar-run: $*" >&2; exit 1; }
 
+# How many panel runs are still going. Containers when we launched into one,
+# otherwise medulla processes on this host.
+alive_count() {
+    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+        docker ps -q --filter 'name=^medulla-' 2>/dev/null | wc -l
+    else
+        pgrep -f 'medulla .*-w ' 2>/dev/null | wc -l
+    fi
+}
+
 preflight() {
     # Fail HERE, not halfway through a session, and say which piece is missing.
     command -v medulla >/dev/null 2>&1 || die "medulla is not installed (see the medulla repo)"
-    command -v docker  >/dev/null 2>&1 || die "docker is not installed — the panel runs in a container"
-    docker info >/dev/null 2>&1        || die "the docker daemon is not responding (colima start?)"
+    # Docker is PREFERRED, not required. It gives the panel a clean box and a
+    # read-only tree. When the container runtime is down, a panel that refuses to
+    # start is worse than a smaller panel that does: a whole container fault once
+    # took spar with it, though nothing about the workflow needs a container.
+    DOCKER_OK=yes
+    if ! command -v docker >/dev/null 2>&1; then
+        DOCKER_OK=no; DOCKER_WHY="docker is not installed"
+    elif ! docker info >/dev/null 2>&1; then
+        DOCKER_OK=no; DOCKER_WHY="the docker daemon is not responding"
+    elif ! docker images >/dev/null 2>&1; then
+        # The daemon answers but its image store does not — a live failure mode
+        # (a corrupted content store answers `docker ps` and fails every run).
+        DOCKER_OK=no; DOCKER_WHY="the docker image store is unreadable"
+    fi
     [ -d ".medulla/workflows/$WORKFLOW" ] || [ -d "$HOME/.medulla/workflows/$WORKFLOW" ] \
         || die "no spar workflow: neither ./.medulla/workflows/$WORKFLOW nor ~/.medulla/workflows/$WORKFLOW (medulla init spar)"
 }
@@ -87,7 +109,19 @@ cmd_start() {
     qfile="$box/question.$id.md"; log="$box/run.$id.log"; err="$box/err.$id.log"
     cp "$question" "$qfile" || die "cannot write $qfile"
 
-    medulla --print-run-dir --docker --cwd-ro --runs-folder "$box" \
+    # Container mode also mounts the tree read-only; native mode cannot, so the
+    # panel is trusted with the working tree it reviews. Say so rather than let it
+    # be discovered.
+    if [ "$DOCKER_OK" = yes ]; then
+        set -- --docker --cwd-ro "$@"
+    else
+        echo "spar-run: $DOCKER_WHY — running the panel NATIVELY on the host." >&2
+        echo "spar-run: reduced panel — harnesses without host credentials sit out;" >&2
+        echo "spar-run: expect roughly 3 of 5 panelists. min_success is 3, so quorum" >&2
+        echo "spar-run: is still reachable, but the round is thinner than in a container." >&2
+        echo "spar-run: the tree is NOT mounted read-only in this mode." >&2
+    fi
+    medulla --print-run-dir --runs-folder "$box" \
         -w "$WORKFLOW" "$@" --var-file "QUESTION=$qfile" \
         >"$log" 2>"$err" &
     local pid=$!
@@ -163,7 +197,10 @@ cmd_wait() {
         # A panel that died on its second minute should not cost forty-five. Give the
         # container a moment to appear first, then treat "no container and no outcome"
         # as death rather than patience.
-        if [ "$waited" -ge 60 ] && [ "$(docker ps -q --filter 'name=^medulla-' | wc -l)" -eq 0 ]; then
+        # "Is it still alive" is asked differently per mode: a container by name, a
+        # native run by its process. Asking docker in native mode reports every
+        # healthy panel as dead sixty seconds in.
+        if [ "$waited" -ge 60 ] && [ "$(alive_count)" -eq 0 ]; then
             gone=$((gone + 1))
             if [ "$gone" -ge 2 ]; then
                 echo "spar-run: no medulla container is running and no outcome was written." >&2
