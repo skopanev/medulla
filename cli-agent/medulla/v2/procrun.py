@@ -40,15 +40,32 @@ class RunResult:
     timed_out: bool
     stdout: str
     stderr: str
+    # WHY it was killed, when the watchdog did it. Empty for an honest timeout.
+    # Without this a watchdog kill and a node timeout are the same rc=124 in the
+    # manifest, and telling them apart cost an hour on a live P0.
+    killed_because: str = ""
 
 
-FIRST_OUTPUT_S = 60      # every harness CLI prints an init event well inside this
+def _env_seconds(name: str, default: int) -> int:
+    """A workflow with long deliberation sets its own threshold, rather than
+    patching the engine — which is what the fixed 300 forced."""
+    raw = os.environ.get(name, "").strip()
+    if not raw.isdigit() or int(raw) <= 0:
+        return default
+    return int(raw)
+
+
+FIRST_OUTPUT_S = _env_seconds("MEDULLA_FIRST_OUTPUT_S", 60)
 # And then it keeps talking. Measured on a healthy opencode round: 298 events in 586
 # seconds, median gap 0s, 90th percentile 3s, longest 66s — no pause over two minutes
 # in the whole run. Five minutes is generous by a factor of four and still catches a
 # body that died mid-work, which is what a live panel did: three panelists went quiet
 # for 10-14 minutes each and burned a 1800s timeout, then a retry burned another.
-IDLE_OUTPUT_S = 300
+# 300 was calibrated against that healthy round and proved WRONG for real work: a
+# panel of four models was killed mid-generation, each after ~279s of output and
+# exactly 300s of thought. A model deliberating on a hard review is not a dead one.
+# 900 still catches the 10-14 minute silences this exists for.
+IDLE_OUTPUT_S = _env_seconds("MEDULLA_IDLE_OUTPUT_S", 900)
 
 
 def run(
@@ -180,7 +197,8 @@ def run(
             _LIVE.discard(proc)
 
     rc = TIMEOUT_RC if timed_out else proc.returncode
-    return RunResult(rc=rc, timed_out=timed_out, stdout="".join(out_buf), stderr="".join(err_buf))
+    return RunResult(rc=rc, timed_out=timed_out, stdout="".join(out_buf),
+                     stderr="".join(err_buf), killed_because=went_quiet)
 
 
 def _kill_group(proc: subprocess.Popen, sig) -> None:

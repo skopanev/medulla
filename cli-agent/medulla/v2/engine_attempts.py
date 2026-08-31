@@ -10,12 +10,12 @@ from pathlib import Path
 
 from .classify import Move, Verdict, classify_attempt, next_move
 from .engine_body import BodyMixin
+from .engine_message import conclusion_message
 from .engine_scan import (
     AttemptsOutcome,
     ScanResult,
     _retry_delay,
     _timeout_env,
-    conclusion_message,
     log,
     scan_stdout,
 )
