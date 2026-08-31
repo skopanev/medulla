@@ -7,8 +7,9 @@ cost an hour of diagnosis on a live P0.
 """
 from __future__ import annotations
 
-from .model import SIG_DEFAULT, SIG_FAILED
 from .engine_scan import _tail, scan_stdout
+from .model import SIG_DEFAULT, SIG_FAILED
+
 
 def conclusion_message(signal, action, result, total, limit_reason, fallback_used,
                        post_signal, post_scan, body_scan, known, *, agent_spec=None,

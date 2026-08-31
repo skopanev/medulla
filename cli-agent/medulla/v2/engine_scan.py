@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .errors import E_INPUTS, EngineCrash
-from .model import CHANNEL_SIGNALS, SIG_DEFAULT, SIG_FAILED
+from .model import CHANNEL_SIGNALS
 from .signals import extract_signals
 
 
