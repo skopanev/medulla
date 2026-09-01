@@ -1,8 +1,7 @@
 """One node, one body, N tries: the retry loop, its fallback phase, and the hooks around it.
 
 Split from engine.py under the project's 250-line rule ($MAX_LOC). This is where an
-attempt becomes an outcome — the pre guard that can skip the body, the fallback that
-gets its own budget, and the post hook that has the last word.
+attempt becomes an outcome: pre guard, fallback, and the post hook's last word.
 """
 from __future__ import annotations
 
@@ -15,6 +14,7 @@ from .engine_scan import (
     AttemptsOutcome,
     ScanResult,
     _retry_delay,
+    _tail,
     _timeout_env,
     log,
     scan_stdout,
@@ -155,8 +155,8 @@ class AttemptsMixin(BodyMixin):
                     raise EngineCrash(E_HARNESS, fatal, node=node.name)
                 self.capture_session(adapter, agent_spec, raw_text)
                 raw_text = adapter.filter_stdout(raw_text)
-            # A shell body is the author's own code: its signals count only where it
-            # wrote them. An agent body keeps the lenient parse it needs (see
+            # A shell body's signals count only where the author wrote them. An agent
+            # body keeps the lenient parse it needs (see
             # extract_signals) and is fenced by agent.sets instead.
             body_scan = scan_stdout(raw_text, known, strict=(current.kind == "shell"))
 
@@ -175,18 +175,16 @@ class AttemptsMixin(BodyMixin):
                 post_scan = scan_stdout(post_res.stdout, known, strict=True)  # hooks are shell
                 post_rc, post_signal = post_res.rc, post_scan.first_known
                 post_stderr = post_res.stderr
-
-            # Pool conjunction law: ok = rc==0 AND no timeout AND no post veto.
-            # Signals are DATA in pools — they are recorded, they never classify
-            # ("echo <signal:x>; exit 7" must not become ok). ignore_exit_code
-            # never reaches pools, not even via defaults (min_success owns that).
+            delivery_confirmed = pool_mode and node.post_confirms_delivery and post_rc == 0
+            # Pool signals are DATA, never classification; ignore_exit_code never applies.
             decision = classify_attempt(
                 kind=current.kind, rc=result.rc, timed_out=result.timed_out,
                 body_signal=None if pool_mode else body_scan.first_known,
                 post_rc=post_rc,
                 post_signal=None if pool_mode else post_signal,
                 ignore_exit_code=(False if pool_mode
-                                  else self.p.action_ignore_exit_code(current)),
+                                  else self.p.action_ignore_exit_code(current)), pool_mode=pool_mode,
+                delivery_confirmed=delivery_confirmed,
             )
             move = next_move(
                 decision, kind=current.kind, phase=phase, attempt=attempt,
@@ -195,7 +193,8 @@ class AttemptsMixin(BodyMixin):
                 pool_mode=pool_mode,
             )
             if decision.failure_class is not None:
-                last_failure_class = decision.failure_class
+                last_failure_class = ("watchdog" if result.killed_because
+                                      else decision.failure_class)
 
             if move.move is Move.RETRY_SAME:
                 log(f"attempt {attempt_id} failed (rc={result.rc}), retrying")
@@ -235,6 +234,8 @@ class AttemptsMixin(BodyMixin):
                 signal, current, result, total, limit_reason, fallback_used,
                 post_signal, post_scan, body_scan, known,
                 agent_spec=agent_spec, post_rc=post_rc, post_stderr=post_stderr)
+            if result.timed_out and post_rc:
+                message += f"; post hook vetoed: {_tail(post_stderr)}"
             return AttemptsOutcome(
                 signal=signal, message=message, attempts=total,
                 attempts_primary=n_primary, attempts_fallback=n_fallback,

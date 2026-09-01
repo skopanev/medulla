@@ -81,11 +81,16 @@ Rules:
 
 ## VERDICT
 
-Close with this section, verbatim heading, exactly two lines. Write it as plain
+Close with this section, verbatim heading, exactly three lines. Write it as plain
 text — NOT inside a code block, and do not repeat the heading inside itself:
 
     ## VERDICT
     GO | NO-GO — <n>, <n> | INSUFFICIENT — one line: why
+    <!-- spar-delivery-complete -->
+
+Write `<!-- spar-delivery-complete -->` as the final non-empty line of the file.
+This marker IS part of the deliverable: without it the response is incomplete and
+will be rejected and retried, even when the verdict above it says GO.
 
 Pick ONE word:
 
@@ -102,7 +107,7 @@ Pick ONE word:
   the difference. Nobody is punished for INSUFFICIENT; a confident wrong call costs
   the round twice.
 
-Nothing else goes in this section. If you think something must be fixed before
+Nothing else goes in this section before the delivery marker. If you think something must be fixed before
 anything else, or that fixing X will expose Y, those are FINDINGS — write them up
 there, with a file and a FIX, where they will be carried forward. The verdict is
 your answer to "can this ship", and that is one line.

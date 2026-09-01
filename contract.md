@@ -65,3 +65,16 @@ repo falls back to.
 - **`AGENTS.md` is binding on how work is verified here:** lint, build and test
   run in mechanical shell stages, never inside an LLM prompt. An agent that
   reports a green check it ran conversationally has not run it.
+
+## Pool delivery confirmation
+
+A pool node may type its post hook as delivery proof with
+`post_confirms_delivery: true`. Only that declaration lets a successful post override
+a body wall timeout; an ordinary post hook never does.
+
+The declaration transfers responsibility for **content integrity** to the workflow
+author. The hook must validate a checksum, parse the complete structure, or require an
+expected end-of-write marker. File existence, non-emptiness (`test -s`), and size alone
+are forbidden as delivery proof: a body killed during a write can leave a non-empty
+partial artifact, which would otherwise enter quorum and permanently enter the resume
+done-mask.

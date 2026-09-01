@@ -96,6 +96,7 @@ class Node:
     pool: Pool | None = None
     pre: str | None = None              # shell hook, once per node run, before body render
     post: str | None = None             # shell hook, after every attempt, before resolution
+    post_confirms_delivery: bool = False  # typed pool proof; successful post may beat timeout
     on_signal: dict[str, str] = field(default_factory=dict)
 
     @property

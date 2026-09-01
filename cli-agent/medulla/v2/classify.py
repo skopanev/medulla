@@ -5,6 +5,7 @@ The rules encode the contract:
 - known signal wins even over rc != 0
 - post rc != 0  => attempt failed (retryable), regardless of the body
 - post rc == 0 + signal => overrides the body's signal
+- declared pool delivery confirmation beats a body timeout
 - silence (rc 0, no known signal): agent — retry primary only, never fallback;
   shell — deterministic, not retried; exhausted => __default__
 - rc != 0 / timeout: retry primary, then fallback (same attempts), then __failed__
@@ -39,7 +40,13 @@ def classify_attempt(
     post_rc: int | None,          # None = no post hook
     post_signal: str | None,      # first KNOWN signal from post stdout, or None
     ignore_exit_code: bool,
+    pool_mode: bool = False,
+    delivery_confirmed: bool = False,
 ) -> AttemptDecision:
+    if pool_mode and timed_out:
+        if delivery_confirmed:
+            return AttemptDecision(Verdict.SILENT)   # artifact truth beats body wall
+        return AttemptDecision(Verdict.RETRY, failure_class="timeout")
     if post_rc is not None and post_rc != 0:
         return AttemptDecision(Verdict.RETRY, failure_class="post")   # post veto
     if post_rc == 0 and post_signal is not None:

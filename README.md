@@ -106,6 +106,23 @@ Shell around any body — the only way to put deterministic checks before/after 
 - **`pre`** runs once before the body renders. Emits a routing signal → the body is **skipped** (guard: "already done"); emits `var` → the body's prompt sees it; exits non-zero → `__failed__`.
 - **`post`** runs after **every** attempt. Exits non-zero → that attempt failed (retry, then fallback — "try until the artifact exists"); emits a signal → **overrides** the body's signal; silent → the body's outcome stands.
 
+Pool nodes may explicitly declare that post is also proof of delivery:
+
+```yaml
+post: 'python3 scripts/validate_result.py "result-$MEDULLA_INPUT_INDEX.json"'
+post_confirms_delivery: true
+```
+
+This is stronger than an ordinary post hook. When a pool body reaches its wall timeout
+but this declared check exits 0, the input is delivered without a retry; its manifest
+row has `ok=true` and `timed_out=true`. A scalar `post: '...'` never rescues a timeout.
+
+By setting `post_confirms_delivery: true`, the workflow author takes responsibility for
+checking **content integrity**. Validate a checksum, an expected end-of-write marker,
+or parse the complete structure. Existence, non-emptiness (`test -s`), or size alone
+are not delivery proofs: SIGTERM/SIGKILL can leave a non-empty partial file. The parser
+accepts this declaration only on nodes with `inputs`.
+
 ### Pools: fan-out over inputs
 
 ```yaml
@@ -318,7 +335,9 @@ nodes:
       You are panelist {{input.slug}} ({{input_index}}/{{input_count}}).
       Critique the plan: {{file:plan.md}}
       Write your verdict to reviews/{{input.slug}}.md
-    post: 'test -s "reviews/{{input.slug}}.md"'   # verdict = artifact exists, not agent mood
+      Finish it with a line containing only <!-- review-complete -->
+    post: 'tail -n 1 "reviews/{{input.slug}}.md" | grep -Fxq "<!-- review-complete -->"'
+    post_confirms_delivery: true
     on_signal: {__done__: apply}
 
   apply:
@@ -427,6 +446,7 @@ Action (exactly one of `shell` / `agent`):
 | `fallback` | alternate agent action after primary attempts are exhausted. Agent-only; a fallback has no fallback |
 | `ignore_exit_code` | rc != 0 doesn't classify the body as failed; outcome comes from signals. **Forbidden in pool nodes** — `min_success` owns that role |
 | `pre` / `post` | shell hooks around the body (see [Hooks](#hooks-pre-and-post)); in pools both run per input |
+| `post_confirms_delivery` | Boolean, pool-only. Types `post` as an integrity proof whose success may override a body timeout |
 
 Pool (presence of `inputs` turns the action into a pool):
 
@@ -434,12 +454,12 @@ Pool (presence of `inputs` turns the action into a pool):
 |---|---|
 | `inputs` | YAML list = data (scalars or objects, one kind per pool, arrays forbidden), or `{shell: "cmd", timeout: 60}` = source. A bare string is a validation error. Hard cap: 10 000 |
 | `max_parallel` | `1` (default, sequential) \| N \| `all` |
-| `min_success` | `all` (default) \| N ≥ 1. Input ok = rc 0 + no timeout + post didn't veto. No short-circuiting ever |
+| `min_success` | `all` (default) \| N ≥ 1. Input ok = body rc 0 with no timeout and no post veto, or body timeout with a successful declared delivery check. No short-circuiting ever |
 
 ### Classification rules
 
 - A known signal emitted before a non-zero exit **wins** over the exit code.
-- Retryable attempt outcomes: non-zero exit, timeout (rc 124), post veto, and **agent silence** (rc 0, no known signal — the most common agent flake). Silence retries on the **primary only** and never triggers fallback (another model drops the tag just as often; blind fallback duplicates side effects); exhausted, it classifies `__default__`. Shell silence is deterministic and not retried. **In pools silence at rc 0 is the normal ok outcome** — pool bodies aren't expected to signal; `post` is their truth channel.
+- Retryable attempt outcomes: non-zero exit, timeout (rc 124), post veto, and **agent silence** (rc 0, no known signal — the most common agent flake). Silence retries on the **primary only** and never triggers fallback (another model drops the tag just as often; blind fallback duplicates side effects); exhausted, it classifies `__default__`. Shell silence is deterministic and not retried. **In pools silence at rc 0 is the normal ok outcome.** A successful `post` may override a body timeout only when the node declares `post_confirms_delivery: true`; ordinary post hooks remain veto/override hooks and do not prove delivery.
 - Pool bodies' signals never route — they're recorded in the manifest (law of layers: inputs produce data, joins produce transitions).
 - Fold law: var signals apply **only at `max_parallel: 1`** (which includes every decision node), in input order, from the successful attempt only. At `max_parallel > 1` they land in the manifest row.
 

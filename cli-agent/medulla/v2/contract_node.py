@@ -172,7 +172,8 @@ def _parse_inputs(raw, where: str) -> InputsSpec:
 
 NODE_KEYS = {
     "shell", "agent", "prompt", "timeout", "max_attempts", "ignore_exit_code", "fallback",
-    "inputs", "max_parallel", "min_success", "pre", "post", "on_signal",
+    "inputs", "max_parallel", "min_success", "pre", "post", "post_confirms_delivery",
+    "on_signal",
 }
 
 
@@ -229,7 +230,15 @@ def _parse_node(name: str, raw: dict, where: str) -> Node:
             not isinstance(raw[hook], str) or not raw[hook].strip()
         ):
             raise _err(f"{where}: {hook} must be a non-empty shell string")
+    delivery_declared = "post_confirms_delivery" in raw
+    confirms_delivery = raw.get("post_confirms_delivery", False)
+    if not isinstance(confirms_delivery, bool):
+        raise _err(f"{where}: post_confirms_delivery must be a boolean")
+    if delivery_declared and pool is None:
+        raise _err(f"{where}: post_confirms_delivery requires inputs")
+    if delivery_declared and raw.get("post") is None:
+        raise _err(f"{where}: post_confirms_delivery requires post")
 
     return Node(name=name, action=action, pool=pool,
-                pre=raw.get("pre"), post=raw.get("post"), on_signal=dict(on_signal))
-
+                pre=raw.get("pre"), post=raw.get("post"),
+                post_confirms_delivery=confirms_delivery, on_signal=dict(on_signal))

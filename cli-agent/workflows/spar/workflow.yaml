@@ -117,6 +117,10 @@ nodes:
       {{var:ROUND_DIR}}/{{input.slug}}.md
       ```
 
+      FINISH that same file with `<!-- spar-delivery-complete -->` as its final
+      non-empty line. This marker IS part of the deliverable; missing it counts
+      as NO answer and triggers a retry.
+
       Only AFTER the file exists on disk, print exactly one line and stop:
 
       SUMMARY: <your one-sentence summary>
@@ -145,6 +149,10 @@ nodes:
       # rejects only the truly empty verdict.
       printf '%s' "$v" | sed -E 's/^(NO-GO|INSUFFICIENT|GO)//' | grep -q '[^ [:punct:]]' \
         || { echo "VERDICT gives no reason (format: <WORD> — one line: why)" >&2; exit 1; }
+      last=$(awk 'NF {line=$0} END {print line}' "$f")
+      [ "$last" = '<!-- spar-delivery-complete -->' ] \
+        || { echo "delivery marker missing: last non-empty line must be <!-- spar-delivery-complete -->" >&2; exit 1; }
+    post_confirms_delivery: true
     max_attempts: 2                       # a panelist that skips the file-write retries once
     timeout: 1800
     on_signal:
