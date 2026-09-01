@@ -65,15 +65,15 @@ def test_undeclared_timeout_uses_environment_then_builtin_default(
     assert procrun.IDLE_OUTPUT_S == 900
 
 
-def test_the_spar_panel_declares_its_own_threshold():
-    """Live: qwen at xhigh printed one line and the 900s default killed it, twice, in a
-    round the other four finished — a reasoning panelist is silent between writes for
-    longer than an ordinary agent. The panel says so itself instead of the default
-    moving for every workflow that inherits it."""
+def test_the_spar_panel_does_not_declare_a_threshold_of_its_own():
+    """It declared 1800 for one release, on a misread log: the single line qwen produced
+    in 1819 seconds was an opencode startup notice, not thinking. It was hung on a 429
+    its pre hook failed open on — and a higher threshold only doubles what a hang costs.
+    The panel stays on the engine default; the fix belongs in the pre hook."""
     from pathlib import Path
 
     import yaml as pyyaml
     yml = Path(__file__).resolve().parent.parent / "workflows/spar/workflow.yaml"
     panel = pyyaml.safe_load(yml.read_text())["nodes"]["panel"]
-    assert panel["agent"]["idle_timeout"] == 1800
-    assert procrun.IDLE_OUTPUT_S == 900, "the engine default is not the panel's business"
+    assert "idle_timeout" not in panel["agent"]
+    assert procrun.IDLE_OUTPUT_S == 900
