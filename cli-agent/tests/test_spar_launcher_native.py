@@ -88,3 +88,18 @@ def test_launcher_liveness_check_works_without_docker():
     src = LAUNCHER.read_text()
     assert "alive_count()" in src
     assert "docker ps -q --filter 'name=^medulla-'" not in src.split("alive_count() {")[0]
+
+
+def test_the_workflow_ships_exactly_one_launcher():
+    """`medulla launch spar start ...` is the owner's command, and medulla picks the
+    launcher by the executable bit — several executables and it refuses to guess. A
+    helper script added to scripts/ with a stray chmod +x took that command out: it
+    started answering "workflow 'spar' ships several launchers — name one". The helpers
+    beside it (collect_verdict.py, quota_precheck.sh) are run BY the workflow and are
+    not executable; only spar-run.sh is."""
+    import os
+    from pathlib import Path
+    scripts = Path(__file__).resolve().parent.parent / "workflows/spar/scripts"
+    executable = sorted(p.name for p in scripts.iterdir()
+                        if p.is_file() and os.access(p, os.X_OK))
+    assert executable == ["spar-run.sh"], executable
