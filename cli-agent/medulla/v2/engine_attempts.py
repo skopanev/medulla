@@ -114,7 +114,8 @@ class AttemptsMixin(BodyMixin):
                               log_path=step_dir / f"attempt-{total}-{tag}.txt",
                               stdin_data=invoke.stdin,
                               env_remove=sorted(set(env_remove)),
-                              merge_stderr=invoke.merge_stderr, echo=echo)
+                              merge_stderr=invoke.merge_stderr, echo=echo,
+                              hard_deadline=self.deadline)
 
             raw_text = result.stdout
             if current.kind == "agent":

@@ -30,7 +30,8 @@ class InputsMixin:
             cmd = self._render_or_crash(spec.shell, node, "inputs.shell")
             res = proc_run(cmd, self.workdir, self._clamp(spec.shell_timeout),
                            extra_env=self._base_env(),
-                           log_path=step_dir / "inputs-source.txt")
+                           log_path=step_dir / "inputs-source.txt",
+                           hard_deadline=self.deadline)
             if res.timed_out:
                 rem = self._remaining()
                 if rem is not None and rem <= 0:      # the run budget killed it, not its own limit
@@ -61,4 +62,3 @@ class InputsMixin:
         (step_dir / "inputs.json").write_text(
             json.dumps(inputs, ensure_ascii=False, indent=1), encoding="utf-8")
         return inputs
-

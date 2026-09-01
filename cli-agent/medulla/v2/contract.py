@@ -14,6 +14,7 @@ from .errors import E_VALIDATION, EngineCrash
 from .model import (
     BOOLEAN_TRAP_NAMES,
     CHANNEL_SIGNALS,
+    DEFAULT_ACTION_TIMEOUT,
     DEFAULT_WORKFLOW_TIMEOUT,
     DEFAULTS_ALLOWED_KEYS,
     ENGINE_FACTS,
@@ -21,6 +22,7 @@ from .model import (
     ENV_BLACKLIST_PREFIX,
     SIG_DONE,
     TERMINALS,
+    Action,
     Defaults,
     Node,
     Workflow,
@@ -64,6 +66,24 @@ def _validate_var_name(key: str, where: str) -> None:
         raise _err(f"{where}: invalid var name {key!r}")
     if key in ENV_BLACKLIST_EXACT or any(key.startswith(p) for p in ENV_BLACKLIST_PREFIX):
         raise _err(f"{where}: var name {key!r} is reserved (vars are exported to child env)")
+
+
+def _validate_idle_budget(
+    action: Action, default_timeout: int, workflow_timeout: int | None, where: str,
+) -> None:
+    effective = action.timeout if action.timeout is not None else default_timeout
+    if workflow_timeout is not None:
+        effective = min(effective, workflow_timeout)
+    if action.agent and action.agent.idle_timeout is not None:
+        idle = action.agent.idle_timeout
+        if idle >= effective:
+            raise _err(
+                f"{where}: agent.idle_timeout ({idle}s) must be less than its "
+                f"effective timeout ({effective}s); otherwise it can never fire")
+    if action.fallback:
+        _validate_idle_budget(
+            action.fallback, default_timeout, workflow_timeout, f"{where}.fallback",
+        )
 
 
 def load_workflow(path: Path) -> Workflow:
@@ -119,6 +139,12 @@ def load_workflow(path: Path) -> Workflow:
     if not isinstance(nodes_raw, dict) or not nodes_raw:
         raise _err("nodes must be a non-empty mapping")
 
+    # workflow timeout: 0 = unlimited; it clamps every action from the first attempt
+    t_raw = data.get("timeout", DEFAULT_WORKFLOW_TIMEOUT)
+    if isinstance(t_raw, bool) or not isinstance(t_raw, int) or t_raw < 0:
+        raise _err("timeout must be a non-negative integer (0 = unlimited)")
+    timeout = None if t_raw == 0 else t_raw
+
     # defaults
     defaults_raw = data.get("defaults") or {}
     if not isinstance(defaults_raw, dict):
@@ -169,6 +195,16 @@ def load_workflow(path: Path) -> Workflow:
             raise _err(f"node name '{name}' must match [A-Za-z][A-Za-z0-9_-]* "
                        f"(it becomes env suffixes and paths)")
         nodes[name] = _parse_node(name, raw, f"node '{name}'")
+        _validate_idle_budget(
+            nodes[name].action, defaults.timeout or DEFAULT_ACTION_TIMEOUT,
+            timeout, f"node '{name}'",
+        )
+
+    if defaults.fallback:
+        _validate_idle_budget(
+            defaults.fallback, defaults.timeout or DEFAULT_ACTION_TIMEOUT,
+            timeout, "defaults.fallback",
+        )
 
     # graph checks
     start = data.get("start")
@@ -198,12 +234,6 @@ def load_workflow(path: Path) -> Workflow:
     for key in vars_raw:
         _validate_var_name(key, "vars")
     vars_map = {k: str(v) for k, v in vars_raw.items()}
-
-    # workflow timeout: 0 = unlimited
-    t_raw = data.get("timeout", DEFAULT_WORKFLOW_TIMEOUT)
-    if isinstance(t_raw, bool) or not isinstance(t_raw, int) or t_raw < 0:
-        raise _err("timeout must be a non-negative integer (0 = unlimited)")
-    timeout = None if t_raw == 0 else t_raw
 
     keep_runs = data.get("keep_runs", 20)
     if isinstance(keep_runs, bool) or not isinstance(keep_runs, int) or keep_runs < 1:

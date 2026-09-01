@@ -60,8 +60,12 @@ re-entering a run:
                                 passes stay in the journal.
 
 agent nodes (fields beyond harness/model/effort/sandbox/args):
+    timeout: N              body runtime; timeout cleanup gets up to 3 extra seconds
+                            for TERM, final output drain, then KILL. Cleanup counts
+                            against and is capped by the workflow deadline
     idle_timeout: N         kill after N seconds without output; node value wins over
-                            MEDULLA_IDLE_OUTPUT_S, then the built-in default (900)
+                            MEDULLA_IDLE_OUTPUT_S, then the built-in default (900);
+                            explicit N must be below the effective attempt timeout
     sets: [K, ...]          vars this agent may set from stdout; empty (default) = none
     session: <name>         name a conversation: the first node with the name opens it,
                             every later one continues it. Recorded in <run>/sessions.json;

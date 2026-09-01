@@ -17,21 +17,29 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .model import TIMEOUT_RC
+from .procrun_io import STOP_GRACE_S, OutputCapture
+from .procrun_io import defer_reap as _defer_reap
+from .procrun_io import watch_output as _watch_output
 
 # every live child, registered for signal-time group-kill: an interrupt must
 # reach POOL WORKERS' children too (the exception only lands in the main
 # thread; workers sit in proc.wait until their agents die)
-_LIVE: set = set()
-_LIVE_LOCK = threading.Lock()
+_LIVE: dict[subprocess.Popen, int] = {}
+_LIVE_LOCK = threading.RLock()
 
 
 def kill_live_processes() -> None:
     """Signal-handler duty: SIGTERM every registered child's process group so
     worker threads unblock immediately and the engine can conclude."""
     with _LIVE_LOCK:
-        procs = list(_LIVE)
-    for proc in procs:
-        _kill_group(proc, signal.SIGTERM)
+        procs = []
+        for proc, pgid in list(_LIVE.items()):
+            if proc.returncode is None:
+                procs.append((proc, pgid))
+            else:
+                _LIVE.pop(proc, None)
+    for proc, pgid in procs:
+        _kill_group(proc, signal.SIGTERM, pgid)
 
 
 @dataclass
@@ -65,6 +73,8 @@ FIRST_OUTPUT_S = _env_seconds("MEDULLA_FIRST_OUTPUT_S", 60)
 # exactly 300s of thought. A model deliberating on a hard review is not a dead one.
 # 900 still catches the 10-14 minute silences this exists for.
 IDLE_OUTPUT_S = _env_seconds("MEDULLA_IDLE_OUTPUT_S", 900)  # agent field overrides
+PIPE_DRAIN_S = 60
+CLEANUP_GRACE_S = 3
 
 
 def run(
@@ -79,7 +89,10 @@ def run(
     echo=None,   # callable(tag, line) for live operator streaming
     watch_output: bool = False,   # only for agent CLIs — see _watch_output
     idle_timeout_s: float | None = None,  # declared agent value; None -> env/default
+    hard_deadline: float | None = None,  # workflow cap includes cleanup grace
 ) -> RunResult:
+    deadline = hard_deadline if hard_deadline is not None else float("inf")
+    cleanup_deadline = deadline
     if isinstance(command, str):
         # bash, not $SHELL — same reason as engine.py: hooks are workflow code and must not
         # change meaning because the operator's login shell differs (zsh does no word
@@ -95,116 +108,128 @@ def run(
     # "w": a retried/resumed attempt reusing this path must not stack stale
     # layers under the fresh output (audit R4)
     log_file = open(log_path, "w", encoding="utf-8", buffering=1) if log_path else None
-    log_lock = threading.Lock()
-
-    proc = subprocess.Popen(
-        argv, cwd=str(cwd),
-        stdin=subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
-        text=True, bufsize=1, start_new_session=True, env=env,
-        errors="replace",
-    )
-    with _LIVE_LOCK:
-        _LIVE.add(proc)
-    if stdin_data is not None:
-        # write+close in a thread: a child that never reads must not deadlock us
-        def _feed():
-            try:
-                proc.stdin.write(stdin_data)
-                proc.stdin.close()
-            except (BrokenPipeError, OSError):
-                pass
-        threading.Thread(target=_feed, daemon=True).start()
-
-    out_buf: list[str] = []
-    err_buf: list[str] = []
-
-    def pump(pipe, buf, tag):
-        try:
-            for line in iter(pipe.readline, ""):
-                buf.append(line)
-                if log_file:
-                    with log_lock:
-                        log_file.write(f"[{tag}] {line}")
-                if echo is not None:
-                    try:
-                        echo(tag, line)
-                    except Exception:
-                        pass
-        finally:
-            try:
-                pipe.close()
-            except Exception:
-                pass
-
-    t_out = threading.Thread(target=pump, args=(proc.stdout, out_buf, "out"), daemon=True)
-    t_out.start()
-    if proc.stderr is not None:
-        t_err = threading.Thread(target=pump, args=(proc.stderr, err_buf, "err"), daemon=True)
-        t_err.start()
-    else:
-        t_err = None
-
-    # A CLI that started says SOMETHING within seconds — a session id, an init event,
-    # a hook response. Silence is not deep thought, it is a process that never came up:
-    # a wrapper that died before its first write, a provider handshake hanging, a
-    # binary waiting on a tty nobody attached. Waiting out the full body timeout to
-    # discover that costs the whole budget — and then the retry costs it again.
-    #
-    # So: nothing at all after FIRST_OUTPUT_S, and the attempt ends early with a
-    # failure that IS worth retrying, unlike a timeout at the far end.
-    went_quiet = ""
-    if watch_output and timeout_s > FIRST_OUTPUT_S * 2:
-        idle = IDLE_OUTPUT_S if idle_timeout_s is None else idle_timeout_s
-        went_quiet = _watch_output(proc, out_buf, err_buf, timeout_s, idle)
-
+    proc = None
+    pgid = None
+    capture = None
+    registered = False
     timed_out = False
+    reaper_started = False
+    exceptional = True
+    went_quiet = ""
     try:
+        proc = subprocess.Popen(
+            argv, cwd=str(cwd),
+            stdin=subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
+            text=True, bufsize=1, start_new_session=True, env=env,
+            errors="replace",
+        )
+        deadline = time.monotonic() + max(timeout_s, 0)
+        if hard_deadline is not None:
+            deadline = min(deadline, hard_deadline)
+        cleanup_deadline = deadline
+        pgid = proc.pid  # start_new_session makes it the process-group leader
+        registered = True
+        with _LIVE_LOCK:
+            _LIVE[proc] = pgid
+        capture = OutputCapture(proc, log_file, echo)
+        if not capture.start(deadline):
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(argv, timeout_s)
+            raise RuntimeError("unable to start subprocess output capture")
+        if stdin_data is not None:
+            # A child that never reads stdin must not deadlock us.
+            def _feed():
+                try:
+                    proc.stdin.write(stdin_data)
+                except (BrokenPipeError, OSError):
+                    pass
+                finally:
+                    try:
+                        proc.stdin.close()
+                    except (OSError, ValueError):
+                        pass
+            threading.Thread(target=_feed, daemon=True).start()
+        idle = IDLE_OUTPUT_S if idle_timeout_s is None else idle_timeout_s
+        if watch_output and (timeout_s > FIRST_OUTPUT_S * 2 or timeout_s > idle):
+            first_output = min(FIRST_OUTPUT_S, idle) if idle_timeout_s is not None \
+                else FIRST_OUTPUT_S
+            went_quiet = _watch_output(
+                proc, capture.out_buf, capture.err_buf, deadline, idle, first_output,
+            )
         if went_quiet:
             raise subprocess.TimeoutExpired(argv, timeout_s)
-        proc.wait(timeout=timeout_s if timeout_s > 0 else 0.001)
+        if not _wait_for_exit(proc, deadline - time.monotonic()):
+            raise subprocess.TimeoutExpired(argv, timeout_s)
+        exceptional = False
     except subprocess.TimeoutExpired:
         timed_out = True
-        _kill_group(proc, signal.SIGTERM)
-        try:
-            proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            _kill_group(proc, signal.SIGKILL)
-            proc.wait()
+        cleanup_deadline = time.monotonic() + CLEANUP_GRACE_S
+        if hard_deadline is not None:
+            cleanup_deadline = min(cleanup_deadline, hard_deadline)
+        termination_deadline = max(
+            time.monotonic(), cleanup_deadline - STOP_GRACE_S,
+        )
+        _kill_group(proc, signal.SIGTERM, pgid)
+        remaining = max(0, termination_deadline - time.monotonic())
+        if remaining == 0 or not _wait_for_exit(proc, min(3, remaining)):
+            _kill_group(proc, signal.SIGKILL, pgid)
+            remaining = max(0, termination_deadline - time.monotonic())
+            if not _wait_for_exit(proc, min(3, remaining)):
+                reaper_started = _defer_reap(proc)
+        exceptional = False
     except BaseException:
-        # KeyboardInterrupt or anything else: the child MUST NOT outlive us —
-        # it sits in its own session (start_new_session) and nobody else will
-        # kill it (audit R1: v1 had this, the rewrite lost it)
-        _kill_group(proc, signal.SIGTERM)
-        try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            _kill_group(proc, signal.SIGKILL)
-            proc.wait()
+        exceptional = True
+        if proc is None:
+            if log_file:
+                log_file.close()
+            raise
+        # KeyboardInterrupt or anything else: the child MUST NOT outlive us
+        _kill_group(proc, signal.SIGTERM, pgid)
+        remaining = max(0, deadline - time.monotonic())
+        if remaining == 0 or not _wait_for_exit(proc, min(2, remaining)):
+            _kill_group(proc, signal.SIGKILL, pgid)
+            remaining = max(0, deadline - time.monotonic())
+            if not _wait_for_exit(proc, min(2, remaining)):
+                reaper_started = _defer_reap(proc)
         raise
     finally:
-        # generous join: an agent's daemon grandchild can hold the pipe open;
-        # 5s truncated real output (audit G7). The child itself is already dead
-        # here, so this only bounds pipe-drain time.
-        t_out.join(timeout=60)
-        if t_err is not None:
-            t_err.join(timeout=60)
-        if log_file:
-            log_file.close()
-        if proc.poll() is None:                    # belt & braces: never leak
-            _kill_group(proc, signal.SIGKILL)
-        with _LIVE_LOCK:
-            _LIVE.discard(proc)
+        try:
+            if proc is not None:
+                if exceptional and not reaper_started:
+                    _kill_group(proc, signal.SIGKILL, pgid)
+                drain_limit = cleanup_deadline if timed_out else min(
+                    time.monotonic() + 2 * STOP_GRACE_S,
+                    hard_deadline if hard_deadline is not None else float("inf"),
+                )
+                drain_deadline = time.monotonic() if exceptional else min(
+                    drain_limit, time.monotonic() + PIPE_DRAIN_S,
+                )
+                pumps_alive = capture.finish(drain_deadline) if capture else False
+                if capture is None:
+                    for pipe in (proc.stdout, proc.stderr):
+                        if pipe:
+                            pipe.close()
+                    if log_file:
+                        log_file.close()
+                if not reaper_started and (pumps_alive or proc.poll() is None):
+                    _kill_group(proc, signal.SIGKILL, pgid)
+        finally:
+            if registered:
+                with _LIVE_LOCK:
+                    _LIVE.pop(proc, None)
 
     rc = TIMEOUT_RC if timed_out else proc.returncode
-    return RunResult(rc=rc, timed_out=timed_out, stdout="".join(out_buf),
-                     stderr="".join(err_buf), killed_because=went_quiet)
+    return RunResult(rc=rc, timed_out=timed_out,
+                     stdout="".join(list(capture.out_buf)),
+                     stderr="".join(list(capture.err_buf)),
+                     killed_because=went_quiet)
 
 
-def _kill_group(proc: subprocess.Popen, sig) -> None:
+def _kill_group(proc: subprocess.Popen, sig, pgid: int | None = None) -> None:
     try:
-        os.killpg(os.getpgid(proc.pid), sig)
+        os.killpg(pgid if pgid is not None else os.getpgid(proc.pid), sig)
     except Exception:
         try:
             proc.send_signal(sig)
@@ -212,38 +237,11 @@ def _kill_group(proc: subprocess.Popen, sig) -> None:
             pass
 
 
-def _watch_output(proc, out_buf: list, err_buf: list, timeout_s: float,
-                  idle_timeout_s: float) -> str:
-    """Wait for the child, but not through silence. Returns why we stopped, or "".
-
-    ONLY for agent CLIs, which announce themselves and then narrate: claude a
-    session_id, codex thread.started, opencode step_start, agy init. A shell body is
-    any program at all — curl, tar, a compiler, an API client that speaks once it is
-    done — and silence there is not a symptom of anything. Applying this to shell
-    killed a fetcher at 60 seconds that normally runs 140-180 and was working fine.
-
-    Two thresholds, because they mean different things. Nothing at all in the first
-    minute is a process that never came up — a wrapper dead before its first write, a
-    handshake hanging, a binary waiting on a tty. Output that STOPS for five minutes is
-    a body that died mid-work, and it will not resume: a healthy round writes an event
-    every few seconds.
-
-    Either way the caller sees a timeout, which is what it is — just discovered in
-    minutes rather than at the far end of a half-hour budget.
-    """
-    end = time.monotonic() + timeout_s
-    seen = 0
-    last = time.monotonic()
-    while time.monotonic() < end:
-        if proc.poll() is not None:
-            return ""                       # finished on its own
-        now_seen = len(out_buf) + len(err_buf)
-        if now_seen > seen:
-            seen, last = now_seen, time.monotonic()
-        quiet = time.monotonic() - last
-        if seen == 0 and quiet > FIRST_OUTPUT_S:
-            return f"no output at all in {FIRST_OUTPUT_S}s"
-        if seen > 0 and quiet > idle_timeout_s:
-            return f"silent for {idle_timeout_s}s after {seen} lines"
-        time.sleep(0.25)
-    return ""                               # the real timeout takes it from here
+def _wait_for_exit(proc: subprocess.Popen, timeout: float) -> bool:
+    if timeout <= 0:
+        return proc.poll() is not None
+    try:
+        proc.wait(timeout=timeout)
+        return True
+    except subprocess.TimeoutExpired:
+        return False

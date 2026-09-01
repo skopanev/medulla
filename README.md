@@ -85,6 +85,7 @@ In agent prompts, naming the signal is enough — "emit the signal named done" �
 ```yaml
   plan:
     agent: {harness: codex, model: gpt-5.5, effort: xhigh, idle_timeout: 1800}
+    timeout: 3600
     prompt: |
       {{file:prompts/plan.md}}
       Branch: {{var:BRANCH}}. Write the plan to plan.md and emit the signal named planned.
@@ -94,7 +95,7 @@ In agent prompts, naming the signal is enough — "emit the signal named done" �
     on_signal: {planned: review, __failed__: __exit_fail__}
 ```
 
-Harnesses: `claude-code`, `codex`, `opencode`, `agy`. `effort` maps to each CLI's native knob. `idle_timeout` is the positive number of seconds an agent may stop producing output; it overrides `MEDULLA_IDLE_OUTPUT_S`, which falls back to 900. `max_attempts` retries flaky attempts (non-zero exit, timeout, agent silence); `fallback` is a second agent tried after the primary's attempts are exhausted. While an agent works, its text streams live to your terminal (`MEDULLA_STREAM=0` to silence).
+Harnesses: `claude-code`, `codex`, `opencode`, `agy`. `effort` maps to each CLI's native knob. `timeout` is body runtime; after it expires, MEDULLA uses up to 3 additional seconds for TERM, final output drain, then KILL. That cleanup time counts against the workflow deadline and is shortened when the workflow has less time left. `idle_timeout` is the positive number of seconds an agent may stop producing output; an explicit value must be strictly below the node's effective attempt timeout, including the workflow deadline clamp. It overrides `MEDULLA_IDLE_OUTPUT_S`, which falls back to 900. `max_attempts` retries flaky attempts (non-zero exit, timeout, agent silence); `fallback` is a second agent tried after the primary's attempts are exhausted. While an agent works, its text streams live to your terminal (`MEDULLA_STREAM=0` to silence).
 
 `sandbox` restricts a step's power. Default is `danger` — under `--docker` the container *is* the sandbox and every workflow written before this field relies on that. Set `sandbox: read-only` when a step feeds the model **untrusted** text (mail, chat logs, scraped pages) while the workspace is mounted read-write: it maps to the harness's native lock — claude `--permission-mode plan`, codex `-s read-only`, opencode denies `edit`/`write`/`patch`/`bash` (a shell is a write primitive). `agy` maps it to `--mode plan` (its permission layer rejects the write RPC, same class of lock as claude's).
 
@@ -419,9 +420,9 @@ Action (exactly one of `shell` / `agent`):
 | Field | Meaning |
 |---|---|
 | `shell` | shell command; its config *is* the command. `prompt` here is a validation error |
-| `agent` | `{harness, model, effort, idle_timeout, sandbox, args}` — one entity, one block. Scalar shortcut: `agent: codex`. `idle_timeout` is positive seconds of allowed output silence (node → `MEDULLA_IDLE_OUTPUT_S` → 900). `sandbox` is `danger` (default — the container is the sandbox) or `read-only` (deny file writes). `args` is a raw CLI escape hatch — non-portable across harnesses |
+| `agent` | `{harness, model, effort, idle_timeout, sandbox, args}` — one entity, one block. Scalar shortcut: `agent: codex`. `idle_timeout` is positive seconds of allowed output silence (node → `MEDULLA_IDLE_OUTPUT_S` → 900); an explicit value must be below the effective attempt timeout. `sandbox` is `danger` (default — the container is the sandbox) or `read-only` (deny file writes). `args` is a raw CLI escape hatch — non-portable across harnesses |
 | `prompt` | agent input (not config); every scalar action field is a template. The engine appends the signal protocol automatically — name signals in words; literal tags are allowed (see Signals) |
-| `timeout` | per **attempt**, seconds |
+| `timeout` | body runtime per **attempt**, seconds. A timeout then gets up to 3 extra seconds for TERM, final output drain, and KILL; cleanup counts against and is capped by the workflow deadline |
 | `max_attempts` | attempts per runner, default 1. Primary gets N, then fallback gets N |
 | `fallback` | alternate agent action after primary attempts are exhausted. Agent-only; a fallback has no fallback |
 | `ignore_exit_code` | rc != 0 doesn't classify the body as failed; outcome comes from signals. **Forbidden in pool nodes** — `min_success` owns that role |
