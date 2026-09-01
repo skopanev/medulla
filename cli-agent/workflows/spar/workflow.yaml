@@ -86,41 +86,11 @@ nodes:
       - {slug: qwen,   harness: opencode,    model: alibaba-token-plan/qwen3.8-max, effort: xhigh}
     max_parallel: all
     min_success: 3        # majority of the 5-model roster
-    pre: |
-      # A dead provider must not cost the panel half an hour of silence: opencode
-      # swallows a 429 and hangs until the step timeout, so ask the API directly —
-      # a quota refusal comes back in under a second. rc!=0 in pre is a SOFT fail
-      # (signal __failed__, attempts=0): this panelist sits the round out and the
-      # others still deliver, which is what min_success/quorum are for.
-      # Only opencode has a cheap, honest signal; every other harness passes through.
-      # MEDULLA_INPUT_HARNESS first: in a pool MEDULLA_HARNESS still holds the
-      # unrendered "{{input.harness}}" (engine builds the tag before rendering).
-      harness="${MEDULLA_INPUT_HARNESS:-${MEDULLA_HARNESS:-}}"
-      [ "$harness" = "opencode" ] || exit 0
-      model="${MEDULLA_INPUT_MODEL:-}"
-      case "$model" in */*) ;; *) exit 0 ;; esac
-      provider="${model%%/*}"; model_id="${model#*/}"
-      auth="$HOME/.local/share/opencode/auth.json"
-      [ -r "$auth" ] || exit 0
-      key=$(jq -r --arg p "$provider" '.[$p].key // empty' "$auth" 2>/dev/null)
-      [ -n "$key" ] || exit 0
-      # base url: local models cache when present (host), else models.dev (container
-      # has no cache). Cannot resolve it -> skip the check rather than invent a verdict.
-      api=$(jq -r --arg p "$provider" '.[$p].api // empty' \
-            "$HOME/.cache/opencode/models.json" 2>/dev/null)
-      [ -n "$api" ] || api=$(curl -sS -m 15 https://models.dev/api.json 2>/dev/null \
-            | jq -r --arg p "$provider" '.[$p].api // empty')
-      [ -n "$api" ] || exit 0
-      body=$(jq -nc --arg m "$model_id" \
-             '{model:$m,messages:[{role:"user",content:"ping"}],max_tokens:1}')
-      out=$(mktemp)
-      code=$(curl -sS -m 20 -o "$out" -w '%{http_code}' \
-             -H 'Content-Type: application/json' -H "Authorization: Bearer $key" \
-             -d "$body" "${api%/}/chat/completions" 2>/dev/null)
-      if [ "$code" = 200 ]; then rm -f "$out"; exit 0; fi
-      why=$(jq -r '.error.message // empty' "$out" 2>/dev/null); rm -f "$out"
-      echo "${MEDULLA_INPUT_SLUG:-panelist} sits this round out: $provider answered HTTP $code${why:+ - $why}" >&2
-      exit 1
+    # A dead provider must not cost the panel half an hour of silence. The check is a
+    # script, not an inline block: it has to validate a download and its JSON before
+    # trusting one field out of it, and the six lines of awk-grade shell it used to be
+    # failed open on every one of those steps.
+    pre: bash "$MEDULLA_WORKFLOW_DIR/scripts/quota_precheck.sh"
     agent:
       harness: "{{input.harness}}"
       model: "{{input.model}}"
