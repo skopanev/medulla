@@ -63,3 +63,17 @@ def test_undeclared_timeout_uses_environment_then_builtin_default(
         monkeypatch.delenv("MEDULLA_IDLE_OUTPUT_S")
         importlib.reload(procrun)
     assert procrun.IDLE_OUTPUT_S == 900
+
+
+def test_the_spar_panel_declares_its_own_threshold():
+    """Live: qwen at xhigh printed one line and the 900s default killed it, twice, in a
+    round the other four finished — a reasoning panelist is silent between writes for
+    longer than an ordinary agent. The panel says so itself instead of the default
+    moving for every workflow that inherits it."""
+    from pathlib import Path
+
+    import yaml as pyyaml
+    yml = Path(__file__).resolve().parent.parent / "workflows/spar/workflow.yaml"
+    panel = pyyaml.safe_load(yml.read_text())["nodes"]["panel"]
+    assert panel["agent"]["idle_timeout"] == 1800
+    assert procrun.IDLE_OUTPUT_S == 900, "the engine default is not the panel's business"

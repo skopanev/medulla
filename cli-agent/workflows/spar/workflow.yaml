@@ -125,6 +125,12 @@ nodes:
       harness: "{{input.harness}}"
       model: "{{input.model}}"
       effort: "{{input.effort:-}}"
+      # A reasoning panelist thinks for a long time between writes, and the engine's
+      # 900s silence default is calibrated for ordinary agents, not for this. Live:
+      # qwen at xhigh printed one line and was killed at 900s of silence, twice, after
+      # 1819 seconds of a round the other four finished. The panel declares its own
+      # threshold rather than moving the default that every other workflow inherits.
+      idle_timeout: 1800
     prompt: |
       {{file:prompts/spar.md}}
 
