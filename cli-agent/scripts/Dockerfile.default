@@ -37,7 +37,17 @@ USER medulla
 RUN curl -fsSL https://antigravity.google/cli/install.sh | bash
 
 # medulla
-RUN pipx install git+https://github.com/skopanev/medulla.git
+ARG MEDULLA_VERSION
+ARG MEDULLA_REF
+RUN test -n "$MEDULLA_VERSION" \
+    && test -n "$MEDULLA_REF" \
+    && pipx install "git+https://github.com/skopanev/medulla.git@${MEDULLA_REF}" \
+    && mkdir -p /home/medulla/.medulla/engine \
+    && printf '%s\n' "$MEDULLA_REF" > /home/medulla/.medulla/engine/INSTALLED_COMMIT \
+    && installed="$(/home/medulla/.local/bin/medulla --version | awk '{print $2}')" \
+    && test "$installed" = "$MEDULLA_VERSION"
+LABEL org.medulla.engine-version="$MEDULLA_VERSION"
+LABEL org.medulla.engine-ref="$MEDULLA_REF"
 ENV PATH="/home/medulla/.local/bin:$PATH"
 
 ENV MEDULLA_DOCKER=1

@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from dockerlib import image_identity
+
 SCRIPT_DIR = Path(os.path.realpath(__file__)).parent.parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 try:
@@ -20,9 +22,6 @@ try:
 except ImportError:                                   # running from a source checkout
     sys.path.insert(0, str(PROJECT_ROOT))
     from medulla.v2.workflow_path import resolve_workflow_yaml, workflow_dir_for
-
-DEFAULT_IMAGE = "medulla:latest"       # unchanged from before the split
-
 
 def _config_yaml(d: Path) -> Path:
     """Which yaml `-w` means. Delegates to the engine's resolver so both processes
@@ -79,14 +78,17 @@ def resolve_dockerfile(workflow: str | None, cli_vars: dict) -> Path:
     return p if p.is_absolute() else (workflow_dir / p)
 
 
-def image_tag_for(workflow: str, dockerfile: Path) -> str:
-    """Per-workflow, content-addressed image tag: medulla-<name>:<sha of Dockerfile>.
+def image_tag_for(
+    workflow: str,
+    dockerfile: Path,
+    identity: tuple[str, str] | None = None,
+) -> str:
+    """Per-workflow tag: medulla-<name>:<sha of Dockerfile + engine version>.
 
-    Workflows with different Dockerfiles must never share a tag (the first
-    builder would silently win), and editing a Dockerfile must trigger a
-    rebuild without a manual --build (a new hash is an absent image)."""
-    import hashlib
-    digest = hashlib.sha256(dockerfile.read_bytes()).hexdigest()[:12]
+    A Dockerfile edit or engine release must trigger a rebuild without manual
+    --build; either change produces an absent tag rather than silently reusing a
+    stale engine."""
+    digest = image_identity.tag_digest(dockerfile, identity)
     # A yaml path drops its extension (`-w brain/resolve.yaml` must not tag the image
     # "medulla-resolve.yaml:<sha>"); a DIRECTORY keeps its full name, or a dir called
     # "my.workflows" would silently tag as "my".
@@ -119,13 +121,21 @@ def image_home(image, fallback):
     return fallback
 
 
-def ensure_image(image, build, workflow, cli_vars, dockerfile=None, ready_image=False):
+def ensure_image(
+    image, build, workflow, cli_vars, dockerfile=None, ready_image=False, identity=None,
+):
+    if ready_image and build:
+        raise SystemExit("error: --build is invalid with IMAGE; remove IMAGE to build a managed image")
+    expected, expected_ref = identity or (None, None)
+    if dockerfile is not None and identity is None:
+        expected, expected_ref = image_identity.engine_identity()
     if not build:
-        result = subprocess.run(
-            ["docker", "image", "inspect", image],
-            capture_output=True, check=False,
-        )
-        if result.returncode == 0:
+        exists = image_identity.image_exists(image)
+        if exists is None:
+            return 1
+        if exists:
+            if expected is not None and not image_identity.verify(image, expected, expected_ref):
+                return 1
             return 0
         if ready_image:
             # IMAGE is a ready tag: never build it from an unrelated Dockerfile
@@ -134,6 +144,8 @@ def ensure_image(image, build, workflow, cli_vars, dockerfile=None, ready_image=
         print(f"image '{image}' not found, building...", file=sys.stderr)
 
     dockerfile = dockerfile or resolve_dockerfile(workflow, cli_vars)
+    if expected is None:
+        expected, expected_ref = image_identity.engine_identity()
     if not dockerfile.is_file():
         raise SystemExit(f"error: Dockerfile not found: {dockerfile}")
     context = Path.cwd()
@@ -142,6 +154,7 @@ def ensure_image(image, build, workflow, cli_vars, dockerfile=None, ready_image=
            "--build-arg", f"USER_UID={os.getuid()}",
            "-f", str(dockerfile),
            "-t", image]
+    cmd.extend(image_identity.build_flags(expected, expected_ref))
     if build:
         cmd.append("--no-cache")
     cmd.append(str(context))
@@ -180,6 +193,8 @@ def ensure_image(image, build, workflow, cli_vars, dockerfile=None, ready_image=
     if proc.returncode != 0:
         print("docker build failed", file=sys.stderr)
         return proc.returncode
+    if not image_identity.verify(image, expected, expected_ref):
+        return 1
     prune_old_images(image)
     return proc.returncode
 
@@ -223,5 +238,3 @@ def prune_old_images(image: str, keep: int = KEEP_IMAGES) -> None:
                              capture_output=True, text=True, check=False)
         if res.returncode == 0:
             print(f"  removed older image {tag}", file=sys.stderr)
-
-

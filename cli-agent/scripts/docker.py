@@ -54,6 +54,7 @@ if str(SCRIPT_DIR) not in sys.path:
 from dockerlib import (
     announce,  # noqa: E402
     cliargs,  # noqa: E402
+    image_identity,  # noqa: E402
     mountpoints,  # noqa: E402
 )
 from dockerlib import env as dockerenv  # noqa: E402
@@ -68,7 +69,6 @@ from dockerlib.env import (  # noqa: E402
     _collect_dotenv,
 )
 from dockerlib.image import (  # noqa: E402
-    DEFAULT_IMAGE,
     _config_yaml,
     ensure_image,
     image_home,
@@ -127,6 +127,7 @@ def main():
     # Precedence: MEDULLA_IMAGE env > --var IMAGE > vars.IMAGE >
     #             (--var DOCKERFILE > vars.DOCKERFILE > packaged default) build
     dockerfile = None
+    identity = None
     workflow_vars = read_workflow_vars(workflow)
     image = (os.environ.get("MEDULLA_IMAGE")
              or cli_vars.get("IMAGE")
@@ -136,12 +137,13 @@ def main():
             dockerfile = resolve_dockerfile(workflow, cli_vars)
             if not dockerfile.is_file():
                 raise SystemExit(f"error: Dockerfile not found: {dockerfile}")
-            image = image_tag_for(workflow, dockerfile)
+            identity = image_identity.engine_identity()
+            image = image_tag_for(workflow, dockerfile, identity)
         else:
-            image = DEFAULT_IMAGE
+            raise SystemExit("error: -w/--workflow required with --docker unless IMAGE is set")
 
     rc = ensure_image(image, build, workflow, cli_vars, dockerfile=dockerfile,
-                      ready_image=dockerfile is None and workflow is not None)
+                      ready_image=dockerfile is None, identity=identity)
     if rc != 0:
         return rc
 

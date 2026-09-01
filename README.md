@@ -381,7 +381,9 @@ nodes:
 
 `medulla --docker -w <dir>` re-runs the workflow inside its image; `scripts/docker.py` owns mounts and credential forwarding, `--build` forces a rebuild, `--mount <dir>` / `--mount-rw <dir>` add extra mounts under `/workspace/<name>`.
 
-Image resolution: `MEDULLA_IMAGE` env → `--var IMAGE` → `vars.IMAGE` (a ready tag: pulled, never built) → otherwise **build** from `--var DOCKERFILE` → `vars.DOCKERFILE` → the packaged default (all four harnesses). Built tags are per-workflow and content-addressed (`medulla-<name>:<sha of Dockerfile>`) — workflows never share a tag by accident, and editing a Dockerfile rebuilds automatically.
+Image resolution: `MEDULLA_IMAGE` env → `--var IMAGE` → `vars.IMAGE` (a caller-owned ready tag: pulled and intentionally unverified) → otherwise **build** from `--var DOCKERFILE` → `vars.DOCKERFILE` → the packaged default (all four harnesses). Runner-built tags are per-workflow and content-addressed (`medulla-<name>:<sha of Dockerfile + installed Medulla version + immutable git commit>`) — a Dockerfile edit or engine release rebuilds automatically. Before launching a runner-built image, Medulla checks its identity labels and requires the installed `medulla --version` to report the same version and commit; a stale image fails instead of upgrading over the network or silently running old code.
+
+A custom `DOCKERFILE` receives `MEDULLA_VERSION` and `MEDULLA_REF` build args. It must install that ref, set `org.medulla.engine-version` / `org.medulla.engine-ref` labels, and write the ref to `~/.medulla/engine/INSTALLED_COMMIT`; use `vars.IMAGE` when an intentionally pinned engine should differ from the host. Source checkouts use committed `HEAD` as their identity, so commit and push changes before building. `MEDULLA_UPGRADE_ON_START` was removed in 4.58.2 because startup no longer performs an upgrade.
 
 ### Container policy: the `docker:` block
 
