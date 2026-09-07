@@ -74,6 +74,11 @@ FIRST_OUTPUT_S = _env_seconds("MEDULLA_FIRST_OUTPUT_S", 60)
 # 900 still catches the 10-14 minute silences this exists for.
 IDLE_OUTPUT_S = _env_seconds("MEDULLA_IDLE_OUTPUT_S", 900)  # agent field overrides
 CLEANUP_GRACE_S = 3
+# How long a Ctrl-C may take: TERM, then this long, then KILL, then this long
+# again before the child is handed to the reaper. Named because "how long does
+# stopping take" was previously answerable only by reading two bare 2s in the
+# interrupt path — and an unnamed budget is one nobody can hold you to.
+INTERRUPT_GRACE_S = 2
 
 
 def run(
@@ -193,10 +198,10 @@ def run(
         # KeyboardInterrupt or anything else: the child MUST NOT outlive us
         _kill_group(proc, signal.SIGTERM, pgid)
         remaining = max(0, deadline - time.monotonic())
-        if remaining == 0 or not _wait_for_exit(proc, min(2, remaining)):
+        if remaining == 0 or not _wait_for_exit(proc, min(INTERRUPT_GRACE_S, remaining)):
             _kill_group(proc, signal.SIGKILL, pgid)
             remaining = max(0, deadline - time.monotonic())
-            if not _wait_for_exit(proc, min(2, remaining)):
+            if not _wait_for_exit(proc, min(INTERRUPT_GRACE_S, remaining)):
                 reaper_started = _defer_reap(proc)
         raise
     finally:
@@ -209,7 +214,17 @@ def run(
                     hard_deadline if hard_deadline is not None else float("inf"),
                 )
                 drain_deadline = time.monotonic() if exceptional else drain_limit
-                pumps_alive = capture.finish(drain_deadline) if capture else False
+                pumps_alive = True     # unknown until finish returns: assume alive
+                try:
+                    pumps_alive = capture.finish(drain_deadline) if capture else False
+                finally:
+                    # The terminal group KILL happens even if an interrupt lands
+                    # INSIDE finish. It used to sit at the end of this block, so a
+                    # Ctrl-C in that window skipped it and the child outlived the
+                    # stop — the very thing the docker layer prevents from outside
+                    # and the engine must guarantee from inside.
+                    if not reaper_started and (pumps_alive or proc.poll() is None):
+                        _kill_group(proc, signal.SIGKILL, pgid)
                 if proc.stdin is not None:
                     # stdin is closed HERE, always, and the feed thread is joined.
                     # Two leaks met at this line. If the capture failed before the
@@ -236,8 +251,6 @@ def run(
                             pipe.close()
                     if log_file:
                         log_file.close()
-                if not reaper_started and (pumps_alive or proc.poll() is None):
-                    _kill_group(proc, signal.SIGKILL, pgid)
         finally:
             if registered:
                 with _LIVE_LOCK:
@@ -254,8 +267,16 @@ def _kill_group(proc: subprocess.Popen, sig, pgid: int | None = None) -> None:
     try:
         os.killpg(pgid if pgid is not None else os.getpgid(proc.pid), sig)
     except Exception:
+        # os.kill, not proc.send_signal: this runs inside the SIGINT/SIGTERM
+        # handler, and send_signal calls poll() -> waitpid on the way. A handler
+        # must stay minimal, and reaping process state from inside one touches
+        # exactly the state that is changing underneath it. Reading .returncode
+        # is an attribute read, not a wait, and it keeps send_signal's real
+        # guarantee: never signal a pid that has already been reaped and may
+        # since belong to somebody else.
         try:
-            proc.send_signal(sig)
+            if proc.returncode is None:
+                os.kill(proc.pid, sig)
         except Exception:
             pass
 

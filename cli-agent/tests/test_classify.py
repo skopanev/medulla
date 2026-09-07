@@ -139,3 +139,21 @@ def test_shell_never_switches_to_fallback():
 def test_attempt_budget_boundaries(attempt, max_attempts, expect):
     m = next_move(RETRY, "agent", "primary", attempt, max_attempts, True)
     assert m.move is expect
+
+
+# ── the body's cause of death outranks the hook's veto (medulla-1bzrxn2wwl) ──
+
+def test_a_wall_clock_kill_is_not_reported_as_a_post_veto():
+    """Measured across the archive: 704 manifests, 3465 rows, SIX inputs written
+    as reason=post while timed_out=True and the message beside them said, word for
+    word, `body died: rc=124`. For scale, honestly-recorded timeouts number five —
+    the masking was MORE common than the correct record. Any aggregation by reason
+    reads a false picture, including the one used to measure a previous fix."""
+    d = classify_attempt("agent", 124, True, None, 1, None, False)
+    assert d.verdict is Verdict.RETRY
+    assert d.failure_class == "timeout", d.failure_class
+
+
+def test_a_post_veto_without_a_timeout_is_still_a_post_veto():
+    d = classify_attempt("agent", 0, False, None, 1, None, False)
+    assert d.verdict is Verdict.RETRY and d.failure_class == "post"

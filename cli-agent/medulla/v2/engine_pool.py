@@ -199,7 +199,21 @@ class PoolMixin(InputsMixin):
                         row = _thread_refusal_row(i, v, exc)
                         self.store.manifest_append(manifest_path, row)
                         rows.append(row)
-                for fut in concurrent.futures.as_completed(futures):
+                try:
+                    completed = list(concurrent.futures.as_completed(futures))
+                except BaseException:
+                    # Leaving the executor waits for the queue AND RUNS IT: a pool
+                    # told to stop began NEW agent attempts while stopping. On a
+                    # five-model panel that is fresh paid requests with side
+                    # effects, while the owner watches a terminal that will not
+                    # answer and presses Ctrl-C again. Cancel what has not started;
+                    # those inputs get no manifest row at all, so resume re-runs
+                    # them rather than inheriting a failure they never had.
+                    for pending in futures:
+                        pending.cancel()
+                    pool_exec.shutdown(wait=False, cancel_futures=True)
+                    raise
+                for fut in completed:
                     try:
                         row = fut.result()
                     except EngineCrash as crash:

@@ -307,3 +307,35 @@ def test_the_feed_thread_does_not_outlive_the_run(tmp_path, monkeypatch):
     # run owns its thread, not that the thread dies soon enough to go unnoticed.
     assert th.active_count() <= before, "the feed thread outlived the run"
     assert born[0].stdin.closed, "the descriptor outlived the run"
+
+
+def test_the_signal_handler_path_never_reaps():
+    """`_graceful` (engine_run) calls kill_live_processes -> _kill_group while the
+    handler is on the stack. Popen.send_signal calls poll() -> waitpid on its way,
+    and a handler must not reap process state that is changing beneath it. Asserted
+    on the source because the race it prevents cannot be scheduled on demand."""
+    import inspect
+    src = inspect.getsource(procrun._kill_group)
+    calls = [l for l in src.splitlines()
+             if "send_signal(" in l and not l.lstrip().startswith("#")]
+    assert not calls, f"the handler path must not reach waitpid: {calls}"
+    assert "os.kill(" in src
+    assert "returncode is None" in src, "still refuse to signal a reaped pid"
+
+
+def test_the_interrupt_budget_is_named_and_bounded(tmp_path, monkeypatch):
+    """How long a Ctrl-C takes used to be answerable only by reading two bare 2s.
+    A budget nobody names is a budget nobody can hold you to."""
+    assert procrun.INTERRUPT_GRACE_S == 2
+    monkeypatch.setattr(procrun, "INTERRUPT_GRACE_S", 0.2)
+
+    def interrupt(*_args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(procrun, "_watch_output", interrupt)
+    started = time.monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        procrun.run(["bash", "-c", "trap '' TERM; while :; do sleep 1; done"],
+                    cwd=tmp_path, timeout_s=60, watch_output=True, idle_timeout_s=0.1)
+    elapsed = time.monotonic() - started
+    assert elapsed < 4 * 0.2 + 1, f"stopping took {elapsed:.2f}s"

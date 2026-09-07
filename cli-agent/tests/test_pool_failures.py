@@ -4,6 +4,7 @@ A render error, an exhausted retry, a post hook that refuses — each belongs to
 input. min_success exists precisely so a panel survives a broken model.
 """
 import json
+import pytest
 
 from conftest import fake_script, read_run
 from conftest import write_workflow as setup
@@ -205,3 +206,43 @@ nodes:
     assert len(failed) == 1, failed
     assert failed[0]["reason"] == "threads", failed[0]["reason"]
     assert sum(1 for r in rows.values() if r["ok"]) == 2
+
+
+def test_a_stopped_pool_cancels_its_queue_instead_of_running_it(tmp_path, monkeypatch):
+    """Leaving the executor waits for the queue AND RUNS IT. A pool told to stop
+    started NEW agent attempts while stopping: the panel reproduction saw inputs 3
+    and 4 begin after the signal. On a five-model panel that is fresh paid requests
+    with side effects, while the owner stares at a terminal that will not answer
+    and presses Ctrl-C again."""
+    import concurrent.futures as cf
+
+    started = tmp_path / "started.log"
+    real_as_completed = cf.as_completed
+
+    def interrupt_after_one(futures, *args, **kwargs):
+        for i, fut in enumerate(real_as_completed(futures, *args, **kwargs)):
+            yield fut
+            if i == 0:
+                raise KeyboardInterrupt
+
+    monkeypatch.setattr(cf, "as_completed", interrupt_after_one)
+
+    text = f"""
+version: "2"
+start: p
+nodes:
+  p:
+    inputs: [a, b, c, d, e, f, g, h, i, j]
+    max_parallel: 2
+    min_success: 1
+    shell: 'sleep 0.1; echo {{{{input}}}} >> {started}; echo {{{{input}}}}'
+    on_signal: {{__done__: __exit_ok__}}
+"""
+    path, work = setup(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 130
+    ran = started.read_text().split() if started.exists() else []
+    # Two were in flight when the signal arrived, and a freed worker can pick up
+    # one more in the instant before the cancellation lands — that race is inherent
+    # to a running executor. What must not happen is the QUEUE being drained: ten
+    # inputs used to run all ten. Three is the ceiling this bound proves.
+    assert len(ran) <= 3, f"the queue kept running after the stop: {ran}"

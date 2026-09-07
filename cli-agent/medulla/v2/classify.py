@@ -48,7 +48,14 @@ def classify_attempt(
             return AttemptDecision(Verdict.SILENT)   # artifact truth beats body wall
         return AttemptDecision(Verdict.RETRY, failure_class="timeout")
     if post_rc is not None and post_rc != 0:
-        return AttemptDecision(Verdict.RETRY, failure_class="post")   # post veto
+        # A body killed by the wall did not fail its hook — it never finished for
+        # the hook to judge. Reporting the veto as the cause replaces the reason
+        # with a symptom, and resume and diagnosis both read that field. Measured:
+        # six archive rows said reason=post at timed_out=True while their own
+        # message said `body died: rc=124`, against five honestly recorded
+        # timeouts. The post failure itself is not lost — it travels in message.
+        return AttemptDecision(Verdict.RETRY,
+                               failure_class="timeout" if timed_out else "post")
     if post_rc == 0 and post_signal is not None:
         return AttemptDecision(Verdict.ROUTE, post_signal)   # post override
     if body_signal is not None:
