@@ -103,3 +103,48 @@ def test_the_workflow_ships_exactly_one_launcher():
     executable = sorted(p.name for p in scripts.iterdir()
                         if p.is_file() and os.access(p, os.X_OK))
     assert executable == ["spar-run.sh"], executable
+
+
+def _start(question, *extra):
+    """Run `start` with medulla absent from PATH: preflight dies right after the
+    litter guard, so the guard's verdict is observable without a real panel — and
+    without the docker image build that a live start triggers."""
+    env = {**os.environ, "PATH": "/bin:/usr/bin"}   # bash and git yes, medulla no
+    res = subprocess.run(["/bin/bash", str(LAUNCHER), "start", str(question), *extra],
+                         capture_output=True, text=True, cwd=ROOT, env=env, check=False)
+    return res.returncode, res.stdout + res.stderr
+
+
+def test_start_refuses_a_question_file_left_in_the_tree(tmp_path):
+    """`start` copies the question into the run's box, so the caller's file is dead
+    weight the moment the panel begins — and left in a repo it stays for months. One
+    workspace collected 71 stray panel-question/panel-handout/BRIEF files, 292 MB, in
+    its root. The skill asks for $TMPDIR; this is what makes it true."""
+    litter = ROOT / "test-question-litter.md"
+    litter.write_text("brief\n")
+    try:
+        rc, out = _start(litter)
+    finally:
+        litter.unlink()
+    assert rc != 0, out
+    assert "mktemp" in out, "the refusal must say where the brief belongs"
+    assert "--allow-outside-tmp" in out, "a human with a hand-written brief needs the door"
+
+
+def test_start_accepts_a_question_under_tmp(tmp_path):
+    """pytest's tmp_path lives under /var/folders on macOS and /tmp on Linux — both
+    are canonical temp roots. A guard that rejected them would block the very place
+    the skill now tells every caller to write."""
+    q = tmp_path / "q.md"
+    q.write_text("brief\n")
+    rc, out = _start(q)
+    assert "refusing to litter" not in out, out
+    assert "medulla is not installed" in out, "the guard must pass before preflight"
+
+
+def test_the_override_flag_is_not_passed_through_to_medulla():
+    """--allow-outside-tmp is the launcher's own; medulla would reject it as unknown."""
+    src = LAUNCHER.read_text()
+    assert "--allow-outside-tmp" in src
+    body = src.split("cmd_start() {")[1]
+    assert "rotate each argument exactly once" in body, "the flag must be stripped, not forwarded"

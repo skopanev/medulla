@@ -67,8 +67,9 @@ Cover:
 
 # Run the panel
 
-    medulla launch spar start question.md                 # prints the run dir
-    medulla launch spar start question.md --mount ../repo # repeatable, read-only
+    q=$(mktemp -t spar-q).md                              # the brief lives in /tmp
+    medulla launch spar start "$q"                        # prints the run dir
+    medulla launch spar start "$q" --mount ../repo        # repeatable, read-only
     medulla launch spar wait  <run-dir>                   # blocks until it finishes
 
 Call it through `medulla launch`, never by path. The script is a FILE, so a relative
@@ -78,6 +79,15 @@ is "no such file or directory". `medulla launch spar` finds it by NAME through t
 cascade `-w` uses, from any directory. Write your prompt to a file and hand it that
 file; nothing about the question passes through a shell argument, so quoting, `$`,
 backticks and length stop mattering.
+
+**Write that file under `$TMPDIR` — never in the repo, never in `$HOME`.** `start`
+copies the question into the run's own box before the panel ever reads it, so the file
+you wrote is dead weight one second later. Left in the tree it is litter that outlives
+the round by months: one workspace here accumulated 71 stray `panel-question-*.md`,
+`panel-handout-*.diff` and `BRIEF.md` files, 292 MB of them, in its root. `start`
+REFUSES a question file outside `$TMPDIR` for exactly this reason. The same goes for
+anything else you generate for the round — diffs, handouts, extracted scopes: they are
+inputs to one panel, not artifacts of the project, and `mktemp -d` is where they go.
 
 It is a script and not a command for you to reproduce because this repo's own
 AGENTS.md says LLMs cannot be trusted to run exact commands — and the contract it

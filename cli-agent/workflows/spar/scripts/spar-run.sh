@@ -87,12 +87,50 @@ force_repo_root() {
     fi          # not a git repo: the caller's directory is the only root there is
 }
 
+in_tmp() {
+    # Canonical prefixes only: on macOS /tmp and $TMPDIR are symlinks into /private,
+    # and a caller who passes /tmp/q.md must not be judged by the string they typed.
+    case "$1" in
+        /tmp/*|/private/tmp/*|/var/folders/*|/private/var/folders/*) return 0 ;;
+    esac
+    [ -n "${TMPDIR:-}" ] || return 1
+    local t; t=$(cd "$TMPDIR" 2>/dev/null && pwd -P) || return 1
+    case "$1" in "$t"/*) return 0 ;; esac
+    return 1
+}
+
 cmd_start() {
     local question="${1:-}"; shift || true
     [ -n "$question" ] || die "usage: spar-run.sh start <question-file> [--mount ../repo]..."
     [ -f "$question" ] || die "question file not found: $question"
     [ -s "$question" ] || die "question file is empty: $question"
-    question=$(cd "$(dirname "$question")" && pwd)/$(basename "$question")   # before cd
+    question=$(cd "$(dirname "$question")" && pwd -P)/$(basename "$question")   # before cd
+
+    # The question is COPIED into the run's box below, so the caller's file is dead
+    # weight one second after this returns — and left in a repo it is litter that
+    # outlives the round by months. One workspace collected 71 stray panel-question,
+    # panel-handout and BRIEF files, 292 MB, in its root before anyone noticed. Asking
+    # for /tmp in the skill is a request; this is the guarantee. A human with a brief
+    # they wrote by hand and want to keep passes --allow-outside-tmp.
+    local allow_outside=no arg n=$#
+    while [ "$n" -gt 0 ]; do             # rotate each argument exactly once
+        arg=$1; shift; n=$((n - 1))
+        case "$arg" in
+            --allow-outside-tmp) allow_outside=yes ;;
+            *) set -- "$@" "$arg" ;;
+        esac
+    done
+    if [ "$allow_outside" = no ] && ! in_tmp "$question"; then
+        echo "spar-run: the question file lives outside \$TMPDIR:" >&2
+        echo "  $question" >&2
+        echo "spar-run: start COPIES the question into the run's own box, so this file" >&2
+        echo "spar-run: is useless the moment the panel starts — and it stays behind in" >&2
+        echo "spar-run: the tree forever. Write the brief (and any diff or handout you" >&2
+        echo "spar-run: generate for the round) under a mktemp path instead:" >&2
+        echo "spar-run:   q=\$(mktemp -t spar-q).md && ... && medulla launch spar start \"\$q\"" >&2
+        die "refusing to litter; pass --allow-outside-tmp to override"
+    fi
+
     force_repo_root
     preflight
 
