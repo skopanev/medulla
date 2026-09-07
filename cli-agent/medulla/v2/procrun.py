@@ -156,7 +156,7 @@ def run(
             first_output = min(FIRST_OUTPUT_S, idle) if idle_timeout_s is not None \
                 else FIRST_OUTPUT_S
             went_quiet = _watch_output(
-                proc, capture.out_buf, capture.err_buf, deadline, idle, first_output,
+                proc, capture, deadline, idle, first_output,
             )
         if went_quiet:
             raise subprocess.TimeoutExpired(argv, timeout_s)

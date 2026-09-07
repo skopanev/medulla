@@ -32,7 +32,10 @@ def test_a_talking_then_silent_agent_is_killed_and_says_why(tmp_path):
     assert res.timed_out
     assert res.rc == 124
     assert "silent for 3s" in res.killed_because, res.killed_because
-    assert "2 lines" in res.killed_because, "say how much it had produced"
+    # Bytes, not lines: the line count was the defect. The capture appends only
+    # complete lines, so a body writing without newlines showed as zero and was
+    # killed as mute while its output sat in stdout. "one\ntwo\n" is 8 bytes.
+    assert "8 bytes" in res.killed_because, "say how much it had produced"
 
 
 def test_an_agent_that_never_speaks_is_named_differently(tmp_path):
@@ -245,3 +248,33 @@ def test_a_bad_override_falls_back_to_the_default():
             os.environ.pop("MEDULLA_IDLE_OUTPUT_S", None)
             import importlib
             importlib.reload(procrun)
+
+
+def test_bytes_without_a_newline_count_as_output(tmp_path):
+    """The watchdog used to count list items, and the capture only appends COMPLETE
+    lines — an unterminated tail sits in the decoder state. So a body streaming
+    reasoning tokens, a large JSON blob or a \\r progress bar wrote thousands of
+    bytes and the watchdog saw a silent process. Measured live: glm5 wrote 5008
+    bytes without a newline and was killed at 60s as "no output at all", with those
+    bytes present in result.stdout. The manifest stated a falsehood."""
+    started = time.monotonic()
+    res = procrun.run(
+        "for i in $(seq 20); do printf 'chunk'; sleep 0.1; done; echo ' done'",
+        cwd=tmp_path, timeout_s=10, watch_output=True, idle_timeout_s=0.5,
+    )
+    elapsed = time.monotonic() - started
+    assert not res.timed_out, f"killed after {elapsed:.2f}s: {res.killed_because}"
+    assert "chunk" in res.stdout
+    assert res.stdout.count("chunk") == 20
+
+
+def test_a_body_that_goes_quiet_after_partial_bytes_reports_bytes(tmp_path):
+    """The counterpart: real silence must still be caught, and the reason must name
+    what was actually measured rather than a line count that was never the basis."""
+    res = procrun.run(
+        "printf 'partial'; sleep 30",
+        cwd=tmp_path, timeout_s=10, watch_output=True, idle_timeout_s=0.5,
+    )
+    assert res.timed_out
+    assert "silent for 0.5s" in res.killed_because
+    assert "0 bytes" not in res.killed_because, res.killed_because

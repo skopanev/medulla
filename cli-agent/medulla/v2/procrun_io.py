@@ -24,22 +24,30 @@ def defer_reap(proc) -> bool:
     return True
 
 
-def watch_output(proc, out_buf: list, err_buf: list, deadline: float,
+def watch_output(proc, capture, deadline: float,
                  idle_timeout_s: float, first_output_s: float) -> str:
-    """Wait for an agent CLI, returning why its output became unhealthy."""
+    """Wait for an agent CLI, returning why its output became unhealthy.
+
+    Measured in BYTES READ, not in captured lines. The capture appends only
+    COMPLETE lines — an unterminated tail waits in the decoder state — so a body
+    streaming reasoning tokens, a large JSON blob or a \r progress bar looked
+    perfectly silent to a watchdog counting list items. Live: 5008 bytes without a
+    newline, killed at 60s as "no output at all", those bytes sitting in stdout the
+    whole time. The mirror was just as bad: blank lines every 0.05s read as life.
+    """
     seen = 0
     last = time.monotonic()
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             return ""
-        now_seen = len(out_buf) + len(err_buf)
+        now_seen = capture.bytes_seen
         if now_seen > seen:
             seen, last = now_seen, time.monotonic()
         quiet = time.monotonic() - last
         if seen == 0 and quiet > first_output_s:
             return f"no output at all in {first_output_s}s"
         if seen > 0 and quiet > idle_timeout_s:
-            return f"silent for {idle_timeout_s}s after {seen} lines"
+            return f"silent for {idle_timeout_s}s after {seen} bytes"
         time.sleep(min(0.25, max(0, deadline - time.monotonic())))
     return ""
 
@@ -50,6 +58,10 @@ class OutputCapture:
     def __init__(self, proc, log_file, echo) -> None:
         self.out_buf: list[str] = []
         self.err_buf: list[str] = []
+        # Written only by the capture thread, read by the watchdog: one writer, so
+        # a plain int needs no lock. It counts bytes off the pipe, which is the
+        # only evidence that the child is alive — a line is a formatting accident.
+        self.bytes_seen = 0
         self._log_file = log_file
         self._echo = echo
         self._log_items = queue.SimpleQueue()
@@ -170,6 +182,7 @@ class OutputCapture:
                 except (BlockingIOError, OSError):
                     data = b""
                 if data:
+                    self.bytes_seen += len(data)
                     self._emit_text(state, state[3].decode(data))
                 self._emit_text(
                     state, state[3].decode(b"", final=True), final=True,
@@ -187,6 +200,7 @@ class OutputCapture:
         except BlockingIOError:
             return
         if data:
+            self.bytes_seen += len(data)
             self._emit_text(state, state[3].decode(data))
             return
         self._emit_text(state, state[3].decode(b"", final=True), final=True)
