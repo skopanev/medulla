@@ -85,9 +85,17 @@ copies the question into the run's own box before the panel ever reads it, so th
 you wrote is dead weight one second later. Left in the tree it is litter that outlives
 the round by months: one workspace here accumulated 71 stray `panel-question-*.md`,
 `panel-handout-*.diff` and `BRIEF.md` files, 292 MB of them, in its root. `start`
-REFUSES a question file outside `$TMPDIR` for exactly this reason. The same goes for
-anything else you generate for the round — diffs, handouts, extracted scopes: they are
-inputs to one panel, not artifacts of the project, and `mktemp -d` is where they go.
+REFUSES a question file outside `$TMPDIR` for exactly this reason.
+
+**But the question is the only file `start` copies.** Anything the panel must READ for
+itself — a diff, a handout, an extracted scope, a `--mount`ed tree — has to sit on a
+path the container runtime actually shares. On this machine Colima shares
+`/Users/skopanev` and `/Volumes/hdd`, and NEITHER `/tmp` nor `$TMPDIR`
+(`/var/folders/...`) is among them: Docker binds a missing source as an EMPTY directory
+and says nothing, so the panel reads zero bytes and answers about nothing. A live round
+lost its supplemental materials exactly this way. Put readable material under a shared
+path — a scratch directory inside the repo's parent, or on the HDD — and keep only the
+question itself in `$TMPDIR`.
 
 It is a script and not a command for you to reproduce because this repo's own
 AGENTS.md says LLMs cannot be trusted to run exact commands — and the contract it

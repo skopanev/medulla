@@ -136,6 +136,9 @@ cmd_start() {
 
     local box; box=$(box_for "$PWD")
     mkdir -p "$box" || die "cannot create $box"
+    # The engine prints physical paths. Resolve after mkdir so a symlinked run
+    # root (or a relative override) is compared using the same spelling below.
+    box=$(cd "$box" && pwd -P) || die "cannot resolve $box"
     # A fixed name races: fire-and-forget is the whole design, and a second start
     # before the first medulla read its var-file would silently swap the question.
     # One id per run, for the question AND the logs. A shared run.log is worse than it
