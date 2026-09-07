@@ -20,7 +20,6 @@ def _escaped_child_script() -> str:
 
 
 def test_successful_body_uses_one_drain_cap_for_both_pipes(tmp_path, monkeypatch):
-    monkeypatch.setattr(procrun, "PIPE_DRAIN_S", 0.2)
     started = time.monotonic()
     res = procrun.run(
         [sys.executable, "-c", _escaped_child_script()],
@@ -180,7 +179,6 @@ def test_blocked_log_cannot_hide_routing_signal(tmp_path, monkeypatch):
         def close(self):
             return None
 
-    monkeypatch.setattr(procrun, "PIPE_DRAIN_S", 0.2)
     monkeypatch.setattr(
         builtins, "open",
         lambda path, *args, **kwargs: SlowLog() if path == log_path
@@ -216,7 +214,6 @@ def test_escaped_pipe_holder_does_not_retain_log(tmp_path, monkeypatch):
         def close(self):
             closed.set()
 
-    monkeypatch.setattr(procrun, "PIPE_DRAIN_S", 0.2)
     monkeypatch.setattr(
         builtins, "open",
         lambda path, *args, **kwargs: TrackingLog() if path == log_path

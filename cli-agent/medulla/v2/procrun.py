@@ -73,7 +73,6 @@ FIRST_OUTPUT_S = _env_seconds("MEDULLA_FIRST_OUTPUT_S", 60)
 # exactly 300s of thought. A model deliberating on a hard review is not a dead one.
 # 900 still catches the 10-14 minute silences this exists for.
 IDLE_OUTPUT_S = _env_seconds("MEDULLA_IDLE_OUTPUT_S", 900)  # agent field overrides
-PIPE_DRAIN_S = 60
 CLEANUP_GRACE_S = 3
 
 
@@ -153,8 +152,12 @@ def run(
             threading.Thread(target=_feed, daemon=True).start()
         idle = IDLE_OUTPUT_S if idle_timeout_s is None else idle_timeout_s
         if watch_output and (timeout_s > FIRST_OUTPUT_S * 2 or timeout_s > idle):
-            first_output = min(FIRST_OUTPUT_S, idle) if idle_timeout_s is not None \
-                else FIRST_OUTPUT_S
+            # One value, two ways to set it, one behaviour: the declared
+            # idle_timeout used to be clamped here and the env one was not, so
+            # MEDULLA_IDLE_OUTPUT_S=10 kept a 60s first-output window while
+            # `idle_timeout: 10` on the node did not. A first-output grace longer
+            # than the idle threshold outlives the threshold it belongs to.
+            first_output = min(FIRST_OUTPUT_S, idle)
             went_quiet = _watch_output(
                 proc, capture, deadline, idle, first_output,
             )
@@ -203,9 +206,7 @@ def run(
                     time.monotonic() + 2 * STOP_GRACE_S,
                     hard_deadline if hard_deadline is not None else float("inf"),
                 )
-                drain_deadline = time.monotonic() if exceptional else min(
-                    drain_limit, time.monotonic() + PIPE_DRAIN_S,
-                )
+                drain_deadline = time.monotonic() if exceptional else drain_limit
                 pumps_alive = capture.finish(drain_deadline) if capture else False
                 if capture is None:
                     for pipe in (proc.stdout, proc.stderr):
