@@ -110,6 +110,7 @@ def run(
     proc = None
     pgid = None
     capture = None
+    feeder = None
     registered = False
     timed_out = False
     reaper_started = False
@@ -149,7 +150,8 @@ def run(
                         proc.stdin.close()
                     except (OSError, ValueError):
                         pass
-            threading.Thread(target=_feed, daemon=True).start()
+            feeder = threading.Thread(target=_feed, daemon=True)
+            feeder.start()
         idle = IDLE_OUTPUT_S if idle_timeout_s is None else idle_timeout_s
         if watch_output and (timeout_s > FIRST_OUTPUT_S * 2 or timeout_s > idle):
             # One value, two ways to set it, one behaviour: the declared
@@ -208,6 +210,26 @@ def run(
                 )
                 drain_deadline = time.monotonic() if exceptional else drain_limit
                 pumps_alive = capture.finish(drain_deadline) if capture else False
+                if proc.stdin is not None:
+                    # stdin is closed HERE, always, and the feed thread is joined.
+                    # Two leaks met at this line. If the capture failed before the
+                    # feed thread started, the descriptor had no owner at all and
+                    # max_attempts repeated the attempt, accumulating exactly when
+                    # the system was already in a bad state. And a detached child
+                    # inheriting stdin kept a blocking daemon writer alive AFTER a
+                    # SUCCESSFUL run — holding the payload (up to 8 MiB), the
+                    # thread and the descriptor, outside any budget: neither the
+                    # node timeout nor the workflow deadline can see it. A panel is
+                    # five bodies with a prompt each, retried; that is a dozen held
+                    # buffers per round, and the manifest says nothing.
+                    # Closing wakes a blocked write as a broken pipe, which _feed
+                    # already swallows.
+                    try:
+                        proc.stdin.close()
+                    except (OSError, ValueError):
+                        pass
+                    if feeder is not None:
+                        feeder.join(timeout=STOP_GRACE_S)
                 if capture is None:
                     for pipe in (proc.stdout, proc.stderr):
                         if pipe:

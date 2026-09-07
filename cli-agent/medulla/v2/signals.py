@@ -30,6 +30,13 @@ def extract_signals(text: str, strict: bool = False) -> list[tuple[str, dict[str
     abuses it is already fenced by agent.sets; a shell node is not, and should not
     need to be: it IS the author.
     """
+    # CRLF is a line ending, not payload. The raw incremental decoder replaced
+    # universal-newline reading and took that normalisation with it, so
+    # `<signal:x>..</signal:x>\r\n` stopped matching the `[ \t]*$` anchor —
+    # in STRICT mode, where the workflow's own shell node is the writer, the
+    # signal vanished entirely and the graph routed elsewhere. medulla routes on
+    # output: anything that changes line boundaries changes the route, silently.
+    text = text.replace("\r\n", "\n")
     if not strict:
         text = re.sub(r"`(<signal:[^`]+)`", r"\1", text)
         text = re.sub(r"(?<=[^\n])(<signal:)", r"\n\1", text)

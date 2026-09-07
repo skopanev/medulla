@@ -107,3 +107,31 @@ def test_the_parser_modes_directly():
     lenient = extract_signals(poisoned)
     assert [n for n, _a, _b in strict] == ["complete"]
     assert "var" in [n for n, _a, _b in lenient]      # the hole, still there for agents
+
+
+# ── line endings decide routes (medulla-29he9emyhq) ──────────────────────────
+
+def test_crlf_does_not_swallow_a_signal():
+    """medulla routes on output, so anything that moves a line boundary moves the
+    graph — silently. The raw incremental decoder replaced universal-newline
+    reading and dropped CRLF normalisation with it; `[ \\t]*$` does not accept the
+    \\r, so in STRICT mode — a shell node, where the workflow itself is the writer —
+    the signal disappeared and the run routed somewhere else entirely."""
+    assert extract_signals("<signal:done>ok</signal:done>\r\n", strict=True) \
+        == [("done", {}, "ok")]
+    assert extract_signals("<signal:done>ok</signal:done>\r\n", strict=False) \
+        == [("done", {}, "ok")]
+
+
+def test_mixed_line_endings_in_one_stream_still_route():
+    text = "noise\r\nmore\n<signal:done>ok</signal:done>\r\ntail\n"
+    assert extract_signals(text, strict=True) == [("done", {}, "ok")]
+
+
+def test_a_unicode_separator_inside_the_payload_is_payload():
+    """str.splitlines cuts on VT, FF and the Unicode separators that readline never
+    treated as boundaries. The parser reads the whole text, so a separator inside a
+    body stays inside the body and the route is unchanged."""
+    body = "left right"
+    got = extract_signals(f"<signal:done>{body}</signal:done>\n", strict=True)
+    assert got == [("done", {}, body)]

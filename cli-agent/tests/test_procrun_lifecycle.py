@@ -239,3 +239,71 @@ def test_escaped_pipe_holder_does_not_retain_log(tmp_path, monkeypatch):
         assert all(pipe.closed for pipe, _buf, _tag in captures[0]._pipes)
     finally:
         os.kill(escaped_pid, signal.SIGKILL)
+
+
+def test_stdin_is_closed_when_the_capture_never_starts(tmp_path, monkeypatch):
+    """stdin has exactly one owner: the feed thread, which starts only AFTER the
+    capture is up. If the capture fails first, nobody closes the descriptor and
+    max_attempts repeats the attempt — the leak accumulates precisely when the
+    system is already in a bad state."""
+    import subprocess as sp
+    born = []
+    real_popen = sp.Popen
+
+    def remember(*args, **kwargs):
+        proc = real_popen(*args, **kwargs)
+        born.append(proc)
+        return proc
+
+    class DeadCapture:
+        def __init__(self, *_args): pass
+        def start(self, _deadline): return False
+        def finish(self, _deadline): return False
+        def abort(self): pass
+        out_buf: list = []
+        err_buf: list = []
+        bytes_seen = 0
+
+    monkeypatch.setattr(procrun.subprocess, "Popen", remember)
+    monkeypatch.setattr(procrun, "OutputCapture", DeadCapture)
+
+    with pytest.raises(RuntimeError):
+        procrun.run(["bash", "-c", "cat"], cwd=tmp_path, timeout_s=5,
+                    stdin_data="payload\n")
+
+    assert born, "the child was never created"
+    assert born[0].stdin is not None
+    assert born[0].stdin.closed, "stdin outlived the attempt with no owner"
+
+
+def test_the_feed_thread_does_not_outlive_the_run(tmp_path, monkeypatch):
+    """A body that never reads stdin blocks the writer on the pipe buffer. The
+    thread was a daemon with no stop and no join, so it survived a SUCCESSFUL run
+    holding the payload, the thread and the descriptor — outside every budget,
+    with nothing in the manifest to show it. Five panelists retried is a dozen
+    held buffers a round."""
+    import subprocess as sp
+    import threading as th
+    born = []
+    real_popen = sp.Popen
+
+    def remember(*args, **kwargs):
+        proc = real_popen(*args, **kwargs)
+        born.append(proc)
+        return proc
+
+    monkeypatch.setattr(procrun.subprocess, "Popen", remember)
+    before = th.active_count()
+    # The body exits at once but leaves a DETACHED grandchild holding stdin open,
+    # so the pipe never closes on its own and the writer stays blocked. Without an
+    # explicit close+join this outlives the successful run.
+    # `0<&0` is load-bearing: a plain `&` gets /dev/null for stdin from a
+    # non-interactive bash, so the grandchild would not hold the pipe at all.
+    res = procrun.run(["bash", "-c", "sleep 2 0<&0 & exit 0"], cwd=tmp_path,
+                      timeout_s=10,
+                      stdin_data="x" * (4 * 1024 * 1024))   # far past the pipe buffer
+    assert res.rc == 0
+    # Measured the instant run() returns — no grace loop. The contract is that the
+    # run owns its thread, not that the thread dies soon enough to go unnoticed.
+    assert th.active_count() <= before, "the feed thread outlived the run"
+    assert born[0].stdin.closed, "the descriptor outlived the run"
