@@ -35,6 +35,40 @@ VAR_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 NODE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
 
+
+def engine_version() -> str:
+    """The running engine's version, by the same route the CLI reports it.
+
+    Empty when it cannot be determined. Do NOT fall back to medulla.__version__:
+    that constant reads 3.0.29 against a 4.61 pyproject, and a made-up number here
+    would refuse a perfectly good engine. An unknown version disables the check
+    rather than guessing at it — a gate that cannot measure must not block.
+    """
+    try:
+        from importlib.metadata import version
+        return version("medulla")
+    except Exception:
+        return ""
+
+
+def _as_tuple(text: str) -> tuple:
+    out = []
+    for part in str(text).split("."):
+        digits = ""
+        for ch in part:
+            if not ch.isdigit():
+                break
+            digits += ch
+        out.append(int(digits) if digits else 0)
+    return tuple(out)
+
+
+def engine_is_older_than(required: str) -> bool:
+    running = engine_version()
+    if not running:
+        return False                        # unknown: never block on a guess
+    return _as_tuple(running) < _as_tuple(required)
+
 def _err(msg: str) -> EngineCrash:
     # Always name the file. "workflow must be a YAML mapping" sent a whole day
     # chasing provider quotas: the offending file was a zero-byte workflow.yaml
@@ -124,11 +158,30 @@ def load_workflow(path: Path) -> Workflow:
             f"This looks like a v1 workflow — see 'Migrating from v1' in README.md"
         )
 
+    # A definition may declare the engine it needs. Without it the failure lands on
+    # whoever did not cause it: a shared copy carrying an unreleased field made every
+    # project pulling the engine from git fail at parse time, before a run directory
+    # existed — no artifacts, no trace, just a line in an err log, in repos whose
+    # owners had nothing to do with the change and could not fix it.
+    required = data.get("min_engine")
+    if required is not None:
+        if not isinstance(required, (str, int, float)):
+            raise _err("min_engine must be a version string, e.g. \"4.61.0\"")
+        if engine_is_older_than(str(required)):
+            raise _err(
+                f"this workflow declares min_engine: {required}, and the installed "
+                f"engine is {engine_version()}. The definition is NEWER than the "
+                f"engine — upgrade medulla, or point at a definition matching this "
+                f"engine. (Nothing is wrong with the workflow file.)"
+            )
+
     top_keys = {"version", "start", "vars", "timeout", "keep_runs", "defaults", "nodes",
-                "docker"}
+                "docker", "min_engine"}
     unknown = set(data) - top_keys
     if unknown:
-        raise _err(f"unknown top-level fields: {sorted(unknown)}")
+        raise _err(f"unknown top-level fields: {sorted(unknown)} — if this definition "
+                   f"comes from a newer medulla, the engine here is {engine_version()} "
+                   f"and the field is not a mistake but a version gap")
 
     # docker: — host-side container policy (consumed by scripts/docker.py, the
     # engine only validates the shape). Law of the block: a workflow may only

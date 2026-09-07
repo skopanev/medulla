@@ -11,6 +11,7 @@ import os
 import shutil
 from pathlib import Path
 
+from .v2.contract import engine_is_older_than, engine_version
 from .v2.workflow_path import shared_workflows
 
 DEFAULT_REFRESH_DEPTH = 4
@@ -66,6 +67,23 @@ def _copy_bundle_over(src: Path, dst: Path) -> None:
             shutil.copy2(Path(base_dir) / f, target)
 
 
+
+def _declared_min_engine(path: Path) -> str | None:
+    """Read min_engine without a YAML parse: this runs before any engine machinery,
+    and a definition too new to parse is exactly the case being caught."""
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line.startswith("min_engine:"):
+                continue
+            value = line.split(":", 1)[1].strip().strip("\"'")
+            return value or None
+            
+    except OSError:
+        return None
+    return None
+
+
 def refresh_skill(name: str, root: str, depth: int = DEFAULT_REFRESH_DEPTH, dry_run: bool = False) -> int:
     """Walk `root` (up to `depth` levels) and refresh every medulla-OWNED deploy
     of `name` from the current bundle. Owned = `.medulla/workflows/<name>/` (a
@@ -82,6 +100,20 @@ def refresh_skill(name: str, root: str, depth: int = DEFAULT_REFRESH_DEPTH, dry_
         print(f"error: no bundled '{name}' (bundled: {', '.join(bundled_templates()) or 'none'})")
         return 1
     bundle, bundle_skill = bundle.resolve(), (bundle / "SKILL.md").resolve()
+
+    # Refuse BEFORE copying anything. This command legitimately pushes the bundled
+    # definition into the machine-wide copy and then into every repository it finds,
+    # so installing an unreleased build and refreshing is enough to hand a
+    # newer-than-the-engine definition to projects that never asked for it. The
+    # failure then lands twenty minutes later on other people's lanes, who cannot
+    # fix it. It belongs here, on the caller, at the moment of the call.
+    required = _declared_min_engine(bundle / "workflow.yaml")
+    if required is not None and engine_is_older_than(required):
+        print(f"error: '{name}' declares min_engine: {required}, but the installed "
+              f"engine is {engine_version()}. Refusing to publish a definition newer "
+              f"than the engine that would run it — upgrade medulla first.")
+        return 1
+
     tag = " [dry-run]" if dry_run else ""
     print(f"scanning {root_p} for '{name}' (depth {depth}){tag} — "
           f"refreshing every medulla-owned copy to the current version "

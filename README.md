@@ -447,6 +447,7 @@ Action (exactly one of `shell` / `agent`):
 | `ignore_exit_code` | rc != 0 doesn't classify the body as failed; outcome comes from signals. **Forbidden in pool nodes** — `min_success` owns that role |
 | `pre` / `post` | shell hooks around the body (see [Hooks](#hooks-pre-and-post)); in pools both run per input |
 | `post_confirms_delivery` | Boolean, pool-only. Types `post` as an integrity proof whose success may override a body timeout |
+| `min_engine` | Top-level. The engine version this definition needs. `refresh` refuses to publish a definition newer than the installed engine, and loading one says so instead of listing unknown fields |
 
 Pool (presence of `inputs` turns the action into a pool):
 
