@@ -52,6 +52,16 @@ class RunResult:
     # Without this a watchdog kill and a node timeout are the same rc=124 in the
     # manifest, and telling them apart cost an hour on a live P0.
     killed_because: str = ""
+    # Timing facts, seconds relative to this attempt's start (None = never
+    # happened). Recorded so a threshold can one day be chosen from data rather
+    # than from the single incident that prompted the last one: every watchdog
+    # number in this project's history — 300, 900, 1800 — came from exactly one
+    # run, because nothing accumulated the timings to argue with.
+    duration_s: float = 0.0
+    first_byte_s: float | None = None
+    last_byte_s: float | None = None
+    read_events: int = 0
+    max_gap_s: float = 0.0
 
 
 def _env_seconds(name: str, default: int) -> int:
@@ -111,6 +121,7 @@ def run(
         env.pop(key, None)
     # "w": a retried/resumed attempt reusing this path must not stack stale
     # layers under the fresh output (audit R4)
+    started_at = time.monotonic()
     log_file = open(log_path, "w", encoding="utf-8", buffering=1) if log_path else None
     proc = None
     pgid = None
@@ -257,10 +268,16 @@ def run(
                     _LIVE.pop(proc, None)
 
     rc = TIMEOUT_RC if timed_out else proc.returncode
+    rel = (lambda t: None if t is None else round(t - started_at, 3))
     return RunResult(rc=rc, timed_out=timed_out,
                      stdout="".join(list(capture.out_buf)),
                      stderr="".join(list(capture.err_buf)),
-                     killed_because=went_quiet)
+                     killed_because=went_quiet,
+                     duration_s=round(time.monotonic() - started_at, 3),
+                     first_byte_s=rel(capture.first_byte_at if capture else None),
+                     last_byte_s=rel(capture.last_byte_at if capture else None),
+                     read_events=capture.read_events if capture else 0,
+                     max_gap_s=round(capture.max_gap_s, 3) if capture else 0.0)
 
 
 def _kill_group(proc: subprocess.Popen, sig, pgid: int | None = None) -> None:

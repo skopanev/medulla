@@ -196,6 +196,28 @@ class AttemptsMixin(BodyMixin):
                 last_failure_class = ("watchdog" if result.killed_because
                                       else decision.failure_class)
 
+            # One row per FINISHED attempt, with the facts a threshold would need
+            # to be argued about: when output started, when it last moved, how many
+            # read events, and the largest gap between them. Written for every
+            # attempt, not just the concluding one — a retry that succeeded used to
+            # erase the attempt that failed, so calibration saw only final failures
+            # and kept agreeing with itself.
+            if current.kind == "agent":
+                self.store.attempt_append({
+                    "attempt": attempt_id, "node": node.name, "phase": phase,
+                    "harness": agent_spec.harness if agent_spec else None,
+                    "model": agent_spec.model if agent_spec else None,
+                    "rc": result.rc, "timed_out": result.timed_out,
+                    "killed_because": result.killed_because or None,
+                    "reason": ("watchdog" if result.killed_because
+                               else decision.failure_class),
+                    "duration_s": result.duration_s,
+                    "first_byte_s": result.first_byte_s,
+                    "last_byte_s": result.last_byte_s,
+                    "read_events": result.read_events,
+                    "max_gap_s": result.max_gap_s,
+                })
+
             if move.move is Move.RETRY_SAME:
                 log(f"attempt {attempt_id} failed (rc={result.rc}), retrying")
                 _retry_delay(self.deadline)      # a zero-delay retry on a 429 is a provider-ban request

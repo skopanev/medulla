@@ -155,6 +155,19 @@ class RunStore(SessionStore):
             with open(self.dir / "journal.jsonl", "a", encoding="utf-8") as f:
                 f.write(line + "\n")
 
+    # ── attempt telemetry: one row per finished agent attempt ──
+    def attempt_append(self, row: dict) -> None:
+        """Timing facts per ATTEMPT, which the journal cannot hold — it keeps one
+        row per completed STEP, so a retry that eventually succeeded leaves no
+        trace of the attempt that failed. Calibration reading only final outcomes
+        sees only final failures, and so keeps confirming that the heuristic works.
+        """
+        row = {"ts": _now(), **row}
+        line = json.dumps(row, ensure_ascii=False)
+        with self._journal_lock:
+            with open(self.dir / "attempts.jsonl", "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+
     # ── pool manifest: crash-safe done-mask, one complete line per write ──
     def manifest_append(self, manifest_path: Path, row: dict) -> None:
         line = json.dumps(row, ensure_ascii=False)

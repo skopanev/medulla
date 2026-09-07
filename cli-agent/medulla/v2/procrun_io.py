@@ -62,6 +62,16 @@ class OutputCapture:
         # a plain int needs no lock. It counts bytes off the pipe, which is the
         # only evidence that the child is alive — a line is a formatting accident.
         self.bytes_seen = 0
+        # Timing evidence for choosing thresholds. Every watchdog threshold in this
+        # project's history — 300, 900, 1800 — was set from exactly one incident,
+        # because nothing accumulated the timings that would let the next number be
+        # chosen differently. These are the raw facts: when output started, when it
+        # last moved, how many read events there were, and the largest gap between
+        # them. The last one is the number the thresholds are actually guessing at.
+        self.first_byte_at: float | None = None
+        self.last_byte_at: float | None = None
+        self.read_events = 0
+        self.max_gap_s = 0.0
         self._log_file = log_file
         self._echo = echo
         self._log_items = queue.SimpleQueue()
@@ -182,7 +192,7 @@ class OutputCapture:
                 except (BlockingIOError, OSError):
                     data = b""
                 if data:
-                    self.bytes_seen += len(data)
+                    self._record(len(data))
                     self._emit_text(state, state[3].decode(data))
                 self._emit_text(
                     state, state[3].decode(b"", final=True), final=True,
@@ -194,13 +204,26 @@ class OutputCapture:
             self._wake_r.close()
             self._wake_w.close()
 
+    def _record(self, count: int) -> None:
+        """One read event off a pipe. Capture thread only — no lock needed."""
+        now = time.monotonic()
+        if self.first_byte_at is None:
+            self.first_byte_at = now
+        elif self.last_byte_at is not None:
+            gap = now - self.last_byte_at
+            if gap > self.max_gap_s:
+                self.max_gap_s = gap
+        self.last_byte_at = now
+        self.read_events += 1
+        self.bytes_seen += count
+
     def _read_ready(self, selector, states, fd: int, state: list) -> None:
         try:
             data = os.read(fd, 65536)
         except BlockingIOError:
             return
         if data:
-            self.bytes_seen += len(data)
+            self._record(len(data))
             self._emit_text(state, state[3].decode(data))
             return
         self._emit_text(state, state[3].decode(b"", final=True), final=True)
