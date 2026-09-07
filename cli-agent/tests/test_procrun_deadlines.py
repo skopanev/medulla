@@ -85,3 +85,26 @@ def test_pre_and_input_sources_receive_workflow_deadline(tmp_path, monkeypatch):
     inputs = engine_inputs.InputsMixin._materialize_inputs(owner, node, tmp_path)
     assert guard is None and inputs == ["one"]
     assert seen == [123.0, 123.0]
+
+
+def test_the_retry_pause_is_clamped_by_the_workflow_deadline(monkeypatch):
+    """The pause between attempts was slept WHOLE, and only then was the deadline
+    checked — a one-second budget ran 2.829s. The deadline is a promise: calling
+    scripts, the panel wait and any external scheduler are standing on it."""
+    import time as time_mod
+    from medulla.v2 import engine_scan
+
+    slept = []
+    monkeypatch.setattr(engine_scan.time, "sleep", lambda s: slept.append(s))
+    monkeypatch.setenv("MEDULLA_RETRY_DELAY_S", "2")
+
+    engine_scan._retry_delay(deadline=time_mod.monotonic() + 0.25)
+    assert slept and slept[-1] <= 0.25, slept
+
+    slept.clear()
+    engine_scan._retry_delay(deadline=time_mod.monotonic() - 5)
+    assert slept == [], "no budget left means no sleep at all"
+
+    slept.clear()
+    engine_scan._retry_delay()
+    assert slept == [2.0], "without a deadline the pilot's 2s stands"

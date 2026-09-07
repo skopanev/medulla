@@ -28,10 +28,17 @@ def _tail(text: str, n: int = 400) -> str:
     return text[-n:] if len(text) > n else text
 
 
-def _retry_delay() -> None:
+def _retry_delay(deadline: float | None = None) -> None:
     """Fixed pause between attempts (pilot's battle scar: 2s beats a rate-limit
-    storm). Env-tunable so tests run at 0."""
+    storm). Env-tunable so tests run at 0.
+
+    Clamped by the workflow deadline, and checked BEFORE sleeping: the pause used
+    to be slept whole and the budget consulted afterwards, so a one-second workflow
+    ran 2.829s. The deadline is a promise — calling scripts, the panel wait and any
+    external scheduler stand on it."""
     delay = float(os.environ.get("MEDULLA_RETRY_DELAY_S", "2"))
+    if deadline is not None:
+        delay = min(delay, max(0.0, deadline - time.monotonic()))
     if delay > 0:
         time.sleep(delay)
 

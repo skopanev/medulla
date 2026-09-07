@@ -163,3 +163,45 @@ nodes:
     _run, out, _j = read_run(yaml.parent)
     assert out["error"]["code"] == "E_DEADLINE"
     assert "min_success 3" in out["error"]["message"]
+
+
+def test_thread_exhaustion_fails_one_input_not_the_pool(tmp_path, monkeypatch):
+    """`RuntimeError: can't start new thread` took the WHOLE pool down, though the
+    refusal belongs to one input: submit() sat in a dict comprehension outside any
+    try, so the exception escaped the `with` and unwound every sibling. That is the
+    opposite of what a pool is for — min_success exists so four of five still make
+    a round. And it bites exactly when threads are scarce: a big panel, nested
+    runs, a loaded machine — the moment losing the round costs most."""
+    import concurrent.futures as cf
+
+    real_submit = cf.ThreadPoolExecutor.submit
+    calls = {"n": 0}
+
+    def flaky_submit(self, fn, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("can't start new thread")
+        return real_submit(self, fn, *args, **kwargs)
+
+    monkeypatch.setattr(cf.ThreadPoolExecutor, "submit", flaky_submit)
+
+    text = """
+version: "2"
+start: p
+nodes:
+  p:
+    inputs: [a, b, c]
+    max_parallel: 3
+    min_success: 2
+    shell: 'echo {{input}}'
+    on_signal: {__done__: __exit_ok__}
+"""
+    path, work = setup(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0, "quorum of the survivors stands"
+    run, _, _ = read_run(path.parent)
+    rows = {r["input"]: r for r in read_manifest(run, "001-p")}
+    assert len(rows) == 3, f"every input keeps a manifest row: {rows}"
+    failed = [r for r in rows.values() if not r["ok"]]
+    assert len(failed) == 1, failed
+    assert failed[0]["reason"] == "threads", failed[0]["reason"]
+    assert sum(1 for r in rows.values() if r["ok"]) == 2

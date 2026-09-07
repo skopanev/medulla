@@ -198,11 +198,11 @@ class AttemptsMixin(BodyMixin):
 
             if move.move is Move.RETRY_SAME:
                 log(f"attempt {attempt_id} failed (rc={result.rc}), retrying")
-                _retry_delay()      # a zero-delay retry on a 429 is a provider-ban request
+                _retry_delay(self.deadline)      # a zero-delay retry on a 429 is a provider-ban request
                 continue
             if move.move is Move.SWITCH_FALLBACK:
                 log(f"attempt {attempt_id} failed (rc={result.rc}), switching to fallback")
-                _retry_delay()
+                _retry_delay(self.deadline)
                 current = fallback
                 phase = "fallback"
                 attempt = 0

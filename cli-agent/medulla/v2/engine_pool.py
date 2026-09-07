@@ -145,6 +145,17 @@ class PoolMixin(InputsMixin):
         if old_rows:
             log(f"pool resume: {len(done)} inputs done, {len(pending_inputs)} to run")
 
+        def _thread_refusal_row(idx: int, value, exc: Exception) -> dict:
+            """One input that never got a thread, recorded as its own failure."""
+            known = next((v for i, v in pending_inputs if i == idx), None)
+            value = known if value is None else value
+            return {"index": idx, "key": f"{idx}:{_input_hash(value)}", "input": value,
+                    "ok": False, "reason": "threads", "signal": None,
+                    "message": str(exc), "rc": None, "timed_out": False,
+                    "attempts": 0, "fallback": False, "harness": None, "model": None,
+                    "vars": {}, "updates": [], "signals": [], "duration_s": 0.0,
+                    "log": None}
+
         def guarded_run(idx: int, value):
             if self._remaining() is not None and self._remaining() <= 0:
                 return None                            # never started: no row, resume re-runs it
@@ -174,8 +185,20 @@ class PoolMixin(InputsMixin):
             import concurrent.futures
             first_crash: EngineCrash | None = None
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool_exec:
-                futures = {pool_exec.submit(guarded_run, i, v): i
-                           for i, v in pending_inputs}
+                futures = {}
+                for i, v in pending_inputs:
+                    # A refused thread belongs to THIS input. Submitting inside a
+                    # comprehension put it outside every try, so `can't start new
+                    # thread` escaped the `with` and unwound the siblings that could
+                    # still have delivered — the exact opposite of what min_success
+                    # is for. It bites when threads are scarce: a big panel, nested
+                    # runs, a loaded machine, i.e. when losing a round costs most.
+                    try:
+                        futures[pool_exec.submit(guarded_run, i, v)] = i
+                    except RuntimeError as exc:
+                        row = _thread_refusal_row(i, v, exc)
+                        self.store.manifest_append(manifest_path, row)
+                        rows.append(row)
                 for fut in concurrent.futures.as_completed(futures):
                     try:
                         row = fut.result()
@@ -184,6 +207,13 @@ class PoolMixin(InputsMixin):
                         # lose their manifest rows to an unrelated worker's crash
                         if first_crash is None:
                             first_crash = crash
+                        continue
+                    except RuntimeError as exc:
+                        # the same refusal, one layer in: procrun starts capture
+                        # threads of its own once the worker is already running
+                        row = _thread_refusal_row(futures[fut], None, exc)
+                        self.store.manifest_append(manifest_path, row)
+                        rows.append(row)
                         continue
                     if row is None:
                         deadline_hit = True
