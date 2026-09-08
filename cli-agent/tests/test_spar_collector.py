@@ -3,15 +3,12 @@
 One pass writes both, so the prose and the machine channel cannot drift apart.
 """
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-import yaml as pyyaml
-
-WORKFLOW = Path(__file__).resolve().parent.parent / "workflows/spar/workflow.yaml"
+from conftest import write_panel_manifest
 
 PANELIST = """Prose above.
 
@@ -34,32 +31,16 @@ def run_dir(tmp_path):
     return tmp_path
 
 
-def collect(tmp_path, panelists, *, expected=None, delivered=None, min_decided=3):
-    """Run the collector over a round: returns (markdown, parsed json, result)."""
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    art = tmp_path / "artifacts"
-    art.mkdir(exist_ok=True)
-    for slug, body in panelists:
-        (art / f"{slug}.md").write_text(body)
-    n = len(panelists)
-    res = subprocess.run(
-        [sys.executable, str(COLLECTOR), str(tmp_path), str(art),
-         "--expected", str(n if expected is None else expected),
-         "--delivered", str(n if delivered is None else delivered),
-         "--min-decided", str(min_decided)],
-        capture_output=True, text=True, check=False)
-    return ((tmp_path / "verdict.md").read_text(),
-            json.loads((tmp_path / "verdict.json").read_text()), res)
-
-
 COLLECTOR = Path(__file__).resolve().parent.parent / "workflows/spar/scripts/collect_verdict.py"
 
 
 def synthesize(run_dir, delivered=4, expected=4, min_decided=1):
     """Run the collector over a round, as the workflow node does."""
+    slugs = sorted(path.stem for path in (run_dir / "artifacts").glob("*.md"))
+    manifest = write_panel_manifest(run_dir, slugs, delivered)
     res = subprocess.run(
         [sys.executable, str(COLLECTOR), str(run_dir), str(run_dir / "artifacts"),
-         "--expected", str(expected), "--delivered", str(delivered),
+         "--manifest", str(manifest), "--expected", str(expected),
          "--min-decided", str(min_decided)],
         capture_output=True, text=True, check=False)
     return (run_dir / "verdict.md").read_text(), res.stdout
@@ -119,11 +100,13 @@ def test_the_subject_is_optional_and_only_what_was_given_appears(tmp_path):
     art = tmp_path / "artifacts"
     art.mkdir()
     (art / "x.md").write_text("## FINDINGS\nNONE\n\n## VERDICT\nGO — fine\n")
+    manifest = write_panel_manifest(tmp_path, ["x"])
 
     def run(*subject):
         (tmp_path / "verdict.json").unlink(missing_ok=True)
         subprocess.run([sys.executable, str(COLLECTOR), str(tmp_path), str(art),
-                        "--expected", "1", "--delivered", "1", "--min-decided", "1",
+                        "--manifest", str(manifest), "--expected", "1",
+                        "--min-decided", "1",
                         *sum((["--subject", s] for s in subject), [])],
                        capture_output=True, text=True, check=False)
         return json.loads((tmp_path / "verdict.json").read_text())
@@ -197,12 +180,10 @@ def _synthesize(tmp_path, panelists, min_decided="3"):
     art.mkdir(exist_ok=True)
     for slug, body in panelists:
         (art / f"{slug}.md").write_text(body)
-    manifest = tmp_path / "m.jsonl"
-    manifest.write_text("".join('{"key":"%d:x","ok":true}\n' % i
-                                for i in range(1, len(panelists) + 1)))
+    manifest = write_panel_manifest(tmp_path, [slug for slug, _body in panelists])
     res = subprocess.run(
         [sys.executable, str(COLLECTOR), str(tmp_path), str(art),
-         "--expected", str(len(panelists)), "--delivered", str(len(panelists)),
+         "--manifest", str(manifest), "--expected", str(len(panelists)),
          "--min-decided", min_decided], capture_output=True, text=True, check=False)
     marker = "<signal:no_quorum>" if res.returncode == 3 else "<signal:ready>"
     return marker, (tmp_path / "verdict.md").read_text()
@@ -230,5 +211,3 @@ def test_enough_opinions_still_produce_a_verdict(tmp_path):
     ])
     assert "<signal:ready>" in stdout
     assert "no_quorum" not in stdout
-
-

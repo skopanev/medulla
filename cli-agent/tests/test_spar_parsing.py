@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 import yaml as pyyaml
+from conftest import write_panel_manifest
 
 COLLECTOR = Path(__file__).resolve().parent.parent / "workflows/spar/scripts/collect_verdict.py"
 
@@ -22,10 +23,11 @@ def collect(tmp_path, panelists, *, expected=None, delivered=None, min_decided=3
     for slug, body in panelists:
         (art / f"{slug}.md").write_text(body)
     n = len(panelists)
+    manifest = write_panel_manifest(tmp_path, [slug for slug, _body in panelists], delivered)
     res = subprocess.run(
         [sys.executable, str(COLLECTOR), str(tmp_path), str(art),
+         "--manifest", str(manifest),
          "--expected", str(n if expected is None else expected),
-         "--delivered", str(n if delivered is None else delivered),
          "--min-decided", str(min_decided)],
         capture_output=True, text=True, check=False)
     return ((tmp_path / "verdict.md").read_text(),

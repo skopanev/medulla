@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from conftest import write_panel_manifest
+
 COLLECTOR = Path(__file__).resolve().parent.parent / "workflows/spar/scripts/collect_verdict.py"
 
 
@@ -27,10 +29,12 @@ def collect(tmp_path, panelists, *, expected=None, delivered=None, min_decided=3
             slug, body = entry
         (art / f"{slug}.md").write_text(body)
     n = len(panelists)
+    slugs = [entry[0] for entry in panelists]
+    manifest = write_panel_manifest(tmp_path, slugs, delivered)
     res = subprocess.run(
         [sys.executable, str(COLLECTOR), str(tmp_path), str(art),
+         "--manifest", str(manifest),
          "--expected", str(n if expected is None else expected),
-         "--delivered", str(n if delivered is None else delivered),
          "--min-decided", str(min_decided)],
         capture_output=True, text=True, check=False)
     md = (tmp_path / "verdict.md").read_text() if (tmp_path / "verdict.md").exists() else ""

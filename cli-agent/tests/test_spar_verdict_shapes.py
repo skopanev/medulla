@@ -72,13 +72,14 @@ def test_a_finding_without_a_bullet_is_still_a_finding(tmp_path):
 
 def test_delivered_and_decided_come_from_the_same_artifacts(tmp_path):
     """The field defect: artifacts=4, quorum.delivered=3, decided=4. `delivered` was
-    the engine's manifest (a post hook had vetoed a complete file); `decided` was the
-    files on disk. One source now — the manifest number is kept only as a witness."""
+    the engine's manifest (a post hook had vetoed a complete file); `decided` was all
+    files on disk. Now only manifest+disk agreement becomes an opinion."""
     ok = "## FINDINGS\n- (R) LOW — a — f.py:1 — w — FIX: h\n\n## VERDICT\nGO — ships\n"
     _, data, _ = collect(tmp_path, [("a", ok), ("b", ok), ("c", ok), ("d", ok)],
                          expected=5, delivered=3)
-    assert data["quorum"]["delivered"] == 4
-    assert data["quorum"]["manifest_delivered"] == 3
+    assert data["quorum"]["delivered"] == 3
+    assert data["quorum"]["decided"] == 3
+    assert data["delivery"]["rejected_on_disk"][0]["slug"] == "d"
 
 
 def test_an_unreadable_objection_does_not_vote_but_still_blocks(tmp_path):

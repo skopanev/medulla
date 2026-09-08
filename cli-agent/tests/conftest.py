@@ -206,6 +206,17 @@ def read_manifest(run, step_name):
     mp = run / "steps" / step_name / "manifest.jsonl"
     return [json.loads(l) for l in mp.read_text().splitlines()] if mp.exists() else []
 
+def write_panel_manifest(run_dir, slugs, delivered=None):
+    """Write realistic latest panel rows; the collector no longer accepts a count."""
+    delivered = len(slugs) if delivered is None else delivered
+    rows = [{"index": i, "key": f"{i}:{slug}", "input": {"slug": slug},
+             "ok": i <= delivered, "reason": "ok" if i <= delivered else "post",
+             "rc": 0, "timed_out": False, "message": ""}
+            for i, slug in enumerate(slugs, 1)]
+    path = run_dir / "manifest.jsonl"
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    return path
+
 def write(tmp_path, text):
     p = tmp_path / "workflow.yaml"
     p.write_text(text, encoding="utf-8")

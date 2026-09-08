@@ -164,7 +164,7 @@ nodes:
       # jq for the manifest, python for the panelist files. The parsing used to be awk
       # in this block: six defects in one day, each a parser bug in a language with no
       # parser. collect_verdict.py writes both channels from one pass.
-      rows=$(jq -s 'group_by(.key) | map(.[-1])' "$MEDULLA_MANIFEST_PANEL")
+      rows=$(jq -s 'group_by(.input.slug) | map(.[-1])' "$MEDULLA_MANIFEST_PANEL")
       total=$(echo "$rows" | jq length)
       ok=$(echo "$rows" | jq 'map(select(.ok)) | length')
       out="$MEDULLA_RUN_DIR/verdict.md"
@@ -172,7 +172,8 @@ nodes:
       rc=0
       python3 "$MEDULLA_WORKFLOW_DIR/scripts/collect_verdict.py" \
         "$MEDULLA_RUN_DIR" "$ROUND_DIR" \
-        --expected "$total" --delivered "$ok" --min-decided "$MIN_DECIDED" \
+        --manifest "$MEDULLA_MANIFEST_PANEL" \
+        --expected "$total" --min-decided "$MIN_DECIDED" \
         --subject "ticket=$TICKET" --subject "purpose=$PURPOSE" \
         --subject "base=$BASE" --subject "head=$HEAD" \
         --subject "patch_digest=$PATCH_DIGEST" || rc=$?

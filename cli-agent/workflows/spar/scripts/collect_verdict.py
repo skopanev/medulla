@@ -1,6 +1,6 @@
 """Panelist files -> verdict.md (for reading) and verdict.json (for gates).
 
-    collect_verdict.py <run-dir> <round-dir> [--expected N] [--delivered N]
+    collect_verdict.py <run-dir> <round-dir> --manifest PATH [--expected N]
                        [--min-decided N]
 
 Exit 0 with a verdict, 3 when fewer than --min-decided formed a GO/NO-GO.
@@ -13,12 +13,12 @@ import re
 import sys
 from pathlib import Path
 
+from delivery_reconcile import reconcile
 from verdict_parse import NOT_PANELISTS, SEVERITY_ORDER, read_panelist
 
 
-def build(round_dir: Path) -> dict:
-    panelists = [read_panelist(p) for p in sorted(round_dir.glob("*.md"))
-                 if p.name not in NOT_PANELISTS]
+def build(paths: list[Path]) -> dict:
+    panelists = [read_panelist(path) for path in paths]
 
     # severity band, then each panelist's own order inside it
     numbered, order = [], []
@@ -95,6 +95,17 @@ def render(data: dict, delivered: int, expected: int) -> str:
            "",
            f"{len(data['findings'])} findings from {len(data['panelists'])} panelist(s).",
            ""]
+    delivery = data["delivery"]
+    review_artifacts = delivery["review_triggering_artifacts"]
+    if review_artifacts:
+        names = ", ".join(f"`{item['slug']}.md`" for item in review_artifacts)
+        out += [f"> **DELIVERY MISMATCH:** {len(review_artifacts)} artifact file(s) on disk",
+                f"> were not accepted by the engine: {names}. They remain on disk for",
+                "> diagnosis, but are excluded from every opinion and quorum count.", ""]
+    if delivery["manifest_only"]:
+        names = ", ".join(f"`{item['slug']}.md`" for item in delivery["manifest_only"])
+        out += ["> **DELIVERY MISMATCH:** the engine accepted artifact(s) missing from disk:",
+                f"> {names}. They cannot count as delivered opinions.", ""]
     if data["blocking"]:
         out += [f"BLOCKING: {', '.join(data['blocking'])} — judge each against its cited "
                 "code before landing.",
@@ -112,6 +123,30 @@ def render(data: dict, delivered: int, expected: int) -> str:
     if expected and delivered < expected:
         out += [f"> **WARNING:** only {delivered} of {expected} panelists delivered. This is a",
                 "> partial panel — do not report it as a full one.", ""]
+    if delivery["has_mismatch"]:
+        ignored = {item["slug"] for item in delivery["ignored_fragments"]}
+        out += ["## Delivery reconciliation", "",
+                "Manifest and disk disagree. Excluded files remain on disk for diagnosis;",
+                "they are not panel opinions.", ""]
+        for item in delivery["rejected_on_disk"]:
+            note = f"reason={item['reason']}, rc={item['rc']}, size={item['size_bytes']} bytes"
+            if item["artifact_verdict"]:
+                note += f", parsed verdict={item['artifact_verdict']} (excluded)"
+            if item["slug"] in ignored:
+                note += ", fragment under 200 bytes (does not require review)"
+            if item["message"]:
+                message = re.sub(r"\s+", " ", item["message"]).strip()[:400]
+                note += f", message={message}"
+            out.append(f"- rejected artifact `{item['slug']}.md`: {note}")
+        for item in delivery["manifest_only"]:
+            out.append(f"- manifest delivered `{item['slug']}` at "
+                       f"{item['index']}/{item['key']}, but its file is missing")
+        for slug in delivery["untracked_on_disk"]:
+            note = " (fragment under 200 bytes; does not require review)" if slug in ignored else ""
+            out.append(f"- untracked artifact `{slug}.md` has no current manifest row{note}")
+        for item in delivery["unidentified_manifest_rows"]:
+            out.append(f"- manifest identity {item['index']}/{item['key']} has no artifact slug")
+        out.append("")
     out += [HOW_TO_READ, "## Verdicts", ""]
 
     for p in data["panelists"]:
@@ -136,36 +171,48 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("run_dir", type=Path)
     ap.add_argument("round_dir", type=Path)
+    ap.add_argument("--manifest", type=Path, required=True)
     ap.add_argument("--expected", type=int, default=0)
-    ap.add_argument("--delivered", type=int, default=0)
     ap.add_argument("--min-decided", type=int, default=3)
     # Whatever the caller knows about WHAT was reviewed. Absent stays absent: an empty
     # string in a gate field is worse than no field, because it reads as an answer.
     ap.add_argument("--subject", action="append", default=[], metavar="KEY=VALUE")
     a = ap.parse_args(argv)
 
-    data = build(a.round_dir)
+    paths, delivery = reconcile(a.manifest, a.round_dir, NOT_PANELISTS)
+    for item in delivery["rejected_on_disk"]:
+        observed = read_panelist(a.round_dir / f"{item['slug']}.md")
+        item["artifact_verdict"] = observed["verdict"]
+        item["artifact_malformed"] = observed["malformed"]
+    data = build(paths)
+    data["delivery"] = delivery
     c = data["counts"]
     decided = c["GO"] + c["NO-GO"]
-    # ONE source of participant state. `--delivered` came from the manifest, which
-    # records what the ENGINE concluded; the artifacts on disk record what actually
-    # arrived. They disagreed — a post hook vetoed a complete file and the round
-    # reported 3 delivered beside 4 decided. Whatever a gate reads, it now reads it
-    # from the same files the verdicts were parsed from.
-    delivered = len(data["panelists"])
+    # Delivery needs BOTH witnesses: the engine must accept the input and its artifact
+    # must exist. Their disagreements remain visible, but never become opinions.
+    delivered = len(paths)
     (a.run_dir / "verdict.md").write_text(render(data, delivered, a.expected),
                                           encoding="utf-8")
     # written even when the round failed: why it failed is a fact a gate needs
     subject = dict(kv.split("=", 1) for kv in a.subject if "=" in kv and kv.split("=", 1)[1])
+    state_reasons = []
+    if data["blocking"]:
+        state_reasons.append("blocking_findings")
+    if c["NO-GO"]:
+        state_reasons.append("no_go")
+    if data["verified_high"]:
+        state_reasons.append("verified_high_findings")
+    if decided < a.min_decided:
+        state_reasons.append("insufficient_quorum")
+    if delivery["review_required"]:
+        state_reasons.append("delivery_mismatch")
     (a.run_dir / "verdict.json").write_text(json.dumps({
         "run_id": a.run_dir.name,
         **({"subject": subject} if subject else {}),
         "quorum": {"expected": a.expected, "delivered": delivered,
                    "min_decided": a.min_decided, "decided": decided,
-                   "met": decided >= a.min_decided,
-                   # kept only as a witness when the engine and the disk disagree
-                   **({"manifest_delivered": a.delivered}
-                      if a.delivered and a.delivered != delivered else {})},
+                   "met": decided >= a.min_decided},
+        "delivery": delivery,
         "counts": c,
         "blocking": data["blocking"],
         "unsupported_no_go": data["unsupported"],
@@ -173,10 +220,8 @@ def main(argv: list[str]) -> int:
         # own: an objection whose citation could not be read is out of the vote, so
         # without this clause the round would go CLEAR while still naming something
         # that holds it — fail-open, exactly backwards.
-        "state": ("REVIEW_REQUIRED"
-                  if (data["blocking"] or c["NO-GO"] or data["verified_high"]
-                      or decided < a.min_decided)
-                  else "CLEAR"),
+        "state": "REVIEW_REQUIRED" if state_reasons else "CLEAR",
+        "state_reasons": state_reasons,
         "verified_high": data["verified_high"],
         "parser": {"malformed": data["malformed"]},
         "panelists": [{"slug": p["slug"], "verdict": p["verdict"], "reason": p["line"],
