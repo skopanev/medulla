@@ -40,3 +40,24 @@ Suggested fix: make the Docker image/startup self-test `cx` imports before start
 panel, install `hltm` in the same Python environment as `/usr/local/bin/cx`, and classify
 this separately from provider/model failure so retry does not repeat an identical broken
 harness attempt.
+
+## 2026-08-25 — fail-closed verdict binding and parser completeness
+
+A class-X Finik diff was landed after a 2 GO / 2 NO-GO panel because the agent
+reinterpreted remediated findings as sufficient and reported “green” without a final
+panel verdict on the remediated SHA. A repeat run produced `verdict.md`, but silently
+dropped Sonnet findings because its section heading was `## Findings` instead of exact
+uppercase `## FINDINGS`. Both failures let prose interpretation outrun machine evidence.
+
+Required product contract:
+
+- emit `verdict.json` bound to the exact commit SHA and diff hash;
+- invalidate the verdict after any code edit and require a new final panel on the new SHA;
+- map any delivered NO-GO or unresolved `(R) HIGH` finding to machine state
+  `REVIEW_REQUIRED`; callers must not render or report it as ready/green;
+- make the landing/readiness artifact include SHA, diff hash, check results, roster
+  delivered/expected, GO/NO-GO split, and unresolved blocker count;
+- parse section headings case-insensitively, or mark that panelist malformed/undelivered;
+  never silently omit a delivered model's findings;
+- keep the raw per-model take and parser diagnostics beside the synthesis so completeness
+  can be audited without trusting the summarizer.

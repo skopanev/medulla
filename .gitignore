@@ -42,3 +42,6 @@ build/
 .claude/
 .agents/
 .opencode/
+
+# runtime lane events: per-machine state, not repository history
+.runtime/
