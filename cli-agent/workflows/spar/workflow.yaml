@@ -7,13 +7,13 @@
 #   medulla --docker --cwd-ro --runs-folder .medulla/panel-runs \
 #     -w spar --var-file "QUESTION=question.md"
 #
-# Output: synthesized.md inside $MEDULLA_RUN_DIR/artifacts/.
+# Output: verdict.md + verdict.json in $MEDULLA_RUN_DIR (NOT artifacts/synthesized.md).
 #
 # v2 shape: the panel is a pool over agent-typed inputs — every scalar agent
 # field is a template, so one body serves all panelists (no dispatcher script:
 # panelist.sh died with v1). post: is the truth channel — a panelist counts
 # only if its output file exists, regardless of its CLI's exit code.
-# min_success: 3 of 5 — the general contract calls a panel's answer by MAJORITY, so
+# min_success: 3 of 4 — the general contract calls a panel's answer by MAJORITY, so
 # a round that only one model survived is not a quorum and must not exit 0. It used to
 # be 1 ("useful if anyone delivered"), which left the agent to notice the shortfall on
 # its own; the engine says it now. synthesize still stamps a warning on partial
@@ -52,7 +52,7 @@ nodes:
         exit 1
       fi
       # The panel reviews a TREE. An empty /workspace means the mounts did not land —
-      # and the round that follows is five agents reasoning about nothing, which reads
+      # and the round that follows is the whole panel reasoning about nothing, which reads
       # like an answer and is not one. Live: a --mount failed, the retry ran without
       # it, three of four panelists reported INSUFFICIENT, and a verdict.md was still
       # produced. Fail here, before spending twenty minutes on it.
@@ -83,9 +83,16 @@ nodes:
       - {slug: gpt5,   harness: codex,       model: gpt-5.6-sol,             effort: high}
       - {slug: sonnet, harness: claude-code, model: claude-sonnet-5}
       - {slug: gemini, harness: agy,         model: "Gemini 3.1 Pro (High)"}
-      - {slug: qwen,   harness: opencode,    model: alibaba-token-plan/qwen3.8-max, effort: xhigh}
     max_parallel: all
-    min_success: 3        # majority of the 5-model roster
+    # Majority, unchanged: 3 of 4 is still a majority because 2 of 4 is a tie.
+    # qwen3.8-max was removed from the roster on 2026-09-09 by the owner, on
+    # measurement rather than impression: it timed out on its FIRST attempt in 3
+    # runs of 3, at 1800s each, and consumed 100%/94%/100% of the run budget while
+    # delivering one review in three. Every other panelist finished in 4-15 minutes.
+    # In the sharpest run all four other reviews were on disk thirteen minutes in,
+    # and the panel then waited 47 more minutes and ended with NO verdict.
+    # Removing a panelist is not an occasion to weaken quorum.
+    min_success: 3        # majority of the 4-model roster
     # A dead provider must not cost the panel half an hour of silence. The check is a
     # script, not an inline block: it has to validate a download and its JSON before
     # trusting one field out of it, and the six lines of awk-grade shell it used to be
@@ -141,7 +148,7 @@ nodes:
       v=$(awk '/^#+ *VERDICT/{f=1; next} /^#/{f=0} f && /^```/{next} f && NF {print; exit}' "$f")
       # `**NO-GO**.` is a verdict; emphasis is the model decorating, not deciding
       v=$(printf '%s' "$v" | tr -d '*_`')
-      printf '%s' "$v" | grep -qE '^(GO|NO-GO|INSUFFICIENT)' \
+      printf '%s' "$v" | sed 's/^[[:space:]]*//' | grep -qE '^(GO|NO-GO|INSUFFICIENT)' \
         || { echo "VERDICT is not one of GO / NO-GO / INSUFFICIENT" >&2; exit 1; }
       # And it must say WHY. A bare "GO" is a file, not an answer: it cannot be argued
       # with, and a reader cannot tell a considered pass from a panelist that gave up.
@@ -165,8 +172,22 @@ nodes:
       # in this block: six defects in one day, each a parser bug in a language with no
       # parser. collect_verdict.py writes both channels from one pass.
       rows=$(jq -s 'group_by(.key) | map(.[-1])' "$MEDULLA_MANIFEST_PANEL")
-      total=$(echo "$rows" | jq length)
+      seen=$(echo "$rows" | jq length)
       ok=$(echo "$rows" | jq 'map(select(.ok)) | length')
+
+      # The DENOMINATOR is the configured roster, not the rows that happen to exist.
+      # A panelist who never wrote a manifest row at all — a cancelled queue writes
+      # none by design, and an engine that dies before the append writes none either —
+      # would otherwise drop out of the count and turn "3 of 4 delivered" into a clean
+      # "3 of 3", hiding exactly the loss this line exists to report. The engine's own
+      # journal knows how many inputs the pool was given; trust it over the leftovers.
+      roster=$(jq -rs 'map(select(.kind == "pool" and .node == "panel")) | last
+                       | .inputs_total // empty' "$MEDULLA_RUN_DIR/journal.jsonl" 2>/dev/null || true)
+      total=$seen
+      case "$roster" in
+        ''|*[!0-9]*) ;;                       # no journal row yet, or not a number
+        *) [ "$roster" -gt "$total" ] && total=$roster ;;
+      esac
       out="$MEDULLA_RUN_DIR/verdict.md"
 
       rc=0

@@ -115,7 +115,7 @@ List the artifacts with your Glob tool, then read them **one file at a time**:
 
     <Glob> "$run/artifacts/*.md"
 
-Do not `cat` them all into the terminal: five panelists × ~500 words is a wall
+Do not `cat` them all into the terminal: four panelists × ~500 words is a wall
 of text that buries exactly the lone finding you are here to preserve.
 
 Each panelist closes with two sections. `## FINDINGS` — one line per finding: `(R)`
@@ -160,11 +160,11 @@ Read `verdict.md` FIRST — the panel writes it as its last act, so it is there 
 you ask, and it is written by the workflow itself rather than by a tool that has to be
 found (a tool that has to be found is a tool that can be missing: it was, once, and the
 run reported success having written nothing). It opens with every panelist's verdict together — `GO 1 · NO-GO 1
-· INSUFFICIENT 1` — because the SPLIT is the answer to "can we ship", and five files
-each ending in one word are unreadable as five files and obvious as one block. A
+· INSUFFICIENT 1` — because the SPLIT is the answer to "can we ship", and four files
+each ending in one word are unreadable as four files and obvious as one block. A
 panelist who skipped the section shows as `(no verdict section)` rather than being
 counted as agreement. Asking a summariser not to summarise is asking water to be dry:
-a model that reads five artifacts and retells them will drop the lone finding — which
+a model that reads every artifact and retells them will drop the lone finding — which
 is the one the panel was convened for. `awk` has no opinions, so the collection is
 mechanical and the count is printed. Carry those lines forward as they are, attributed;
 merge two only when they are literally the same claim, never when they "feel similar".

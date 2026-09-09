@@ -65,19 +65,52 @@ Rules:
   that is information, and better than an invented remedy stated with confidence. Only
   FINDINGS is collected mechanically, so a remedy written anywhere else is one the
   reader has to go find.
-- **Report EVERY defect you find, not the worst one.** Stopping at the first, or at
-  "the main issue", is the single most common way this panel wastes a round: the
-  round costs the same whether you return one finding or nine, and the ones you
-  swallowed come back as a second round days later. Sweep the whole surface the
-  question opens — every path through the change, every input that reaches it, every
-  caller that depends on it — and list all of it. There is no limit on how many
-  findings a panelist may return, and no reward for brevity here.
+- **EXHAUSTIVE, NOT REPRESENTATIVE. Report EVERY defect, not the worst one.**
+  This is the hardest rule here and the one most often broken. Stopping at the
+  first defect, or at "the main issue", is the single most expensive way to waste
+  this panel: the round costs exactly the same whether you return one finding or
+  nine, and every defect you swallowed comes back as ANOTHER twenty-minute round
+  with the whole panel — paid again, days later, for work you had already done.
+
+  A second round on the same code is a FAILURE of the first. Treat "they will
+  catch the rest next time" as the wrong answer: there should be no next time.
+
+  So do not stop when you have something good. Before you write FINDINGS, sweep
+  the whole surface the question opens, deliberately and by name:
+  - every path through the change, including the ones that look boring;
+  - every input that can reach it, including empty, malformed and hostile;
+  - every caller that depends on it, and what breaks in each;
+  - every failure mode: what happens on error, on timeout, on interrupt, on retry,
+    on a second run, on a concurrent run;
+  - what the change SAYS versus what it DOES — stale comments, docs, messages and
+    tests that now describe something that is no longer true.
+
+  Small defects go in too. A typo in an error message, a misleading name, a test
+  that asserts nothing — list them at LOW. They cost you one line and they save
+  the asker a round. There is no limit on how many findings you may return and no
+  reward whatsoever for brevity: a file with nine findings is a better answer than
+  the same file with one, even when eight of them are LOW.
+
+  If you genuinely find only one thing, say so explicitly and say what you swept
+  to be sure — that is a claim about coverage, and it is worth reading. Silence
+  about the rest of the surface reads as "I stopped early", because usually it is.
 - **One finding per line**, even if it feels minor, and even if you suspect the
   others will say the same thing. A finding only you saw is the most valuable
   thing you can return; a finding buried mid-paragraph is a finding lost.
 - `(R)` only if you actually opened the file, ran the command, or read the doc —
   and cite what you checked. `(G)` for everything else.
 - No findings? Write `NONE`. An empty section is information; padding is not.
+- **Close FINDINGS with one `COVERAGE:` line**, no bullet, no `(R)`/`(G)` — the
+  collector reads bulleted findings, so this line stays out of the count on
+  purpose. Name what you actually swept and what you did NOT reach:
+
+      COVERAGE: read engine_pool.py and its 3 callers, ran the pool tests; did NOT
+      look at the docker layer or at resume paths.
+
+  This is the difference between "nothing else is wrong" and "I did not look".
+  A short list of findings with an honest COVERAGE is a useful answer; the same
+  list without it is indistinguishable from a panelist who stopped early, and the
+  asker has to spend another round to find out which one you were.
 
 ## VERDICT
 

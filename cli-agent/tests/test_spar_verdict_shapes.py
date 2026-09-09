@@ -5,7 +5,18 @@ sweep over 2219 delivered artifacts found 50 of them failed for the fence alone 
 each one a live artifact with findings, recorded as "no verdict" and dropped from
 the delivered count a gate reads.
 """
+import importlib.util as _il
+import sys as _sys
+from pathlib import Path as _Path
+
 from test_spar_parsing import collect
+
+_spec = _il.spec_from_file_location(
+    "verdict_parse",
+    _Path(__file__).resolve().parent.parent / "workflows/spar/scripts/verdict_parse.py")
+verdict_parse = _il.module_from_spec(_spec)
+_sys.modules["verdict_parse"] = verdict_parse
+_spec.loader.exec_module(verdict_parse)
 
 FINDINGS = "## FINDINGS\n- (R) HIGH — a claim — f.py:1 — why — FIX: how\n\n"
 
@@ -106,3 +117,55 @@ def test_prose_carrying_a_confidence_mark_is_not_a_finding(tmp_path):
     _, data, _ = collect(tmp_path, [("sonnet", body)], min_decided=1)
     assert data["panelists"][0]["findings"] == 1
     assert "a real one" in data["findings"][0]["text"]
+
+
+# ── the panel found these in its own parser (2026-09-08 round) ───────────────
+
+def test_a_citation_survives_any_dash(tmp_path):
+    """The split was on the em-dash alone. Models substitute "-" and "--" freely,
+    and the wrong character produced clause="" — so a NO-GO that DID cite findings
+    was printed as unsupported and blocked nothing. "NO-GO" carries a hyphen of its
+    own, so the verdict word has to come off before the line is split."""
+    for line in ("NO-GO — 1, 3 — reason", "NO-GO - 1, 3 - reason",
+                 "NO-GO -- 1, 3 -- reason", "NO-GO – 1, 3 – reason", "NO-GO — 1, 3"):
+        art = tmp_path / f"p{abs(hash(line))}.md"
+        art.write_text("## FINDINGS\n- (R) HIGH — a — f:1 — w — FIX: x\n\n"
+                       f"## VERDICT\n{line}\n")
+        row = verdict_parse.read_panelist(art)
+        assert row["cites_local"] == [1, 3], line
+        assert row["citation_unreadable"] is False, line
+
+
+def test_prose_in_place_of_a_citation_is_still_unreadable(tmp_path):
+    """Widening the dash must not widen what counts as a citation."""
+    art = tmp_path / "p.md"
+    art.write_text("## FINDINGS\n- (R) HIGH — a — f:1 — w — FIX: x\n\n"
+                   "## VERDICT\nNO-GO — this breaks 3 callers\n")
+    row = verdict_parse.read_panelist(art)
+    assert row["cites_local"] == [] and row["citation_unreadable"] is True
+
+
+def test_a_numbered_finding_is_not_thrown_away(tmp_path):
+    """The verdict format asks panelists to cite findings BY NUMBER, so they number
+    them — and requiring a bullet dropped every numbered line without a word."""
+    art = tmp_path / "p.md"
+    art.write_text("## FINDINGS\n"
+                   "1. (R) HIGH — first — f:1 — w — FIX: x\n"
+                   "2) (G) LOW — second — f:2 — w — FIX: y\n"
+                   "- (R) MED — third — f:3 — w — FIX: z\n\n"
+                   "## VERDICT\nNO-GO — 1 — reason\n")
+    row = verdict_parse.read_panelist(art)
+    assert len(row["findings"]) == 3, row["findings"]
+
+
+def test_the_coverage_line_is_carried(tmp_path):
+    """The prompt demands COVERAGE and the parser read nobody's: it is excluded from
+    findings on purpose, and that made it invisible everywhere. A claim about what
+    was NOT looked at separates "nothing else is wrong" from "I did not look"."""
+    art = tmp_path / "p.md"
+    art.write_text("## FINDINGS\n- (R) HIGH — a — f:1 — w — FIX: x\n"
+                   "COVERAGE: read engine_pool.py and 3 callers; did NOT reach docker\n\n"
+                   "## VERDICT\nGO — fine\n")
+    row = verdict_parse.read_panelist(art)
+    assert "did NOT reach docker" in row["coverage"]
+    assert len(row["findings"]) == 1, "COVERAGE must not become a finding"

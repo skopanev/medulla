@@ -65,11 +65,25 @@ def _looks_like_finding(line: str) -> bool:
     `(R) HIGH — ...` is the format; `(R) Reproduced directly:` is prose that happens
     to carry a confidence mark, and admitting it would invent a finding nobody made.
     """
-    return bool(re.match(r"\(?[RG]\)?\s+(HIGH|MED|LOW)\b", line))
+    # An optional "1." / "12)" prefix is allowed: the verdict format asks panelists
+    # to cite findings by NUMBER, so they number them — and requiring a bullet threw
+    # every numbered finding away without a word.
+    return bool(re.match(r"(?:\d+[.)]\s*)?\(?[RG]\)?\s+(HIGH|MED|LOW)\b", line))
 
 
 def read_panelist(path: Path) -> dict:
     text = path.read_text(encoding="utf-8", errors="replace")
+    # The COVERAGE line is deliberately excluded from findings (no bullet, no
+    # severity) and was therefore read by nobody at all: the prompt demanded it, the
+    # parser dropped it, and the caller could not see the un-swept surface it names.
+    # A claim about what was NOT looked at is the difference between "nothing else is
+    # wrong" and "I did not look" — carry it.
+    coverage = ""
+    for line in _section(text, "## FINDINGS"):
+        m = re.match(r"\s*COVERAGE\s*:\s*(.+)", line, re.I)
+        if m:
+            coverage = m.group(1).strip()
+            break
     findings = []
     for line in _section(text, "## FINDINGS"):
         stripped = line.strip()
@@ -101,7 +115,13 @@ def read_panelist(path: Path) -> dict:
     word = next((w for w in VERDICT_WORDS if plain.startswith(w)), "")
     cites, unreadable = [], False
     if word == "NO-GO":
-        clause = plain.split("—")[1] if "—" in plain else ""
+        # ANY dash, not just the em-dash: models substitute "-" and "--" freely, and
+        # a split on the wrong character produced clause="" — the NO-GO was printed
+        # as unsupported and blocked nothing. Strip the verdict WORD first: "NO-GO"
+        # contains a hyphen itself, so splitting the whole line cuts inside it.
+        tail = plain[len(word):]
+        parts = re.split(r"\s*[—–-]+\s*", tail)
+        clause = parts[1] if len(parts) > 1 else ""
         if CITATION.match(clause):
             cites = [int(n) for n in re.findall(r"\d+", clause)]
         else:
@@ -110,6 +130,7 @@ def read_panelist(path: Path) -> dict:
         malformed.append(f"verdict not one of GO/NO-GO/INSUFFICIENT: {verdict_line[:40]!r}")
     return {
         "slug": path.stem,
+        "coverage": coverage,
         "malformed": malformed,
         "verdict": word or None,
         "line": verdict_line,
