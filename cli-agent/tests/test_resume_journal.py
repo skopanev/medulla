@@ -174,3 +174,25 @@ nodes:
     assert read_outcome(run)["outcome"] == "succeeded"             # outcome untouched
 
 
+
+
+def test_a_run_records_which_workflow_file_it_read(tmp_path):
+    """Nothing used to say WHICH definition a run loaded, and the question is not
+    academic: a machine-wide copy lagged the source by a day while every panel
+    silently ran the old roster, and finding that meant tracing a venv by hand.
+    It goes beside the journal, not in it — the journal is the resume contract and
+    holds completed steps only."""
+    text = """
+version: "2"
+start: n
+nodes:
+  n:
+    shell: 'echo "<signal:done>ok</signal:done>"'
+    on_signal: {done: __exit_ok__}
+"""
+    path, work = setup(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
+    run = runs_of(path.parent)[0]
+    source = (run / "source.txt").read_text()
+    assert str(path.resolve()) in source, source
+    assert "engine:" in source

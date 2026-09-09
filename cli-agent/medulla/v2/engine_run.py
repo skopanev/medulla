@@ -25,6 +25,7 @@ from .rundir import (
     prune_runs,
     sweep_pipeline_sessions,
 )
+from .contract import engine_version
 from .workflow_path import config_yaml
 
 
@@ -153,7 +154,19 @@ def run_workflow(
                                            # work): a backgrounded caller reads it now,
                                            # relative so it resolves on host under docker
         prune_runs(workflow.dir, workflow.keep_runs, workflow.timeout, runs_root)
+        # WHICH definition did this run actually read? Nothing used to say, and the
+        # question is not academic: a machine-wide copy can lag the source by days
+        # while every panel silently runs the old roster. Diagnosing that meant
+        # tracing the venv by hand, four times in one day. One journal line turns
+        # "I verified the file I chose" into "the program told me which file it
+        # read" — and it lands in the evidence a reader is already holding.
+        # NOT the journal: that file is the resume contract and holds completed
+        # STEPS only. This goes beside it, where a reader of the run already looks.
+        (store.dir / "source.txt").write_text(
+            f"workflow: {workflow.path.resolve()}\nengine: {engine_version()}\n",
+            encoding="utf-8")
         log(f"run {store.run_id} -> {store.dir}")
+        log(f"workflow {workflow.path.resolve()}")
         engine = Engine(workflow, store, workdir)
         outcome = engine.run(start_override)
         store.write_outcome(_normalize_outcome(outcome, store, engine))
