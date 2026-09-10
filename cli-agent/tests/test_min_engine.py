@@ -8,6 +8,8 @@ nothing to do with the change and no way to fix it.
 """
 import subprocess
 import sys
+
+import pytest
 from pathlib import Path
 
 from conftest import write_workflow as setup
@@ -106,4 +108,57 @@ def test_refresh_replaces_the_name_not_the_contents(tmp_path, monkeypatch):
     assert (dst / "run.sh").read_text() == "original\n"
     assert before != after, "same inode: a running reader would see spliced bytes"
     leftovers = [p.name for p in dst.iterdir() if "medulla-tmp" in p.name]
+    assert not leftovers, leftovers
+
+
+def test_skill_files_are_replaced_by_name_too(tmp_path):
+    """The workflow copy was fixed first because a shell script fails LOUDLY when
+    spliced. A SKILL.md fails silently: an agent reading it mid-refresh gets prose
+    that makes slightly less sense than it should, and nobody files a bug.
+
+    Written by breaking the property the check names — the assertion is on the inode,
+    because asserting the text passes for the whole life of the defect.
+    """
+    import os
+    from medulla.refresh import _replace_file
+
+    src = tmp_path / "new.md"
+    src.write_text("new skill\n")
+    dst = tmp_path / "SKILL.md"
+    dst.write_text("old skill\n")
+
+    before = os.stat(dst).st_ino
+    _replace_file(src, dst)
+
+    assert dst.read_text() == "new skill\n"
+    assert os.stat(dst).st_ino != before, "wrote through the inode a reader may hold"
+    assert not [p for p in tmp_path.iterdir() if "medulla-tmp" in p.name]
+
+
+def test_a_failed_replace_leaves_no_temp_behind(tmp_path, monkeypatch):
+    """The recovery path nobody exercises: a half-copied temp beside a live deploy is
+    worse than the failure that produced it.
+
+    The first version of this test passed WITHOUT the fix — a missing source never
+    creates a temp, so there was nothing to clean and the assertion proved nothing.
+    Breaking the property properly means failing AFTER the temp exists, so os.replace
+    is the thing that has to break.
+    """
+    import os as os_mod
+    from medulla import refresh
+
+    src = tmp_path / "new.md"
+    src.write_text("new\n")
+    dst = tmp_path / "SKILL.md"
+    dst.write_text("old\n")
+
+    def boom(*_args):
+        raise OSError("cross-device link")
+
+    monkeypatch.setattr(refresh.os, "replace", boom)
+    with pytest.raises(OSError):
+        refresh._replace_file(src, dst)
+
+    assert dst.read_text() == "old\n", "the original must survive a failed swap"
+    leftovers = [p.name for p in tmp_path.iterdir() if "medulla-tmp" in p.name]
     assert not leftovers, leftovers

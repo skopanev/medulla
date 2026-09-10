@@ -81,6 +81,25 @@ def _copy_bundle_over(src: Path, dst: Path) -> None:
 
 
 
+
+def _replace_file(src: Path, target: Path) -> None:
+    """Swap the NAME, never the contents of a file someone may be reading.
+
+    The same rule that spar-run.sh taught us the hard way: copy2 writes through to
+    the existing inode, so a reader already inside the file gets new bytes at an old
+    offset. A SKILL.md is read whole by an agent CLI at load time — a refresh landing
+    mid-read hands it a splice of two versions, and unlike a shell script it fails
+    silently, as prose that makes slightly less sense than it should.
+    """
+    tmp = target.with_name(f".{target.name}.medulla-tmp-{os.getpid()}")
+    try:
+        shutil.copy2(src, tmp)
+        os.replace(tmp, target)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def _declared_min_engine(path: Path) -> str | None:
     """Read min_engine without a YAML parse: this runs before any engine machinery,
     and a definition too new to parse is exactly the case being caught."""
@@ -148,7 +167,7 @@ def refresh_skill(name: str, root: str, depth: int = DEFAULT_REFRESH_DEPTH, dry_
                 print(f"  [dry-run] SKILL.md -> {dest / name} (machine-wide)")
             else:
                 try:
-                    shutil.copy2(bundle_skill, target)
+                    _replace_file(bundle_skill, target)
                     print(f"  SKILL.md  -> {dest / name} (machine-wide)")
                 except OSError as exc:
                     failures.append(f"{target}: {exc}")
@@ -198,7 +217,7 @@ def refresh_skill(name: str, root: str, depth: int = DEFAULT_REFRESH_DEPTH, dry_
             if dry_run:
                 print(f"  [dry-run] SKILL.md -> {p}"); n_sk += 1; continue
             try:
-                shutil.copy2(bundle_skill, target)
+                _replace_file(bundle_skill, target)
                 print(f"  SKILL.md  -> {p}"); n_sk += 1
             except OSError as e:
                 print(f"  FAILED    -> {target}: {e}"); failures.append(str(target))
