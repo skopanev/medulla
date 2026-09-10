@@ -1,7 +1,7 @@
 """What the container gets in its environment.
 
-The .env tiers are collected whole, then docker.secrets must explicitly grant every
-key that crosses the container boundary.
+The .env tiers are collected whole and cross into the container whole — shell bodies
+are what they are for. An agent body inherits only what its harness was granted.
 """
 import importlib.util
 import os
@@ -20,7 +20,7 @@ def dockerpy():
 
 
 def test_tier_merge_nearest_wins_all_tiers_whole(dockerpy, tmp_path, monkeypatch):
-    # Collection stays whole; the later policy gate rejects undeclared keys explicitly.
+    # Collection stays whole: the split happens per body, not at the container edge.
     home = tmp_path / "home"
     (home / ".medulla").mkdir(parents=True)
     (home / ".medulla" / ".env").write_text(
@@ -170,9 +170,15 @@ nodes: {one: {agent: {harness: private-cli}}}
         resolve_policy(str(workflow))
 
 
-def test_undeclared_dotenv_fails_and_agents_remove_rival_env(tmp_path):
+def test_business_keys_reach_the_container_but_never_an_agent(tmp_path):
+    """A business key is not an undeclared credential.
+
+    It belongs to the shell nodes the .env was written for, and the agent must not
+    read it. The old gate refused the run instead, and the only way past that error
+    was to grant a business key to a harness — making the model's environment worse to
+    make the message go away.
+    """
     from medulla.v2.secret_policy import (
-        SecretPolicyError,
         encoded_policy,
         env_keys_to_remove,
         resolve_policy,
@@ -187,12 +193,39 @@ docker:
 nodes: {}
 ''', encoding="utf-8")
     policy = resolve_policy(str(workflow))
-    with pytest.raises(SecretPolicyError, match="UNDECLARED_TOKEN"):
-        select_env_values(policy, {"UNDECLARED_TOKEN": "secret"}, {})
-    assert select_env_values(policy, {"SLACK_TOKEN": "ok"}, {})["SLACK_TOKEN"] == "ok"
-    assert "OPENAI_API_KEY" in env_keys_to_remove("claude-code", encoded_policy(policy))
-    assert "CLAUDE_CODE_OAUTH_TOKEN" not in env_keys_to_remove(
-        "claude-code", encoded_policy(policy))
+    # A real .env is hundreds of names nobody enumerates. None of these appear
+    # anywhere in medulla, and that is the point: the rule reads the grant, never
+    # a list of keys it was taught to distrust.
+    business = {f"PROJECT_KEY_{n}": f"v{n}" for n in range(500)}
+    dotenv = {**business, "SLACK_TOKEN": "ok"}
+
+    # The container gets all of it: shell bodies are what the .env is for.
+    values = select_env_values(policy, dotenv, {})
+    assert all(values[name] == value for name, value in business.items())
+    assert values["SLACK_TOKEN"] == "ok"
+
+    encoded = encoded_policy(policy)
+    remove = set(env_keys_to_remove("claude-code", encoded, present=dotenv))
+    assert business.keys() <= remove, "not one business key may reach a model"
+    assert "OPENAI_API_KEY" in remove, "nor a rival harness credential"
+    assert "SLACK_TOKEN" not in remove, "an explicit grant survives"
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in remove, "nor its own credential"
+
+
+def test_a_bare_run_strips_too(tmp_path):
+    """No policy travels outside Docker, but the engine still knows what it merged.
+
+    Host system vars are never candidates, so PATH and HOME survive untouched.
+    """
+    from medulla.v2.secret_policy import env_keys_to_remove
+    remove = env_keys_to_remove("codex", "", present={"PROJECT_KEY_1", "PATH"})
+    assert "PROJECT_KEY_1" in remove
+    assert "ANTHROPIC_API_KEY" in remove, "rival credential goes even with no policy"
+    assert "OPENAI_API_KEY" not in remove, "codex still authenticates"
+    assert env_keys_to_remove("codex", "", present=()) == sorted(
+        {"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ZHIPU_API_KEY",
+         "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CLOUD_PROJECT",
+         "GOOGLE_APPLICATION_CREDENTIALS", "VERTEX_LOCATION"})
 
 
 def test_credential_mounts_follow_selected_bundles(dockerpy, tmp_path, monkeypatch):

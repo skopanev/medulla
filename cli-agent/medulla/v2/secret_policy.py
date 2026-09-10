@@ -133,15 +133,15 @@ def resolve_policy(workflow: str | None) -> dict:
 
 
 def select_env_values(policy: dict, dotenv: dict, host_env=None) -> dict[str, str]:
-    """Select declared values; merged .env remains whole until this explicit gate."""
+    """Everything the CONTAINER gets: this run's harness credentials from the host,
+    plus the merged .env whole.
+
+    A business key is not a credential to declare. Shell nodes are what the .env is
+    for, and an agent body never sees it — `env_keys_to_remove` strips it before the
+    child starts. Demanding a declaration here asked the wrong question and offered a
+    worse answer: the only way past the error was to grant a business key to codex.
+    """
     allowed = set(policy["all_env"])
-    undeclared = set(dotenv) - allowed
-    if undeclared:
-        names = ", ".join(sorted(undeclared))
-        raise SecretPolicyError(
-            f"merged .env contains undeclared keys: {names}; remove unused keys from "
-            "the merged tiers or grant each to its intended selected harness under "
-            "docker.secrets.grants.<harness>.env")
     source = os.environ if host_env is None else host_env
     values = {name: source[name] for name in allowed if source.get(name)}
     values.update(dotenv)
@@ -166,18 +166,35 @@ def prepare_run_secrets(workflow, collect_dotenv, add_claude_fallback):
     return policy, selected
 
 
-def env_keys_to_remove(harness: str, raw: str | None = None) -> list[str]:
-    """Secrets in the engine env that this harness's child must not inherit."""
+def env_keys_to_remove(harness: str, raw: str | None = None,
+                       present=()) -> list[str]:
+    """Names the agent body must not inherit — everything present that THIS harness
+    was not granted.
+
+    Two sources feed it. Rival harness credentials come from the run policy. The
+    rest is `present`: names the engine merged into the body env itself
+    (`_base_env` folds the whole .env into every body), which is how a business key
+    reaches a model. The question is never "does medulla recognise this key" — a
+    name it has never heard of is removed the same way. Shell bodies are untouched;
+    the caller only asks for agents.
+    """
+    candidates = {str(name) for name in present}
     raw = os.environ.get(POLICY_ENV, "") if raw is None else raw
     if not raw:
-        return []                         # bare/non-Docker runs keep today's env
+        # Bare/non-Docker: no policy travels in the environment, but the engine still
+        # knows what it merged and the registry still knows what this harness may
+        # hold. Host system vars are not candidates, so PATH and HOME survive.
+        allowed = set(registry()["harnesses"].get(harness, {}).get("env", []))
+        rivals = {name for other, spec in registry()["harnesses"].items()
+                  for name in spec["env"] if other != harness}
+        return sorted((candidates | rivals) - allowed)
     try:
         policy = json.loads(raw)
     except (TypeError, json.JSONDecodeError):
-        return sorted({name for spec in registry()["harnesses"].values()
-                       for name in spec["env"]})             # malformed fails closed
+        return sorted(candidates | {name for spec in registry()["harnesses"].values()
+                                    for name in spec["env"]})  # malformed fails closed
     allowed = set(policy.get("harnesses", {}).get(harness, {}).get("env", []))
-    return sorted(set(policy.get("all_env", [])) - allowed)
+    return sorted((candidates | set(policy.get("all_env", []))) - allowed)
 
 
 def _read_workflow(workflow: str | None) -> dict:

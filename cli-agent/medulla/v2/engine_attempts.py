@@ -105,7 +105,12 @@ class AttemptsMixin(BodyMixin):
                    **invoke.env}
             env_remove = list(invoke.env_remove)
             if current.kind == "agent" and agent_spec is not None:
-                env_remove.extend(env_keys_to_remove(agent_spec.harness))
+                # Names this body only INHERITED from the merged .env — still carrying
+                # the dotenv value, so no var or input overrode them. A workflow var of
+                # the same name is the author's explicit choice and stays.
+                inherited = {k for k, v in self.dotenv.items() if env.get(k) == v}
+                env_remove.extend(env_keys_to_remove(agent_spec.harness,
+                                                     present=inherited))
 
             result = proc_run(invoke.argv, self.workdir, eff, extra_env=env,
                               watch_output=(current.kind == "agent"),
