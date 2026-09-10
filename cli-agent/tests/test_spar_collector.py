@@ -357,3 +357,17 @@ def test_nothing_is_promoted_when_every_high_was_cited(tmp_path):
               "## VERDICT\nNO-GO — 1 — that one\n"),
     ], expected=1, delivered=1, min_decided=1)
     assert data["promoted_high"] == []
+
+
+def test_the_verdict_dates_the_round_and_the_collector_separately(tmp_path):
+    """Two clocks in one file. `engine` comes from source.txt, written when the run
+    STARTED; the collector that wrote the verdict may be newer, because a round begun
+    before an upgrade is synthesised after it. Measured in the field: verdicts with
+    the same engine stamp appeared on both sides of a field's introduction — ordered
+    by write time, not by engine. Dating a FIELD by the round's clock tells a reader
+    to ignore it exactly where it exists."""
+    (tmp_path / "source.txt").write_text("workflow: /x/workflow.yaml\nengine: 4.70.1\n")
+    _, data, _ = collect(tmp_path, [("s", "## FINDINGS\nNONE\n\n## VERDICT\nGO — ok\n")],
+                         expected=1, delivered=1, min_decided=1)
+    assert data["engine"] == "4.70.1", "the round's clock comes from source.txt"
+    assert data.get("collector"), "the writing program names itself too"

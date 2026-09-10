@@ -142,6 +142,20 @@ machine-readable part: carry every line forward, attributed. `NONE` in FINDINGS 
 real answer, and so is `INSUFFICIENT` — a panelist who could not see enough says so
 instead of dressing a guess as a decision.
 
+**A verdict carries TWO clocks, and they disagree more often than you would think.**
+`engine` dates the ROUND — it is written when the run starts. `collector` dates the
+program that WROTE the verdict, which may be newer: a round begun before an upgrade
+and synthesised after it carries an old engine with new fields. Measured across one
+morning's runs, verdicts stamped with the same engine appeared on both sides of a
+field's introduction — monotonic by write time, not by engine. So date a FIELD by
+`collector` and the round by `engine`; telling a reader "this field exists from
+version X" using the wrong clock makes them ignore it exactly where it is present.
+
+**`attempts > 1` does not mean the attempt was vetoed.** A retry has more than one
+cause, and only some are form refusals. Seen live: `attempts: 2` alongside `ok: true`,
+`rc: 0`, `reason: "ok"` and an EMPTY message. Every actual veto carried `reason: post`
+AND a `message` naming the rule, so read those two rather than the count.
+
 **When a seat is missing from the round, the manifest says WHY in words.** One read
 gives everything, and `input.slug` is the artifact's filename, so it leads straight to
 the file to open by hand:
