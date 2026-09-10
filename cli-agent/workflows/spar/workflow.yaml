@@ -284,6 +284,7 @@ nodes:
       python3 "$MEDULLA_WORKFLOW_DIR/scripts/collect_verdict.py" \
         "$MEDULLA_RUN_DIR" "$ROUND_DIR" \
         --expected "$total" --delivered "$ok" --min-decided "$MIN_DECIDED" \
+        --delivered-slugs "$(echo "$rows" | jq -r '[.[] | select(.ok) | (.input.slug // .key)] | join(",")')" \
         --subject "ticket=$TICKET" --subject "purpose=$PURPOSE" \
         --subject "base=$BASE" --subject "head=$HEAD" \
         --subject "patch_digest=$PATCH_DIGEST" \

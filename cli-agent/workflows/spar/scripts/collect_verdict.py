@@ -16,9 +16,23 @@ from pathlib import Path
 from verdict_parse import NOT_PANELISTS, SEVERITY_ORDER, read_panelist
 
 
-def build(round_dir: Path) -> dict:
+def build(round_dir: Path, delivered_slugs=None) -> dict:
     panelists = [read_panelist(p) for p in sorted(round_dir.glob("*.md"))
                  if p.name not in NOT_PANELISTS]
+
+    # A panelist the ENGINE refused is not a voter. The collector reads files off
+    # disk, so an artifact rejected by the delivery hook still sat there with a
+    # readable VERDICT and was counted — measured twice on live rounds, and the
+    # second one had a clean parse and its findings intact, so this is not a
+    # side-effect of a parsing failure but its own mechanism. One round read GO 2 /
+    # NO-GO 2 where the engine's own manifest said GO 1 / NO-GO 2, and a landing was
+    # standing on it. The text stays visible — a rejected artifact is still evidence
+    # a human may want — but it does not vote and it does not block.
+    refused = set()
+    if delivered_slugs is not None:
+        refused = {p["slug"] for p in panelists if p["slug"] not in delivered_slugs}
+        for p in panelists:
+            p["refused"] = p["slug"] in refused
 
     # severity band, then each panelist's own order inside it
     numbered, order = [], []
@@ -32,6 +46,9 @@ def build(round_dir: Path) -> dict:
 
     blocking, unsupported = [], []
     for p in panelists:
+        if p.get("refused"):
+            p["cites"] = []
+            continue
         ids = [f"F{by_local[(p['slug'], c)]}" for c in p["cites_local"]
                if (p["slug"], c) in by_local]
         p["cites"] = ids
@@ -49,7 +66,8 @@ def build(round_dir: Path) -> dict:
     # blocking alone is enough to hold the change (see `state` below).
     unsup = set(unsupported)
     counts = {w: sum(1 for p in panelists
-                     if p["verdict"] == w and p["slug"] not in unsup)
+                     if p["verdict"] == w and p["slug"] not in unsup
+                     and not p.get("refused"))
               for w in ("GO", "NO-GO", "INSUFFICIENT")}
     counts["none"] = sum(1 for p in panelists if not p["verdict"])
     counts["unsupported"] = len(unsupported)
@@ -57,7 +75,8 @@ def build(round_dir: Path) -> dict:
     # defect at a cited line is what the contract's blocker test is about, whatever
     # verdict word the panelist chose around it.
     verified_high = [f["id"] for f in numbered
-                     if f["severity"] == "HIGH" and f["confidence"] == "R"]
+                     if f["severity"] == "HIGH" and f["confidence"] == "R"
+                     and f["panelist"] not in refused]
     # ...and therefore they belong in the WORK LIST, not only in the gate arithmetic.
     # They were counted in `state` and left out of `blocking`, so a verified HIGH that
     # no panelist happened to CITE in its one-line reason disappeared from the list
@@ -147,12 +166,18 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--expected", type=int, default=0)
     ap.add_argument("--delivered", type=int, default=0)
     ap.add_argument("--min-decided", type=int, default=3)
+    # Comma-separated slugs the ENGINE accepted. Absent: every artifact on disk
+    # counts, which is the pre-4.70 behaviour and what old callers still get.
+    ap.add_argument("--delivered-slugs", default=None)
     # Whatever the caller knows about WHAT was reviewed. Absent stays absent: an empty
     # string in a gate field is worse than no field, because it reads as an answer.
     ap.add_argument("--subject", action="append", default=[], metavar="KEY=VALUE")
     a = ap.parse_args(argv)
 
-    data = build(a.round_dir)
+    slugs = None
+    if a.delivered_slugs is not None:
+        slugs = {x.strip() for x in a.delivered_slugs.split(",") if x.strip()}
+    data = build(a.round_dir, slugs)
     c = data["counts"]
     decided = c["GO"] + c["NO-GO"]
     # ONE source of participant state. `--delivered` came from the manifest, which
@@ -192,7 +217,8 @@ def main(argv: list[str]) -> int:
         # separates "nothing else is wrong" from "I did not look" reached no reader.
         "panelists": [{"slug": p["slug"], "verdict": p["verdict"], "reason": p["line"],
                        "cites": p["cites"], "findings": len(p["findings"]),
-                       **({"coverage": p["coverage"]} if p.get("coverage") else {})}
+                       **({"coverage": p["coverage"]} if p.get("coverage") else {}),
+                       **({"refused_by_engine": True} if p.get("refused") else {})}
                       for p in data["panelists"]],
         "findings": [{"id": f["id"], "panelist": f["panelist"],
                       "confidence": f["confidence"], "severity": f["severity"],

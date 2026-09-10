@@ -34,7 +34,8 @@ def run_dir(tmp_path):
     return tmp_path
 
 
-def collect(tmp_path, panelists, *, expected=None, delivered=None, min_decided=3):
+def collect(tmp_path, panelists, *, expected=None, delivered=None, min_decided=3,
+            delivered_slugs=None):
     """Run the collector over a round: returns (markdown, parsed json, result)."""
     tmp_path.mkdir(parents=True, exist_ok=True)
     art = tmp_path / "artifacts"
@@ -46,7 +47,8 @@ def collect(tmp_path, panelists, *, expected=None, delivered=None, min_decided=3
         [sys.executable, str(COLLECTOR), str(tmp_path), str(art),
          "--expected", str(n if expected is None else expected),
          "--delivered", str(n if delivered is None else delivered),
-         "--min-decided", str(min_decided)],
+         "--min-decided", str(min_decided)]
+        + ([] if delivered_slugs is None else ["--delivered-slugs", delivered_slugs]),
         capture_output=True, text=True, check=False)
     return ((tmp_path / "verdict.md").read_text(),
             json.loads((tmp_path / "verdict.json").read_text()), res)
@@ -55,12 +57,13 @@ def collect(tmp_path, panelists, *, expected=None, delivered=None, min_decided=3
 COLLECTOR = Path(__file__).resolve().parent.parent / "workflows/spar/scripts/collect_verdict.py"
 
 
-def synthesize(run_dir, delivered=4, expected=4, min_decided=1):
+def synthesize(run_dir, delivered=4, expected=4, min_decided=1, delivered_slugs=None):
     """Run the collector over a round, as the workflow node does."""
     res = subprocess.run(
         [sys.executable, str(COLLECTOR), str(run_dir), str(run_dir / "artifacts"),
          "--expected", str(expected), "--delivered", str(delivered),
-         "--min-decided", str(min_decided)],
+         "--min-decided", str(min_decided)]
+        + ([] if delivered_slugs is None else ["--delivered-slugs", delivered_slugs]),
         capture_output=True, text=True, check=False)
     return (run_dir / "verdict.md").read_text(), res.stdout
 
@@ -264,3 +267,45 @@ def test_a_guessed_high_is_not_promoted_into_the_work_list(tmp_path):
     # Assert on the JSON, not the prose: the HOW-TO-READ block mentions the word.
     assert data["blocking"] == [], data["blocking"]
     assert data["verified_high"] == []
+
+
+def test_an_artifact_the_engine_refused_does_not_vote(tmp_path):
+    """The collector reads files off disk, so an artifact rejected by the delivery
+    hook still sat there with a readable VERDICT and was counted. Measured twice on
+    live rounds — and the second had a CLEAN parse with its findings intact, so this
+    is its own mechanism, not a side-effect of a parsing failure.
+
+    One round read GO 2 / NO-GO 2 where the engine's manifest said GO 1 / NO-GO 2,
+    and a landing was standing on it.
+    """
+    art = [("gemini", "## FINDINGS\nNONE\n\n## VERDICT\nGO — looks fine\n"),
+           ("gpt5", "## FINDINGS\n- (R) HIGH — real — f.py:1 — why — FIX: x\n\n"
+                    "## VERDICT\nNO-GO — 1 — that one\n"),
+           ("sonnet", "## FINDINGS\nNONE\n\n## VERDICT\nGO — agree\n")]
+    _, data, _ = collect(tmp_path, art, expected=3, delivered=2, min_decided=1,
+                         delivered_slugs="gpt5,sonnet")
+    assert data["counts"]["GO"] == 1, data["counts"]
+    assert data["counts"]["NO-GO"] == 1
+    refused = [p for p in data["panelists"] if p.get("refused_by_engine")]
+    assert [p["slug"] for p in refused] == ["gemini"]
+
+
+def test_a_refused_artifact_still_shows_its_text(tmp_path):
+    """It does not vote and it does not block — but a rejected artifact is still
+    evidence a human may want, so it stays visible rather than being deleted."""
+    art = [("gemini", "## FINDINGS\n- (R) HIGH — from a refused seat — f.py:9 — why"
+                      " — FIX: y\n\n## VERDICT\nGO — fine\n"),
+           ("gpt5", "## FINDINGS\nNONE\n\n## VERDICT\nGO — fine\n")]
+    out, data, _ = collect(tmp_path, art, expected=2, delivered=1, min_decided=1,
+                           delivered_slugs="gpt5")
+    assert "from a refused seat" in out, "the text must remain readable"
+    assert data["blocking"] == [], "a refused seat cannot hold the change"
+    assert data["verified_high"] == []
+
+
+def test_without_the_list_every_artifact_counts(tmp_path):
+    """Old callers pass no list and keep the previous behaviour."""
+    art = [("gemini", "## FINDINGS\nNONE\n\n## VERDICT\nGO — fine\n"),
+           ("gpt5", "## FINDINGS\nNONE\n\n## VERDICT\nGO — fine\n")]
+    _, data, _ = collect(tmp_path, art, expected=2, delivered=2, min_decided=1)
+    assert data["counts"]["GO"] == 2
