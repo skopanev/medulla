@@ -15,6 +15,16 @@ from pathlib import Path
 
 from verdict_parse import NOT_PANELISTS, SEVERITY_ORDER, read_panelist
 
+# The version of THIS SCRIPT, not of the installed package. The first attempt asked
+# importlib for "medulla" and got nothing: inside the panel container medulla lives in
+# a pipx venv that the workflow's python3 cannot see, so the field never appeared in a
+# real run — green in my venv, absent in production, which is the exact failure class
+# this file has spent the night helping to find. And the package would have been the
+# wrong answer anyway: the collector is a FILE from the mounted workflow directory,
+# refreshed on the host independently of the engine in the container. That is why two
+# rounds with one engine stamp can differ in fields. A test pins this to pyproject.
+COLLECTOR_VERSION = "4.72.1"
+
 
 def build(round_dir: Path, delivered_slugs=None) -> dict:
     panelists = [read_panelist(p) for p in sorted(round_dir.glob("*.md"))
@@ -211,12 +221,7 @@ def main(argv: list[str]) -> int:
     # engine 4.70.1 appear on BOTH sides of a field's introduction, monotonic by write
     # time and not by engine. Saying "read this field on 4.71.1+" would tell a reader
     # to ignore it exactly where it exists.
-    collector = ""
-    try:
-        from importlib.metadata import version as _pkg_version
-        collector = _pkg_version("medulla")
-    except Exception:
-        pass
+    collector = COLLECTOR_VERSION
 
     engine = ""
     try:

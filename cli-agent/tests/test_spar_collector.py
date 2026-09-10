@@ -371,3 +371,31 @@ def test_the_verdict_dates_the_round_and_the_collector_separately(tmp_path):
                          expected=1, delivered=1, min_decided=1)
     assert data["engine"] == "4.70.1", "the round's clock comes from source.txt"
     assert data.get("collector"), "the writing program names itself too"
+
+
+def test_the_collector_version_matches_the_package():
+    """A hardcoded constant rots silently, so it is pinned to pyproject here.
+
+    It has to be hardcoded: inside the panel container medulla lives in a pipx venv
+    the workflow's python3 cannot see, so asking importlib returns nothing and the
+    field never appears in a real run. The first version of this feature did exactly
+    that — green in a venv where medulla was installed editable, absent in production
+    — and a consumer noticed the field missing from four live rounds before I did.
+    """
+    import re
+    root = Path(__file__).resolve().parent.parent.parent
+    declared = re.search(r'^version = "([^"]+)"',
+                         (root / "pyproject.toml").read_text(), re.M).group(1)
+    src = COLLECTOR.read_text()
+    pinned = re.search(r'^COLLECTOR_VERSION = "([^"]+)"', src, re.M).group(1)
+    assert pinned == declared, (
+        f"collect_verdict.py says {pinned}, pyproject says {declared} — "
+        "bump both, or the verdict misdates itself")
+
+
+def test_the_collector_version_needs_no_installed_package(tmp_path, monkeypatch):
+    """The container's python3 cannot import medulla. The field must not depend on it."""
+    monkeypatch.setenv("PYTHONPATH", "")
+    _, data, _ = collect(tmp_path, [("s", "## FINDINGS\nNONE\n\n## VERDICT\nGO — ok\n")],
+                         expected=1, delivered=1, min_decided=1)
+    assert data.get("collector"), "the script must name itself without importing anything"
