@@ -92,9 +92,9 @@ nodes:
       if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         head=$(git rev-parse HEAD 2>/dev/null || echo "no-commits")
 
-        # ONE WALK OF THE TREE, not four. This block used to run `git status` for the
-        # dirty flag, `git status` again inside the digest, `git ls-files --others` to
-        # count, and `git diff` — four full traversals. On the host that is under a
+        # THREE WALKS, DOWN FROM FOUR, AND NONE AT ALL ON A CLEAN TREE. This block used
+        # to run `git status` for the dirty flag, `git status` again inside the digest,
+        # `git ls-files --others` to count, and `git diff`. On the host that is under a
         # second; through virtiofs in a container it was measured at 20.99s against a
         # 30s budget, and nine rounds had already died in this node. Nine seconds of
         # headroom is not headroom when three panels run at once.
@@ -124,7 +124,19 @@ nodes:
         # fingerprint passed off as a whole one is worse than none: it compares equal
         # to nothing and unequal to everything, and the reader cannot tell why.
         echo "<signal:update>prepare: tree read, ${untracked_n:-0} untracked — computing the digest</signal:update>"
-        if [ "${untracked_n:-0}" -le 2000 ]; then
+        if [ -z "$status" ]; then
+          # A CLEAN TREE NEEDS NO FURTHER WALK. An empty status means no change to a
+          # tracked file and no untracked file — so `git diff HEAD` and `git ls-files
+          # --others` are both empty BY DEFINITION, and each still costs a full
+          # traversal to prove it. That is the expensive case in the field, not the
+          # dirty one: a clean checkout carrying 28576 built and installed files spent
+          # 12s here at moderate load and died at 30s under load, with ZERO untracked
+          # files to hash. The digest is byte-identical to the long path — which is
+          # what makes the offline check work at all:
+          #     printf 'head:<sha>\n' | shasum -a 256
+          scope=full
+          content=$(printf 'head:%s\n' "$head" | shasum -a 256 2>/dev/null | cut -d' ' -f1)
+        elif [ "${untracked_n:-0}" -le 2000 ]; then
           scope=full
           content=$( { printf 'head:%s\n' "$head"
                        # NOT printf '%s\n': on a clean tree status is EMPTY, and a
@@ -314,15 +326,40 @@ nodes:
         cp "$f" "$ROUND_DIR/superseded/$MEDULLA_INPUT_SLUG.${MEDULLA_ATTEMPT_ID:-attempt}.md" \
           2>/dev/null || true
       fi
-      test -s "$f" || { echo "no artifact written" >&2; exit 1; }
+      # SAY WHY IT WROTE NOTHING, when the harness itself said so. A body can exit
+      # non-zero with an EMPTY stderr because it reports failures as JSON on stdout —
+      # measured: a provider answered "Weekly/Monthly Limit Exhausted" there, and the
+      # manifest row read "stderr:" followed by nothing. Three panels were escalated
+      # as unexplained while the reason sat in a file nobody knew to open. The status
+      # is unchanged: this is still a failure, and still exits 1.
+      if [ ! -s "$f" ]; then
+        why=$(python3 "$MEDULLA_WORKFLOW_DIR/scripts/provider_error.py" \
+                "${MEDULLA_ATTEMPT_LOG:-}" 2>/dev/null || true)
+        if [ -n "$why" ]; then
+          echo "no artifact written; $why" >&2
+        else
+          echo "no artifact written" >&2
+        fi
+        exit 1
+      fi
       # Any heading level. A panelist wrote `### VERDICT`, the hook rejected a complete
       # artifact for it, and the round reported one fewer delivered than it had.
-      grep -qE '^#+ *FINDINGS' "$f" || { echo "no FINDINGS section" >&2; exit 1; }
-      grep -qE '^#+ *VERDICT'  "$f" || { echo "no VERDICT section" >&2; exit 1; }
+      #
+      # CASE-INSENSITIVE, LIKE THE COLLECTOR. These two checks and the collector ask
+      # the same question of the same file, and they used to answer differently: the
+      # hook was `^#+ *FINDINGS`, the collector `(?im)^#+\s*FINDINGS\b`. A panelist
+      # that wrote `## Findings` had a complete review REJECTED by the hook while the
+      # collector would have parsed it whole — the system refusing what it can already
+      # read. Measured: 13 vetoes for "no FINDINGS section" in the stored manifests,
+      # 5 of them for the case of one letter, and the retry never helped because the
+      # panelist writes the same heading the second time.
+      # Whitespace to match too: the collector allows a tab, ` *` does not.
+      grep -qiE '^#+[[:space:]]*FINDINGS' "$f" || { echo "no FINDINGS section" >&2; exit 1; }
+      grep -qiE '^#+[[:space:]]*VERDICT'  "$f" || { echo "no VERDICT section" >&2; exit 1; }
       # skip fences: a panelist that copied the prompt's example verbatim wraps the
       # verdict in ``` and repeats the heading inside it — the first non-empty line
       # was the fence, and a delivered artifact was failed for "no verdict"
-      v=$(awk '/^#+ *VERDICT/{f=1; next} /^#/{f=0} f && /^```/{next} f && NF {print; exit}' "$f")
+      v=$(awk 'toupper($0) ~ /^#+[[:space:]]*VERDICT/{f=1; next} /^#/{f=0} f && /^```/{next} f && NF {print; exit}' "$f")
       # `**NO-GO**.` is a verdict; emphasis is the model decorating, not deciding
       v=$(printf '%s' "$v" | tr -d '*_`')
       printf '%s' "$v" | sed 's/^[[:space:]]*//' | grep -qE '^(GO|NO-GO|INSUFFICIENT)' \

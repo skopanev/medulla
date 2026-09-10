@@ -203,10 +203,20 @@ cmd_start() {
     : "${MEDULLA_RUN_ID:="${box##*/}-$$"}"
     export MEDULLA_RUN_ID
 
-    medulla --print-run-dir --runs-folder "$box" \
+    # OUTLIVE THE SESSION THAT STARTED IT. `cmd &` leaves the child in this shell's
+    # process group, so when the caller's session ends the kernel sends SIGHUP to the
+    # group and the panel dies mid-round — after twenty minutes of paid models. Twice
+    # this shows as a round that plainly FINISHED: journal terminal, verdict.json and
+    # verdict.md on disk, and no outcome.json, because the engine writes that last and
+    # never got there. `wait` then reported "no container and no outcome" about a
+    # review that was complete, which is the worst direction to be wrong in.
+    # nohup, not setsid: setsid is not on macOS. stdout and stderr are already
+    # redirected, so nohup writes no nohup.out.
+    nohup medulla --print-run-dir --runs-folder "$box" \
         -w "$WORKFLOW" "$@" --var-file "QUESTION=$qfile" \
         >"$log" 2>"$err" &
     local pid=$!
+    disown "$pid" 2>/dev/null || true
 
     # Watch the PROCESS as well as the file: medulla that dies before printing — bad
     # yaml, an image that must be built, a daemon that went away — would otherwise
@@ -272,8 +282,25 @@ cmd_wait() {
     # start -> wait within seconds is the documented path. Demanding the directory now
     # is the very race `start` was fixed for.
 
-    local waited=0 gone=0
+    # A ROUND CAN FINISH WITHOUT BEING MARKED FINISHED. outcome.json is written last,
+    # so an engine killed after the terminal transition leaves a COMPLETE review with
+    # no marker: journal terminal, verdict.json and verdict.md on disk. Read the
+    # JOURNAL, never the presence of a verdict file — a verdict exists long before the
+    # round ends, and treating it as completion would hide real failures.
+    journal_terminal() {
+        python3 "$(dirname "$0")/panel_state.py" --terminal "$1" 2>/dev/null
+    }
+
+    local waited=0 gone=0 terminal=""
     while [ ! -f "$run/outcome.json" ]; do
+        terminal=$(journal_terminal "$run") || terminal=""
+        if [ -n "$terminal" ]; then
+            echo "spar-run: the round FINISHED but was never marked finished ($terminal)." >&2
+            echo "  The journal reached a terminal state and outcome.json is absent," >&2
+            echo "  which means the engine was killed after the last node completed." >&2
+            echo "  What follows is the verdict of a completed round, not a partial one." >&2
+            break
+        fi
         sleep 10
         waited=$((waited + 10))
         # A panel that died on its second minute should not cost forty-five. Give the
@@ -342,10 +369,23 @@ cmd_wait() {
         echo "  $f"
     done
     echo "panel finished: $delivered panelist artifact(s) in $run/artifacts/"
-    grep -q '"outcome": *"succeeded"' "$run/outcome.json" 2>/dev/null || {
-        echo "spar-run: the run did NOT succeed — read $run/outcome.json" >&2
-        exit 2
-    }
+    # A FINISHED FAILURE IS STILL A FAILURE. With no outcome.json there is nothing to
+    # grep, and grepping a missing file would have called every unmarked round a
+    # failure — including the completed ones this branch exists to rescue. The journal
+    # already said which terminal it reached; use that, and say where it came from.
+    # `[ x ] && { ... }` here would BE the function's exit status when the test is
+    # false — a successful round would return 1 for having nothing to report.
+    if [ ! -f "$run/outcome.json" ]; then
+        if [ "$terminal" = "__exit_fail__" ]; then
+            echo "spar-run: the run FAILED (journal: __exit_fail__; outcome.json was never written)" >&2
+            exit 2
+        fi
+    else
+        grep -q '"outcome": *"succeeded"' "$run/outcome.json" 2>/dev/null || {
+            echo "spar-run: the run did NOT succeed — read $run/outcome.json" >&2
+            exit 2
+        }
+    fi
 }
 
 case "${1:-}" in

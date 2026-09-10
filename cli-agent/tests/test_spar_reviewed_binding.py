@@ -325,3 +325,49 @@ def test_the_stage_line_carries_the_untracked_COUNT(repo):
         (big / f"f{i}.txt").write_text("x")
     out = run_prepare(repo)
     assert "2100 untracked" in out, out
+
+
+def test_a_clean_tree_costs_ONE_walk_not_three(repo):
+    """The expensive case in the field is the CLEAN tree, not the dirty one.
+
+    An empty status means no tracked file changed and no untracked file exists, so
+    `git diff HEAD` and `git ls-files --others` are both empty by definition — and
+    each still costs a full traversal to prove it. Measured downstream: a clean
+    checkout carrying 28576 built and installed files spent 12s in this node at
+    moderate load and died at 30s under load, with ZERO untracked files to hash.
+    """
+    seen = []
+    real = subprocess.run
+
+    # OUTSIDE the tree: a wrapper directory inside it is an untracked file, and the
+    # fixture would make the very tree it calls clean into a dirty one.
+    fake = repo.parent / "gitwrap"
+    fake.mkdir(exist_ok=True)
+    (fake / "git").write_text(
+        "#!/bin/sh\n"
+        'printf "%s\\n" "$*" >> "$GIT_CALL_LOG"\n'
+        'exec /usr/bin/git "$@"\n')
+    (fake / "git").chmod(0o755)
+    log = repo.parent / "git-calls.txt"
+    log.write_text("")
+    import os as _os
+    run_dir = repo.parent / f"{repo.name}-run"
+    run_dir.mkdir(exist_ok=True)
+    res = real(["bash", "-c", prepare_shell()], capture_output=True, text=True,
+               cwd=repo, check=False,
+               env={**_os.environ, "QUESTION": "q", "MEDULLA_RUN_DIR": str(run_dir),
+                    "GIT_CALL_LOG": str(log),
+                    "PATH": f"{fake}:{_os.environ['PATH']}"})
+    calls = log.read_text().splitlines()
+    seen = [c for c in calls if c.startswith(("diff", "ls-files"))]
+    assert state_of(res.stdout) == "clean", res.stdout + res.stderr
+    assert not seen, f"a clean tree still walked the tree for: {seen}"
+
+
+def test_the_clean_shortcut_gives_the_SAME_digest_as_the_long_path(repo):
+    """Skipping work is only safe if the answer is byte-identical — the offline check
+    a downstream reader runs on every clean round depends on exactly this value."""
+    import hashlib
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    assert digest_of(run_prepare(repo)) == hashlib.sha256(f"head:{head}\n".encode()).hexdigest()

@@ -4,6 +4,9 @@ A colima content-store fault took Docker down and spar went with it — not beca
 the panel needs a container, but because the launcher demanded one and the prepare
 guard checked a path that only exists inside one. Every harness runs on the host.
 """
+import time
+import signal
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -228,3 +231,118 @@ def test_a_round_that_died_at_startup_shows_the_reason(tmp_path):
              "PATH": f"/bin:/usr/bin:{os.environ.get('PATH', '')}"})
     assert "died at startup" in res.stderr, res.stderr
     assert "FileNotFoundError" in res.stderr, "the reason was one file away and unread"
+
+
+# ── a round that finished but was never marked finished ─────────────────────────
+
+def _finished_run(tmp_path, next_state="__exit_ok__", with_outcome=False):
+    run = tmp_path / "run"
+    (run / "artifacts").mkdir(parents=True)
+    (run / "journal.jsonl").write_text(
+        json.dumps({"node": "prepare", "signal": "ready", "next": "panel"}) + "\n"
+        + json.dumps({"node": "synthesize", "signal": "ready", "next": next_state}) + "\n")
+    (run / "verdict.md").write_text("# Panel verdict\n")
+    (run / "artifacts" / "sonnet.md").write_text("## VERDICT\nGO — 1\n")
+    if with_outcome:
+        (run / "outcome.json").write_text('{"outcome": "succeeded"}')
+    return run
+
+
+def test_a_completed_round_is_not_reported_as_dead(tmp_path):
+    """outcome.json is written LAST, so an engine killed after the terminal transition
+    leaves a COMPLETE review with no marker — journal terminal, verdict.json and
+    verdict.md on disk. `wait` keyed off the marker alone and announced "no container
+    is running and no outcome was written" about a review that had finished. Seen
+    twice on live rounds; a lane read the verdict anyway and the tool contradicted it.
+    """
+    run = _finished_run(tmp_path)
+    res = subprocess.run(["/bin/bash", str(LAUNCHER), "wait", str(run), "--timeout", "30"],
+                         capture_output=True, text=True, timeout=120, check=False,
+                         env={**os.environ, "SPAR_STARTUP_GRACE_S": "0"})
+    assert "FINISHED but was never marked" in res.stderr, res.stderr
+    assert "sonnet.md" in res.stdout, "the artifacts of a finished round must still print"
+
+
+def test_an_unfinished_round_is_still_reported_as_dead(tmp_path):
+    """Preserve failure detection: a journal that never reached a terminal state is
+    NOT a finished round, however many artifacts are lying about. Keying off the
+    presence of a verdict file instead of the journal would erase real failures."""
+    run = _finished_run(tmp_path, next_state="panel")
+    res = subprocess.run(["/bin/bash", str(LAUNCHER), "wait", str(run), "--timeout", "30"],
+                         capture_output=True, text=True, timeout=120, check=False,
+                         env={**os.environ, "SPAR_STARTUP_GRACE_S": "0"})
+    assert "FINISHED but was never marked" not in res.stderr
+    assert res.returncode == 3, res.stderr
+
+
+def test_a_panel_survives_the_session_that_started_it(tmp_path):
+    """`cmd &` leaves the child in the caller's process group, so when that session
+    ends the kernel SIGHUPs the group and the panel dies mid-round — after twenty
+    minutes of paid models. That is what produced the finished-but-unmarked rounds:
+    the engine writes outcome.json last and never got there.
+    """
+    project = tmp_path / "project"
+    (project / ".medulla/workflows/spar").mkdir(parents=True)
+    question = tmp_path / "q.md"
+    question.write_text("Review this fixture.\n")
+    marker = tmp_path / "survived"
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    (binaries / "docker").write_text("#!/bin/sh\nexit 0\n")
+    # prints the run dir at once, then outlives its parent by a second and records it
+    # The launcher only accepts a run path INSIDE the box it named, so echo the box
+    # it was given rather than the cwd.
+    (binaries / "medulla").write_text(
+        '#!/bin/sh\n'
+        'while [ "$#" -gt 0 ]; do\n'
+        '  [ "$1" = --runs-folder ] && { box=$2; shift 2; continue; }\n'
+        '  shift\n'
+        'done\n'
+        'printf "%s/fixture-run\\n" "$(cd "$box" && pwd -P)"\n'
+        'sleep 3\nprintf done > "$SPAR_TEST_MARKER"\n')
+    for name in ("docker", "medulla"):
+        (binaries / name).chmod(0o755)
+
+    env = {**os.environ, "PATH": f"{binaries}:/bin:/usr/bin",
+           "MEDULLA_PANEL_RUNS": str(tmp_path / "panel-runs" / "box"),
+           "SPAR_TEST_MARKER": str(marker)}
+    # Run the launcher in its OWN session, then hang up that session — exactly what
+    # happens when the caller's shell goes away.
+    proc = subprocess.Popen(["/bin/bash", "-c",
+                             f"exec {LAUNCHER} start {question}"],
+                            cwd=project, env=env, start_new_session=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    pgid = os.getpgid(proc.pid)      # BEFORE waiting: once reaped, the pid is gone
+    proc.wait(timeout=60)
+    out, err = proc.communicate()
+    assert proc.returncode == 0, f"the launcher itself failed: {err.decode()[:400]}"
+    os.killpg(pgid, signal.SIGHUP)
+    time.sleep(5)
+    assert marker.exists(), "the panel died with the session that started it"
+
+
+def test_a_finished_FAILURE_keeps_its_failure_status(tmp_path):
+    """The rescue must not rescue too much. A round whose journal reached
+    __exit_fail__ finished — but it finished FAILING, and reporting it as a completed
+    review would be worse than the bug being fixed. With no outcome.json there is
+    nothing to grep either, and grepping a missing file called every unmarked round a
+    failure, including the completed ones this branch exists to save.
+    """
+    run = _finished_run(tmp_path, next_state="__exit_fail__")
+    res = subprocess.run(["/bin/bash", str(LAUNCHER), "wait", str(run), "--timeout", "30"],
+                         capture_output=True, text=True, timeout=120, check=False,
+                         env={**os.environ, "SPAR_STARTUP_GRACE_S": "0"})
+    assert res.returncode == 2, res.stderr
+    assert "FAILED" in res.stderr and "__exit_fail__" in res.stderr
+    assert "sonnet.md" in res.stdout, "the evidence of a failed round is still evidence"
+
+
+def test_a_finished_SUCCESS_without_a_marker_is_not_called_a_failure(tmp_path):
+    """The other half: no outcome.json used to mean `grep` on a missing file, which
+    fails, which printed "the run did NOT succeed" about a completed review."""
+    run = _finished_run(tmp_path, next_state="__exit_ok__")
+    res = subprocess.run(["/bin/bash", str(LAUNCHER), "wait", str(run), "--timeout", "30"],
+                         capture_output=True, text=True, timeout=120, check=False,
+                         env={**os.environ, "SPAR_STARTUP_GRACE_S": "0"})
+    assert res.returncode == 0, res.stderr
+    assert "did NOT succeed" not in res.stderr

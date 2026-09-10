@@ -173,7 +173,16 @@ class AttemptsMixin(BodyMixin):
                 post_env = {**env,
                             "MEDULLA_TIMEOUT_S": _timeout_env(hook_timeout),
                             "MEDULLA_BODY_RC": str(result.rc),
-                            "MEDULLA_BODY_SIGNAL": body_scan.first_known or ""}
+                            "MEDULLA_BODY_SIGNAL": body_scan.first_known or "",
+                            # WHAT THE BODY PRINTED, for a hook that wants to say WHY.
+                            # A harness can fail with rc=1 and an empty stderr because
+                            # it reports errors as JSON on STDOUT — measured: a
+                            # provider answered "Weekly/Monthly Limit Exhausted" there
+                            # and the manifest carried "stderr:" followed by nothing,
+                            # so every such refusal had to be diagnosed by hand from a
+                            # file the reader had to know existed. The hook can now
+                            # read that file and put the reason where it is looked for.
+                            "MEDULLA_ATTEMPT_LOG": str(step_dir / f"attempt-{total}-{tag}.txt")}
                 post_res = proc_run(post_rendered, self.workdir,
                                     hook_timeout, extra_env=post_env,
                                     log_path=step_dir / f"post-{total}.txt")

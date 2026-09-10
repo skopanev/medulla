@@ -55,9 +55,34 @@ def _expected(inputs_path: Path, fallback: list[str]) -> list[str]:
     return [i.get("slug") if isinstance(i, dict) else str(i) for i in data]
 
 
+def _reached_terminal(run: Path) -> str | None:
+    """Did this round finish, according to the JOURNAL rather than a marker file?
+
+    outcome.json is written last, so an engine killed after the terminal transition
+    leaves a complete review with no marker — journal terminal, verdict.json and
+    verdict.md on disk. Seen twice on live rounds. The journal is the right source:
+    a verdict file exists long before the round ends, so keying off one would report
+    a panel still in progress, or a failed one, as complete.
+    """
+    try:
+        lines = [ln for ln in (run / "journal.jsonl").read_text().splitlines() if ln.strip()]
+        nxt = json.loads(lines[-1]).get("next")
+        return nxt if nxt in ("__exit_ok__", "__exit_fail__") else None
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 def main(argv: list[str]) -> int:
+    if argv and argv[0] == "--terminal":
+        if len(argv) < 2:
+            print("usage: panel_state.py --terminal <run-dir>", file=sys.stderr)
+            return 2
+        reached = _reached_terminal(Path(argv[1]))
+        if reached:
+            print(reached)          # WHICH terminal: a finished FAILURE is still a failure
+        return 0 if reached else 1
     if not argv:
-        print("usage: panel_state.py <run-dir>", file=sys.stderr)
+        print("usage: panel_state.py [--terminal] <run-dir>", file=sys.stderr)
         return 2
     run = Path(argv[0])
     step = next((p for p in sorted(run.glob("steps/*panel*")) if p.is_dir()), None)

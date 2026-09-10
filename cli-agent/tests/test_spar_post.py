@@ -252,3 +252,159 @@ def test_superseded_copies_are_not_counted_as_panelists(tmp_path):
     _run_post(art, "gemini", "001.i1.p1")
     assert (art / "superseded").is_dir()
     assert sorted(p.name for p in art.glob("*.md")) == ["gemini.md"]
+
+
+# ── why a panelist wrote nothing ────────────────────────────────────────────────
+
+import sys as _sys  # noqa: E402
+from pathlib import Path as _P  # noqa: E402
+
+_sys.path.insert(0, str(_P(__file__).resolve().parent.parent / "workflows/spar/scripts"))
+from provider_error import provider_error  # noqa: E402
+
+OPENCODE_429 = (
+    '[out] [rtk] rtk binary not found in PATH — plugin disabled\n'
+    '[out] {"type":"error","timestamp":1789047005833,"sessionID":"ses_f747",'
+    '"error":{"name":"APIError","data":{"message":"Weekly/Monthly Limit Exhausted. '
+    'Your limit will reset at 2026-09-13 10:00:29","statusCode":429,'
+    '"responseHeaders":{"set-cookie":"acw_tc=SECRETCOOKIEVALUE;path=/",'
+    '"x-request-id":"bcd8105a-1f6c-45d6-8f71-fdc24a7833d7"},'
+    '"responseBody":"{\\"error\\":{\\"code\\":\\"1310\\"}}"}}}\n')
+
+
+def test_the_reason_is_extracted_from_STDOUT(tmp_path):
+    """The harness exits 1 with an EMPTY stderr and reports the failure as JSON on
+    stdout, so the manifest carried "stderr:" and nothing after it. Three panels were
+    escalated as unexplained while this line sat in a file nobody knew to open."""
+    log = tmp_path / "attempt-2-opencode.txt"
+    log.write_text(OPENCODE_429)
+    out = provider_error(log)
+    assert "Weekly/Monthly Limit Exhausted" in out and "HTTP 429" in out
+
+
+def test_it_does_not_leak_cookies_or_request_ids(tmp_path):
+    """That JSON also carries response headers: session cookies and request ids. A
+    manifest is read by a whole fleet and travels into tickets and chat."""
+    log = tmp_path / "attempt-1-opencode.txt"
+    log.write_text(OPENCODE_429)
+    out = provider_error(log)
+    assert "SECRETCOOKIEVALUE" not in out and "set-cookie" not in out
+    assert "bcd8105a" not in out, "request id leaked"
+    assert len(out) <= 200
+
+
+def test_a_clean_log_yields_nothing_to_say(tmp_path):
+    """No invented reason: a body that failed without saying why must not be given
+    words it never said."""
+    log = tmp_path / "attempt-1-opencode.txt"
+    log.write_text('[out] {"type":"step_start","sessionID":"ses_x"}\n')
+    assert provider_error(log) == ""
+
+
+def test_a_missing_log_is_not_an_error(tmp_path):
+    """The hook runs on failures of every kind, including ones with no log at all."""
+    assert provider_error(tmp_path / "nope.txt") == ""
+
+
+def test_the_LAST_error_wins(tmp_path):
+    """Two attempts, two errors: the reader wants the one that ended it."""
+    log = tmp_path / "attempt-1-opencode.txt"
+    log.write_text(
+        '[out] {"type":"error","error":{"name":"E","data":{"message":"transient blip","statusCode":500}}}\n'
+        + OPENCODE_429)
+    assert "Limit Exhausted" in provider_error(log)
+
+
+def test_the_hook_still_FAILS_when_it_explains_itself(tmp_path, monkeypatch):
+    """Explaining a failure must not soften it. The seat produced nothing; the round
+    is still short one panelist, and the hook still exits non-zero."""
+    import subprocess
+    import yaml as _yaml
+    wf = _P(__file__).resolve().parent.parent / "workflows/spar/workflow.yaml"
+    post = _yaml.safe_load(wf.read_text())["nodes"]["panel"]["post"]
+    round_dir = tmp_path / "artifacts"
+    round_dir.mkdir()
+    log = tmp_path / "attempt-1-opencode.txt"
+    log.write_text(OPENCODE_429)
+    res = subprocess.run(["bash", "-c", post], capture_output=True, text=True, check=False,
+                         env={**os.environ,
+                              "ROUND_DIR": str(round_dir),
+                              "MEDULLA_INPUT_SLUG": "glm5",
+                              "MEDULLA_ATTEMPT_LOG": str(log),
+                              "MEDULLA_WORKFLOW_DIR": str(wf.parent)})
+    assert res.returncode == 1, "a failure that explains itself is still a failure"
+    assert "no artifact written" in res.stderr
+    assert "Limit Exhausted" in res.stderr, res.stderr
+
+
+def test_the_engine_hands_the_hook_the_attempt_log():
+    """The hook cannot read what it is not told about — the path is the engine's to
+    provide, and without it the explanation silently never appears."""
+    src = (_P(__file__).resolve().parent.parent
+           / "medulla/v2/engine_attempts.py").read_text()
+    assert "MEDULLA_ATTEMPT_LOG" in src
+    assert 'f"attempt-{total}-{tag}.txt"' in src.split("MEDULLA_ATTEMPT_LOG")[1][:200]
+
+
+# ── the hook and the collector must answer the same question the same way ───────
+
+def _post_verdict(tmp_path, body):
+    """Run the real post hook over one artifact; returns (rc, stderr)."""
+    import subprocess
+    import yaml as _yaml
+    wf = _P(__file__).resolve().parent.parent / "workflows/spar/workflow.yaml"
+    post = _yaml.safe_load(wf.read_text())["nodes"]["panel"]["post"]
+    round_dir = tmp_path / "artifacts"
+    round_dir.mkdir(exist_ok=True)
+    (round_dir / "sonnet.md").write_text(body)
+    res = subprocess.run(["bash", "-c", post], capture_output=True, text=True, check=False,
+                         env={**os.environ, "ROUND_DIR": str(round_dir),
+                              "MEDULLA_INPUT_SLUG": "sonnet",
+                              "MEDULLA_WORKFLOW_DIR": str(wf.parent)})
+    return res.returncode, res.stderr
+
+
+COMPLETE = """## {findings}
+- (R) HIGH — a real problem — a.py:1 — it breaks — FIX: change it
+
+## {verdict}
+NO-GO — 1
+
+<!-- spar-delivery-complete -->
+"""
+
+
+def test_a_lowercase_findings_heading_is_accepted(tmp_path):
+    """`## Findings` had a COMPLETE review rejected by the hook while the collector
+    would have parsed it whole — the system refusing what it can already read. Five
+    of the thirteen stored "no FINDINGS section" vetoes were this and nothing else,
+    and the retry never helped: the panelist writes the same heading again."""
+    rc, err = _post_verdict(tmp_path, COMPLETE.format(findings="Findings", verdict="VERDICT"))
+    assert rc == 0, err
+
+
+def test_a_lowercase_verdict_heading_is_accepted(tmp_path):
+    rc, err = _post_verdict(tmp_path, COMPLETE.format(findings="FINDINGS", verdict="Verdict"))
+    assert rc == 0, err
+
+
+def test_the_hook_and_the_collector_agree(tmp_path):
+    """The property that matters is not the flag, it is that ONE file gets ONE answer.
+    Both are asked; disagreement in either direction is the defect."""
+    from verdict_parse import read_panelist
+    for headings in (("Findings", "VERDICT"), ("FINDINGS", "Verdict"),
+                     ("findings", "verdict"), ("FINDINGS", "VERDICT")):
+        body = COMPLETE.format(findings=headings[0], verdict=headings[1])
+        rc, err = _post_verdict(tmp_path, body)
+        art = tmp_path / "artifacts" / "sonnet.md"
+        art.write_text(body)
+        parsed = read_panelist(art)
+        collector_ok = not parsed["malformed"]
+        assert (rc == 0) == collector_ok, f"{headings}: hook rc={rc}, collector={parsed['malformed']} ({err})"
+
+
+def test_a_missing_findings_section_is_STILL_rejected(tmp_path):
+    """The fix aligns two checks; it does not remove one. An artifact with no findings
+    section at all is still incomplete."""
+    rc, err = _post_verdict(tmp_path, "## VERDICT\nGO — because\n")
+    assert rc == 1 and "no FINDINGS section" in err
