@@ -175,3 +175,31 @@ def _extract(src, fname):
     start = src.index(f"{fname}() {{")
     end = src.index("\n}", start) + 2
     return src[start:end]
+
+
+def test_alive_count_asks_about_one_run_not_every_panel():
+    """`--filter name=^medulla-` answered for EVERY panel on the machine, so a wait
+    sat quietly through its own round's death whenever a stranger's round was up.
+    Measured by a lane whose wait hung on a round already dead, and by a round whose
+    four panelists were SIGTERMed inside one second — the shape of an external stop,
+    not four independent failures.
+
+    Asserted on the source: stubbing `docker` here means stubbing `command -v` too,
+    and a test that fakes the shell builtins it depends on proves less than reading
+    the filter it is meant to check.
+    """
+    body = _extract(LAUNCHER.read_text(), "alive_count")
+    assert 'name=^medulla-$(basename "$run")' in body, body
+    assert 'local run="${1:-}"' in body, "the run must be an argument, not a global"
+    assert "docker ps -q --filter 'name=^medulla-'" in body, \
+        "the machine-wide form stays as the fallback when no run is named"
+
+
+def test_a_container_is_named_after_its_run():
+    """A random uuid made every panel indistinguishable: a kill by name or image hit
+    whoever else was running, and I did exactly that to another team's panel."""
+    src = (LAUNCHER.resolve().parent.parent.parent.parent
+           / "scripts" / "dockerlib" / "process.py").read_text()
+    assert 'container_name = f"medulla-{safe[:100]}"' in src
+    assert "if run_dir_name:" in src
+    assert 'f"medulla-{uuid.uuid4().hex[:8]}"' in src, "fallback stays for callers with no run dir"

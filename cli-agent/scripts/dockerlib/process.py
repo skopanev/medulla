@@ -122,7 +122,21 @@ def run_docker(image, volumes, args, runs_under: str | None = None,
         # does) then fails on a half-built module
         from dockerlib.session_run import _run_kept
         return _run_kept(image, volumes, args, runs_under, run_dir_name)
-    container_name = f"medulla-{uuid.uuid4().hex[:8]}"
+    # NAME THE CONTAINER AFTER ITS RUN. A random uuid made every panel on the machine
+    # indistinguishable: `docker ps --filter name=^medulla-` answered for ALL of them,
+    # so a wait could not tell its own round's death from a stranger's life, and a kill
+    # by name or image hit whoever else was running. Both were measured — a lane found
+    # its wait hanging while its round was already dead because other panels were up,
+    # and a round died with four panelists SIGTERMed inside one second, which is the
+    # shape of an external stop rather than four independent failures. I did it myself
+    # to somebody else's panel with `docker kill $(docker ps -q --filter name=medulla)`.
+    # The run directory name is unique, already known here, and legal in a container
+    # name; falling back to a uuid keeps callers that have no run dir working.
+    if run_dir_name:
+        safe = "".join(c if (c.isalnum() or c in "_.-") else "-" for c in run_dir_name)
+        container_name = f"medulla-{safe[:100]}"
+    else:
+        container_name = f"medulla-{uuid.uuid4().hex[:8]}"
     cmd = build_run_command(image, volumes, args, container_name,
                             run_dir_name=run_dir_name,
                             runs_under=runs_under)

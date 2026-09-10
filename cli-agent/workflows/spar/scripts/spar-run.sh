@@ -54,8 +54,18 @@ die() { echo "spar-run: $*" >&2; exit 1; }
 # How many panel runs are still going. Containers when we launched into one,
 # otherwise medulla processes on this host.
 alive_count() {
+    # "Is MY round alive", not "is any panel alive". Filtering on `^medulla-` answered
+    # for every panel on the machine, so a wait sat quietly through its own round's
+    # death whenever a stranger's round was up — measured by a lane whose wait hung on
+    # a round that had already died. Containers are named after their run directory
+    # (4.72.0+), so the question can finally be asked about one run.
+    local run="${1:-}"
     if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-        docker ps -q --filter 'name=^medulla-' 2>/dev/null | wc -l
+        if [ -n "$run" ]; then
+            docker ps -q --filter "name=^medulla-$(basename "$run")\$" 2>/dev/null | wc -l
+        else
+            docker ps -q --filter 'name=^medulla-' 2>/dev/null | wc -l
+        fi
     else
         pgrep -f 'medulla .*-w ' 2>/dev/null | wc -l
     fi
@@ -262,7 +272,7 @@ cmd_wait() {
         # "Is it still alive" is asked differently per mode: a container by name, a
         # native run by its process. Asking docker in native mode reports every
         # healthy panel as dead sixty seconds in.
-        if [ "$waited" -ge 60 ] && [ "$(alive_count)" -eq 0 ]; then
+        if [ "$waited" -ge 60 ] && [ "$(alive_count "$run")" -eq 0 ]; then
             gone=$((gone + 1))
             if [ "$gone" -ge 2 ]; then
                 echo "spar-run: no medulla container is running and no outcome was written." >&2
