@@ -8,18 +8,27 @@ from medulla.v2 import engine_body, engine_inputs, procrun
 
 
 def test_log_open_does_not_consume_body_runtime(tmp_path, monkeypatch):
+    """Opening the attempt log is setup, not the body's time.
+
+    The margins here were 0.15s of body inside a 0.25s budget, which left 0.1s for
+    everything else — less than it costs to start a python interpreter on a loaded
+    machine. It failed roughly one run in three while the machine was busy, which is
+    exactly when the suite is least able to tell a real regression from noise. Same
+    property, same shape, ten times the room: the delay alone (1.6s) exceeds the
+    whole budget (1.0s), so if it were ever charged to the body this would time out.
+    """
     real_open = builtins.open
     log_path = tmp_path / "attempt.log"
 
     def delayed_open(path, *args, **kwargs):
         if path == log_path:
-            time.sleep(0.2)
+            time.sleep(1.6)
         return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "open", delayed_open)
     result = procrun.run(
-        [sys.executable, "-c", "import time; time.sleep(0.15)"],
-        tmp_path, timeout_s=0.25, log_path=log_path,
+        [sys.executable, "-c", "import time; time.sleep(0.2)"],
+        tmp_path, timeout_s=1.0, log_path=log_path,
     )
     assert result.rc == 0 and not result.timed_out
 

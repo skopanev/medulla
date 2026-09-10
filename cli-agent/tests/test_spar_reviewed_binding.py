@@ -296,3 +296,32 @@ def test_a_clean_digest_is_EXACTLY_the_hash_of_its_head_line(repo):
                           capture_output=True, text=True, check=True).stdout.strip()
     expected = hashlib.sha256(f"head:{head}\n".encode()).hexdigest()
     assert digest_of(run_prepare(repo)) == expected
+
+
+def test_prepare_says_which_stage_it_reached(repo):
+    """A body killed by the node timeout reports nothing: rc=124 "body died" looks
+    the same whether the digest was hashing 170 thousand files — the tree's fault,
+    fixable downstream by panelling a clean clone — or the first git call had not
+    returned through a contended mount, which nobody downstream can fix. Lanes could
+    not tell those apart and relaunched into the same wall; one lost two rounds in
+    six minutes. What a body prints before it dies survives, so the stages are
+    printed as they are passed.
+    """
+    out = run_prepare(repo)
+    stages = [ln for ln in out.splitlines() if "signal:update" in ln and "prepare:" in ln]
+    assert len(stages) >= 3, out
+    assert "reading the working tree" in stages[0]
+    assert "untracked" in stages[1], "the count is the fork between the two costs"
+    assert "digest computed" in stages[2]
+
+
+def test_the_stage_line_carries_the_untracked_COUNT(repo):
+    """The number is the whole point: it separates "this tree is expensive" from
+    "this environment is slow", and it is the only one a reader cannot recover
+    afterwards from a killed round."""
+    big = repo / "vendor"
+    big.mkdir()
+    for i in range(2100):
+        (big / f"f{i}.txt").write_text("x")
+    out = run_prepare(repo)
+    assert "2100 untracked" in out, out

@@ -98,6 +98,15 @@ nodes:
         # second; through virtiofs in a container it was measured at 20.99s against a
         # 30s budget, and nine rounds had already died in this node. Nine seconds of
         # headroom is not headroom when three panels run at once.
+        # SAY WHERE YOU GOT TO. A body killed by the node timeout cannot report
+        # anything — rc=124 "body died" is all the caller sees, and it looks identical
+        # whether the digest was hashing 170 thousand files (the tree's fault, fixable
+        # by panelling a clean clone) or the first git call had not returned yet (the
+        # environment's fault, fixable by nobody downstream). Lanes could not tell
+        # those apart and relaunched into the same wall — one lost two rounds in six
+        # minutes that way. What a body prints BEFORE it dies survives, so print the
+        # stage: the last line standing names the cost.
+        echo "<signal:update>prepare: reading the working tree</signal:update>"
         status=$(git status --porcelain --untracked-files=all 2>/dev/null)
         dirty=$(printf '%s' "$status" | head -c 1)
         untracked_n=$(printf '%s\n' "$status" | grep -c '^??' || true)
@@ -114,6 +123,7 @@ nodes:
         # Over the limit the digest covers NAMES only, and says so. A partial
         # fingerprint passed off as a whole one is worse than none: it compares equal
         # to nothing and unequal to everything, and the reader cannot tell why.
+        echo "<signal:update>prepare: tree read, ${untracked_n:-0} untracked — computing the digest</signal:update>"
         if [ "${untracked_n:-0}" -le 2000 ]; then
           scope=full
           content=$( { printf 'head:%s\n' "$head"
@@ -134,6 +144,7 @@ nodes:
                        git ls-files --others --exclude-standard -z 2>/dev/null
                      } | shasum -a 256 2>/dev/null | cut -d' ' -f1 )
         fi
+        echo "<signal:update>prepare: digest computed ($scope)</signal:update>"
         echo "<signal:var key=REVIEWED_HEAD>$head</signal:var>"
         echo "<signal:var key=REVIEWED_STATE>$([ -n "$dirty" ] && echo dirty || echo clean)</signal:var>"
         echo "<signal:var key=REVIEWED_DIGEST>$content</signal:var>"

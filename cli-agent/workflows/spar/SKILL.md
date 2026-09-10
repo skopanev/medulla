@@ -194,6 +194,21 @@ full panel from `len(panelists)` alone. In the pre-hook message the reason carri
 class: `[provider]` is the vendor refusing or silent (retry later), `[config]` is our
 side unable to ask (a fix that will not heal itself).
 
+**The delivery marker means COMPLETE, not FINAL.** `<!-- spar-delivery-complete -->`
+says this file was written to the end. It does not say this file is the last word:
+a superseded artifact and the one that replaced it BOTH carry it, and a round was
+reported as GO 2 · NO-GO 1 from a `gemini.md` that had since flipped to NO-GO. The
+two-part completeness check stays correct — only `verdict.json` says which artifacts
+were counted.
+
+**A round can die in `prepare`, and that is not a panelist refusing.** `rc=124`
+with `body died` on a node that never routed means the SUBJECT was never prepared:
+no panelist ran at all. `prepare` prints its stages, so the last line standing names
+what it was doing — reading the tree, or hashing the digest, with the untracked
+count. The count separates the two costs: a large untracked set is the tree's fault
+and a clean clone fixes it; a stall before any stage line is the environment's, and
+relaunching walks into the same wall.
+
 **A digest can be BOUNDED, and `reviewed_digest_scope` says which.** `full` means the
 digest covers the bytes — HEAD, the diff, and the content of untracked files. Over
 2000 untracked files it covers NAMES only and says `names-only`. The reason is not
