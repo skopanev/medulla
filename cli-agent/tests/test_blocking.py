@@ -107,10 +107,13 @@ def test_the_reported_tie_now_says_what_to_do(tmp_path):
 
 
 def test_findings_keep_their_ids_across_the_file(tmp_path):
-    out, _data, _res = collect(tmp_path, [("sonnet", [CACHE, NOISE], "NO-GO — 2 — the log is noisy")])
+    out, data, _res = collect(tmp_path, [("sonnet", [CACHE, NOISE], "NO-GO — 2 — the log is noisy")])
     # the SECOND finding of sonnet is cited; severity sorting puts it last
-    assert "BLOCKING: F2" in out
+    assert "F2" in data["blocking"], data["blocking"]
     assert "F2. sonnet — (G) LOW — noisy log" in out
+    # F1 is a verified HIGH and joins the work list on its own merit, uncited —
+    # this test is about ids surviving the renumbering, not about who blocks.
+    assert data["blocking"] == ["F1", "F2"], data["blocking"]
 
 
 def test_blocking_ids_are_sorted_and_deduplicated(tmp_path):

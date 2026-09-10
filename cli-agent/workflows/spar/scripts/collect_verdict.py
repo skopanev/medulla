@@ -58,6 +58,14 @@ def build(round_dir: Path) -> dict:
     # verdict word the panelist chose around it.
     verified_high = [f["id"] for f in numbered
                      if f["severity"] == "HIGH" and f["confidence"] == "R"]
+    # ...and therefore they belong in the WORK LIST, not only in the gate arithmetic.
+    # They were counted in `state` and left out of `blocking`, so a verified HIGH that
+    # no panelist happened to CITE in its one-line reason disappeared from the list
+    # readers actually work from. Measured by a consumer across 14 rounds: 4 carried
+    # at least one such finding, and in one of them it was a HIGH on the fault path —
+    # fixed, but not because the list said so. Severity is the FINDER's call and HIGH
+    # means "should stop the change", so an uncited one stops it too.
+    blocking.extend(verified_high)
     return {
         "panelists": panelists,
         "findings": numbered,

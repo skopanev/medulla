@@ -232,3 +232,35 @@ def test_enough_opinions_still_produce_a_verdict(tmp_path):
     assert "no_quorum" not in stdout
 
 
+
+
+def test_a_verified_high_nobody_cited_is_still_in_the_work_list(tmp_path):
+    """`blocking` was built from what a NO-GO panelist CITED in its one-line reason,
+    so a finding could be verified HIGH and simply go uncited — present in
+    verified_high, absent from the list readers work from. Measured by a consumer
+    across 14 rounds: 4 carried at least one, and in one of them it was a HIGH on the
+    fault path. It got fixed, but not because the list said so.
+
+    The code already claimed these "weigh the same as a NO-GO for a gate" and acted
+    on it in `state`. This makes the work list agree with the arithmetic.
+    """
+    out, _, _ = collect(tmp_path, [
+        ("sonnet", "## FINDINGS\n"
+                   "- (R) HIGH — a real one nobody cited — f.py:1 — why — FIX: x\n\n"
+                   "## VERDICT\nGO — nothing I would stop for\n"),
+        ("gemini", "## FINDINGS\nNONE\n\n## VERDICT\nGO — fine\n"),
+    ], expected=2, delivered=2, min_decided=1)
+    assert "BLOCKING: F1" in out, out
+
+
+def test_a_guessed_high_is_not_promoted_into_the_work_list(tmp_path):
+    """(G) is a guess. Blocking on one would make the list unactionable — the reader
+    cannot clear what nobody verified."""
+    _, data, _ = collect(tmp_path, [
+        ("sonnet", "## FINDINGS\n"
+                   "- (G) HIGH — suspected — f.py:1 — why — FIX: x\n\n"
+                   "## VERDICT\nGO — nothing verified\n"),
+    ], expected=1, delivered=1, min_decided=1)
+    # Assert on the JSON, not the prose: the HOW-TO-READ block mentions the word.
+    assert data["blocking"] == [], data["blocking"]
+    assert data["verified_high"] == []

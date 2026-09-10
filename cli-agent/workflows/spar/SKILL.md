@@ -142,6 +142,26 @@ machine-readable part: carry every line forward, attributed. `NONE` in FINDINGS 
 real answer, and so is `INSUFFICIENT` — a panelist who could not see enough says so
 instead of dressing a guess as a decision.
 
+**Panelists read the WORKING TREE, not a snapshot.** `/workspace` IS the directory
+they open, live, for the whole round. So never run a PRODUCER — install, build,
+codegen, formatter — in parallel with a panel: it writes into the bytes under review
+while they are being read, and no sha records that. Measured: a build's `dist` was
+written at 03:51 and the round launched at 03:51:52, and the tree the panel saw is one
+nobody can rebuild, including the lane that made it. A dockerised test RUN is
+survivable — its volumes are outside the tree and its artefacts are gitignored — but a
+build is not. `git status` before and after both showed nothing, and both were
+irrelevant: before and after are not during.
+
+**Auditing a `clean` claim without re-running anything.** For a clean tree every term
+after the head line is empty, so `reviewed_digest` collapses to a value anyone can
+recompute offline:
+
+    printf 'head:<reviewed_head>\n' | shasum -a 256
+
+Equal means the round really did see a pristine checkout; different means the tree
+carried something, whatever `reviewed_state` says. Useful for old runs, since it needs
+no container and no repository.
+
 **`<!-- spar-delivery-complete -->` is a PUBLIC contract, not an internal detail.**
 Every panelist must close its artifact with that exact line, and the delivery hook
 rejects an artifact without it. So a complete panel is assemblable WITHOUT the
