@@ -142,6 +142,22 @@ machine-readable part: carry every line forward, attributed. `NONE` in FINDINGS 
 real answer, and so is `INSUFFICIENT` — a panelist who could not see enough says so
 instead of dressing a guess as a decision.
 
+**When a seat is missing from the round, the manifest says WHY in words.** One read
+gives everything, and `input.slug` is the artifact's filename, so it leads straight to
+the file to open by hand:
+
+    jq -c '{ok, reason, message, attempts, slug: .input.slug}' steps/<NNN>-panel/manifest.jsonl
+
+`reason` is `post` for every form veto and cannot tell them apart; `message` names the
+rule that fired. Two seen live, and they are different problems with the same symptom:
+`no FINDINGS section` is a heading the parser does not match (a panelist wrote
+`## Находки`), while `VERDICT gives no reason` is a bare `GO` with nothing after it —
+the panelist ignored the format, twice, and the retry produced the same bare word.
+Note `body rc=0` in both: the panelist SUCCEEDED and the veto is about form only.
+
+Do not read the row position as identity — it is not stable. One panelist sat at index
+1 in two rounds and index 3 in the next.
+
 **Panelists read the WORKING TREE, not a snapshot.** `/workspace` IS the directory
 they open, live, for the whole round. So never run a PRODUCER — install, build,
 codegen, formatter — in parallel with a panel: it writes into the bytes under review

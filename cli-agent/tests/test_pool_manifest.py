@@ -212,3 +212,53 @@ nodes:
     done = {r["input"] for r in rows}
     assert {"fast1", "fast2"} <= done                   # concluded rows survive
     assert all(r["input"] != "slow" or not r["ok"] for r in rows)
+
+
+def test_the_row_names_the_seat_where_a_reader_looks(tmp_path):
+    """`slug` was only inside `input`, while `harness` and `model` were lifted to the
+    top of the row. One careful consumer concluded three separate times that "the
+    manifest does not name the seat" — finding two of the three fields where expected,
+    they read the third as absent rather than nested, and published a workaround that
+    sent readers to attempts.jsonl for a name the manifest already had.
+
+    A structure that lies about its own completeness costs more than a duplicated
+    string, so the name now sits in both places.
+    """
+    text = """
+version: "2"
+start: p
+nodes:
+  p:
+    inputs: [{slug: alpha}, {slug: beta}]
+    max_parallel: 2
+    min_success: 1
+    shell: 'echo {{input.slug}}'
+    on_signal: {__done__: __exit_ok__}
+"""
+    path, work = setup(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
+    run, _, _ = read_run(path.parent)
+    rows = read_manifest(run, "001-p")
+    assert sorted(r["slug"] for r in rows) == ["alpha", "beta"], rows
+    # still nested too: existing readers must not break
+    assert sorted(r["input"]["slug"] for r in rows) == ["alpha", "beta"]
+
+
+def test_a_plain_string_input_has_no_slug_invented_for_it(tmp_path):
+    """Only object inputs carry a slug. A bare string gets none rather than a made-up
+    one — absent is absent."""
+    text = """
+version: "2"
+start: p
+nodes:
+  p:
+    inputs: [one, two]
+    max_parallel: 2
+    min_success: 1
+    shell: 'echo {{input}}'
+    on_signal: {__done__: __exit_ok__}
+"""
+    path, work = setup(tmp_path, text)
+    assert run_workflow(path, workdir=work) == 0
+    run, _, _ = read_run(path.parent)
+    assert all("slug" not in r for r in read_manifest(run, "001-p"))

@@ -76,7 +76,16 @@ class PoolMixin(InputsMixin):
                     else:
                         log(f"warn: var '{k}' rejected (reserved/invalid name)")
 
+        # `slug` sits at the TOP of the row, beside harness and model, because that
+        # is where a reader looks for it. It is also inside `input`, and that was the
+        # only place it lived — with harness and model lifted out but not it. Three
+        # separate readings by one careful consumer concluded "the manifest does not
+        # name the seat": finding two of the three fields where expected, they read
+        # the third as absent rather than nested. A structure that lies about its own
+        # completeness costs more than a duplicated string.
         row = {"index": idx, "key": key, "input": value}
+        if isinstance(value, dict) and isinstance(value.get("slug"), str):
+            row["slug"] = value["slug"]
         try:
             outcome = self._run_attempts(
                 node, input_dir, render_fn, apply_pre_vars,
