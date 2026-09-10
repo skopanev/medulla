@@ -194,7 +194,27 @@ def main():
                 dest = runs_under_for(Path(workflow))
                 name = resolved.parent.name
                 mnt = f"/mnt/medulla-workflows/{name}"
-                volumes.extend(["-v", f"{resolved}:{mnt}/workflow.yaml:ro"])
+                # MOUNT THE DIRECTORY, NOT THE FILE. A bind mount of a FILE is bound to
+                # its inode, and `medulla refresh` replaces definitions atomically —
+                # write a temp file, os.replace it into place — which is the right way
+                # to publish a file somebody may be reading. But the new name points at
+                # a new inode, and every container already mounting the old one loses
+                # it outright: measured here, `cat` inside the container goes from the
+                # file's contents to "No such file or directory" the instant the host
+                # replaces it.
+                #
+                # That is the FileNotFoundError on medulla's own workflow.yaml that
+                # killed rounds all day. It looked environmental because it only hits
+                # rounds launched inside the second or two a refresh takes, and it
+                # presents as a healthy start: the launcher prints the run directory
+                # and the pid, then nothing is ever created. Two lanes three seconds
+                # apart, with different flags, died identically — and the refresh that
+                # did it was usually mine, run right after a release.
+                #
+                # A directory mount survives it: the directory keeps its inode while
+                # files inside it are replaced, and the container sees the new content.
+                # Verified both ways before changing this.
+                volumes.extend(["-v", f"{resolved.parent}:{mnt}:ro"])
                 # EVERY directory the workflow ships, not a hardcoded list. It was
                 # ("prompts",) — so scripts/ never reached the container, and the
                 # synthesize node's `$MEDULLA_WORKFLOW_DIR/scripts/spar-run.sh` did not
@@ -202,10 +222,10 @@ def main():
                 # still reported success. A workflow that ships a directory ships it
                 # because a node needs it; runs/ is the one exception, being history
                 # rather than definition.
-                for src in sorted(d for d in resolved.parent.iterdir() if d.is_dir()):
-                    if src.name in ("runs", "__pycache__"):
-                        continue
-                    volumes.extend(["-v", f"{src}:{mnt}/{src.name}:ro"])
+                # The subdirectories come with it now — prompts/, scripts/ and
+                # anything else the workflow ships. runs/ comes too, read-only and
+                # unread; shadowing it would mean a second mount inside this one, and
+                # a nested mount is what the file mount already cost us.
                 args = [f"{mnt}/workflow.yaml" if a == str(workflow) else a for a in args]
                 # RELATIVE, not /workspace/...: --print-run-dir hands this path back to
                 # the caller, who is on the HOST while the run happened inside the

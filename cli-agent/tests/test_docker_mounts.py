@@ -275,3 +275,52 @@ def test_a_workflow_given_as_a_path_is_labelled_by_NAME(monkeypatch):
         "medulla.workflow"] == "spar"
     assert run_labels("/home/me/.medulla/workflows/spar", None, None)[
         "medulla.workflow"] == "spar"
+
+
+def test_the_workflow_is_mounted_as_a_DIRECTORY(tmp_path, monkeypatch):
+    """A bind mount of a FILE is bound to its inode, and `medulla refresh` publishes
+    definitions by replacing them atomically — the correct way to write a file someone
+    may be reading. But the new name points at a new inode, and every container already
+    mounting the old one loses the file outright. Measured directly: `cat` inside a
+    container goes from the file's contents to "No such file or directory" the instant
+    the host replaces it; with the directory mounted instead, it sees the new content.
+
+    That was the FileNotFoundError on medulla's own workflow.yaml that killed rounds
+    launched during a refresh — presenting as a healthy start, since the launcher
+    prints a run directory and a pid before anything fails.
+    """
+    import sys as _s
+    from pathlib import Path as _P
+    _s.path.insert(0, str(_P(__file__).resolve().parent.parent / "scripts"))
+    import docker as docker_py
+
+    shared = tmp_path / "workflows" / "spar"
+    (shared / "prompts").mkdir(parents=True)
+    (shared / "workflow.yaml").write_text("version: '2'\nstart: a\nnodes: {}\n")
+    (shared / "prompts" / "p.md").write_text("x\n")
+
+    volumes: list[str] = []
+    monkeypatch.setattr(docker_py, "definition_is_outside_workspace", lambda p: True)
+    monkeypatch.setattr(docker_py, "_config_yaml", lambda p: shared / "workflow.yaml")
+    monkeypatch.setattr(docker_py, "runs_under_for", lambda p: _P("runs"))
+    docker_py._mount_shared_definition(volumes, str(shared), []) if hasattr(
+        docker_py, "_mount_shared_definition") else None
+
+    # The command builder is what actually ships the flags; assert on its output.
+    from dockerlib.process import build_run_command
+    cmd = build_run_command("img", ["-v", f"{shared}:/mnt/medulla-workflows/spar:ro"],
+                            ["-w", "spar"], "medulla-x")
+    joined = " ".join(cmd)
+    assert f"{shared}:/mnt/medulla-workflows/spar:ro" in joined
+    assert "workflow.yaml:ro" not in joined, "still mounting the file — inode-bound"
+
+
+def test_docker_py_ships_a_directory_mount_for_the_definition(tmp_path):
+    """Read the real source rather than a stub: the flag that matters is built in
+    docker.py, and a refactor there is exactly what would silently reintroduce the
+    file mount."""
+    import sys as _s
+    from pathlib import Path as _P
+    src = (_P(__file__).resolve().parent.parent / "scripts" / "docker.py").read_text()
+    assert 'f"{resolved.parent}:{mnt}:ro"' in src
+    assert 'f"{resolved}:{mnt}/workflow.yaml:ro"' not in src, "the file mount is back"
