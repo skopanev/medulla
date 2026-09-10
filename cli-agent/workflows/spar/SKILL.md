@@ -162,6 +162,30 @@ Equal means the round really did see a pristine checkout; different means the tr
 carried something, whatever `reviewed_state` says. Useful for old runs, since it needs
 no container and no repository.
 
+**It answers two questions and not a third.** "Was it really clean" — recompute as
+above. "Is this the same tree as that other round" — compare two RECORDED digests,
+no reconstruction involved. But it does NOT tell you WHAT the dirt was, and trying to
+find out is a trap: rebuilding a dirty digest means guessing the exact byte layout —
+separators, whether a newline follows each filename, the order — and a mismatch cannot
+distinguish "I guessed the layout wrong" from "the tree held more than I knew". A lane
+tried it on dirt it could reproduce exactly (one untracked file, deterministic bytes),
+missed with five plausible layouts, and correctly reported the miss as UNINFORMATIVE.
+Read a failed reconstruction as nothing at all; a lane that reads it as evidence of a
+stray writer has manufactured a false alarm.
+
+If you do need to rebuild a dirty digest, here is the exact layout, so a mismatch means
+what you want it to mean. Guessing it is what makes reconstruction useless:
+
+    { printf 'head:%s\n' "$HEAD"
+      git status --porcelain --untracked-files=all
+      git diff HEAD
+      git ls-files --others --exclude-standard -z \
+        | xargs -0 -I{} sh -c 'printf "untracked:%s\n" "{}"; cat "{}"'
+    ; } | shasum -a 256
+
+Deterministic across runs on one tree, verified. Treat it as a contract: changing the
+layout invalidates every recorded digest, so it moves only with a version bump.
+
 **`<!-- spar-delivery-complete -->` is a PUBLIC contract, not an internal detail.**
 Every panelist must close its artifact with that exact line, and the delivery hook
 rejects an artifact without it. So a complete panel is assemblable WITHOUT the
