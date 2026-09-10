@@ -153,6 +153,7 @@ nodes:
 
 
 def test_dynamic_and_unknown_harnesses_fail_before_docker(tmp_path):
+    """A shell-produced harness is bounded by the names the definition itself uses."""
     from medulla.v2.secret_policy import SecretPolicyError, resolve_policy
     workflow = tmp_path / "workflow.yaml"
     workflow.write_text('''version: "2"
@@ -161,7 +162,17 @@ nodes:
     inputs: {shell: "printf codex"}
     agent: {harness: "{{input.harness}}"}
 ''', encoding="utf-8")
-    with pytest.raises(SecretPolicyError, match="finite list"):
+    # "codex" is written right there, so the grant is codex and nothing else.
+    assert set(resolve_policy(str(workflow))["harnesses"]) == {"codex"}
+
+    # A definition naming no known harness has nothing to bound it: still refused.
+    workflow.write_text('''version: "2"
+nodes:
+  panel:
+    inputs: {shell: "printf whatever"}
+    agent: {harness: "{{input.harness}}"}
+''', encoding="utf-8")
+    with pytest.raises(SecretPolicyError, match="no known harness is named"):
         resolve_policy(str(workflow))
     workflow.write_text('''version: "2"
 nodes: {one: {agent: {harness: private-cli}}}

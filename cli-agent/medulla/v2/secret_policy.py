@@ -99,13 +99,20 @@ def resolve_policy(workflow: str | None, cli_vars: dict | None = None) -> dict:
     discovered, unresolved = _discover_harnesses(data, vars_map)
     declared = block.get("harnesses", "auto")
     if declared == "auto":
-        if unresolved:
-            raise SecretPolicyError(
-                "agent harness cannot be resolved before docker run: it is neither a "
-                "literal, nor a pool input, nor a var with a literal value. Give the "
-                "var a default in `vars:`, pass --var, or declare "
-                "docker.secrets.harnesses as a finite list")
         selected = discovered
+        if unresolved:
+            # The harness only a run can know — a pool whose inputs a shell produces.
+            # Refusing here stopped definitions that were never ambiguous to a reader:
+            # the set they dispatch is written in the file, in the check that validates
+            # it. Fall back to the names actually present, which bounds the grant by the
+            # definition instead of by the registry.
+            named = _harnesses_named_in(workflow)
+            if not named:
+                raise SecretPolicyError(
+                    "agent harness cannot be resolved before docker run and no known "
+                    "harness is named in the definition: give the var a literal default "
+                    "in `vars:`, pass --var, or declare docker.secrets.harnesses")
+            selected = discovered | named
     else:
         selected = set(declared)
         missing = discovered - selected
@@ -199,6 +206,25 @@ def env_keys_to_remove(harness: str, raw: str | None = None,
                                     for name in spec["env"]})  # malformed fails closed
     allowed = set(policy.get("harnesses", {}).get(harness, {}).get("env", []))
     return sorted((candidates | set(policy.get("all_env", []))) - allowed)
+
+
+def _harnesses_named_in(workflow: str | None) -> set[str]:
+    """Registry harnesses whose names appear literally in the definition.
+
+    The last resort before refusing a run whose harness only a shell command can
+    produce. It cannot be wider than the registry and is usually NARROWER than
+    granting every vendor: a definition that dispatches one harness names one.
+    A name it misses is not a leak — that agent fails to authenticate and says so.
+    """
+    if not workflow:
+        return set()
+    try:
+        text = resolve_workflow_yaml(Path(workflow)).read_text(encoding="utf-8")
+    except Exception:
+        return set()
+    known = set(registry()["harnesses"]) - {"shell"}
+    return {name for name in known
+            if re.search(rf"\b{re.escape(name)}\b", text)}
 
 
 def _read_workflow(workflow: str | None) -> dict:
