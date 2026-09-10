@@ -179,8 +179,12 @@ def main(argv: list[str]) -> int:
                   else "CLEAR"),
         "verified_high": data["verified_high"],
         "parser": {"malformed": data["malformed"]},
+        # coverage: what that panelist says it swept and what it did NOT reach. The
+        # prompt has demanded it, and nothing carried it — so the one claim that
+        # separates "nothing else is wrong" from "I did not look" reached no reader.
         "panelists": [{"slug": p["slug"], "verdict": p["verdict"], "reason": p["line"],
-                       "cites": p["cites"], "findings": len(p["findings"])}
+                       "cites": p["cites"], "findings": len(p["findings"]),
+                       **({"coverage": p["coverage"]} if p.get("coverage") else {})}
                       for p in data["panelists"]],
         "findings": [{"id": f["id"], "panelist": f["panelist"],
                       "confidence": f["confidence"], "severity": f["severity"],

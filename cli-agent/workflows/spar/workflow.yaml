@@ -37,6 +37,12 @@ vars:
   HEAD: ""
   PATCH_DIGEST: ""
 
+  # Filled by prepare from the tree itself, not by the caller — see the comment
+  # there. These are what the round REVIEWED, as opposed to what it was told.
+  REVIEWED_HEAD: ""
+  REVIEWED_STATE: ""
+  REVIEWED_DIGEST: ""
+
 timeout: 3600
 
 
@@ -71,6 +77,32 @@ nodes:
       mkdir -p "$MEDULLA_RUN_DIR/artifacts"
       printf '%s\n' "$QUESTION" > "$MEDULLA_RUN_DIR/artifacts/question.md"
       echo "<signal:var key=ROUND_DIR>$MEDULLA_RUN_DIR/artifacts</signal:var>"
+
+      # WHAT WAS ACTUALLY REVIEWED. A verdict costing an hour and four models used
+      # to carry no record of the thing it looked at, so a day later nobody could
+      # say whether it applied to the current tree or to a state three days gone.
+      # HEAD alone does not answer that: the panel reads the WORKING TREE, and a
+      # dirty or untracked file is part of what it reviewed while being absent from
+      # any commit. So the digest covers HEAD, the staged and unstaged diff, and the
+      # content of untracked files — the bytes the panelists could actually open.
+      # Nothing here is invented: a tree that is not a git repository says so, and
+      # the non-code question mode (a strategy call with no diff at all) keeps
+      # working exactly as before, with the fields simply absent.
+      if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        head=$(git rev-parse HEAD 2>/dev/null || echo "no-commits")
+        dirty=$(git status --porcelain --untracked-files=all 2>/dev/null | head -c 1)
+        content=$( { printf 'head:%s\n' "$head"
+                     git status --porcelain --untracked-files=all 2>/dev/null
+                     git diff HEAD 2>/dev/null
+                     git ls-files --others --exclude-standard -z 2>/dev/null \
+                       | xargs -0 -I{} sh -c 'printf "untracked:%s\n" "{}"; cat "{}" 2>/dev/null' \
+                     ; } | shasum -a 256 2>/dev/null | cut -d' ' -f1 )
+        echo "<signal:var key=REVIEWED_HEAD>$head</signal:var>"
+        echo "<signal:var key=REVIEWED_STATE>$([ -n "$dirty" ] && echo dirty || echo clean)</signal:var>"
+        echo "<signal:var key=REVIEWED_DIGEST>$content</signal:var>"
+      else
+        echo "<signal:var key=REVIEWED_STATE>not-a-git-repository</signal:var>"
+      fi
       echo "<signal:ready>ok</signal:ready>"
     timeout: 30
     on_signal:
@@ -196,7 +228,10 @@ nodes:
         --expected "$total" --delivered "$ok" --min-decided "$MIN_DECIDED" \
         --subject "ticket=$TICKET" --subject "purpose=$PURPOSE" \
         --subject "base=$BASE" --subject "head=$HEAD" \
-        --subject "patch_digest=$PATCH_DIGEST" || rc=$?
+        --subject "patch_digest=$PATCH_DIGEST" \
+        --subject "reviewed_head=$REVIEWED_HEAD" \
+        --subject "reviewed_state=$REVIEWED_STATE" \
+        --subject "reviewed_digest=$REVIEWED_DIGEST" || rc=$?
 
       [ "$ok" -lt "$total" ] && echo "<signal:update>only $ok/$total panelists delivered</signal:update>"
 
