@@ -201,3 +201,54 @@ nodes:
     assert run_workflow(path, workdir=work) == 2
     row = _row(path, "001-panel")
     assert row["reason"] == "watchdog" and row["timed_out"] is True
+
+
+def _post_body():
+    return pyyaml.safe_load(WORKFLOW.read_text())["nodes"]["panel"]["post"]
+
+
+def _run_post(round_dir, slug, attempt):
+    return subprocess.run(["bash", "-c", _post_body()], capture_output=True, text=True,
+                          env={**os.environ, "ROUND_DIR": str(round_dir),
+                               "MEDULLA_INPUT_SLUG": slug,
+                               "MEDULLA_ATTEMPT_ID": attempt}, check=False)
+
+
+def test_a_retry_cannot_erase_the_verdict_the_panelist_gave_first(tmp_path):
+    """Measured twice in the field. sonnet.md changed finding ids and severities
+    under one filename; gemini.md flipped GO with 3 LOW into NO-GO with 2 HIGH —
+    same panelist, same run, opposite verdict.
+
+    The flip is the dangerous one: a reader cannot defend against it by re-judging
+    findings, because a GO carries none to re-judge. And keeping a copy only on
+    REJECTION missed exactly this case — the first artifact PASSES the hook and is
+    overwritten anyway, because the body died or timed out after writing it.
+    """
+    art = tmp_path / "artifacts"
+    art.mkdir()
+    art.joinpath("gemini.md").write_text(
+        "## FINDINGS\nNONE\n\n## VERDICT\nGO — nothing blocking\n"
+        "<!-- spar-delivery-complete -->\n")
+    assert _run_post(art, "gemini", "001.i1.p1").returncode == 0, "a valid GO passes"
+
+    art.joinpath("gemini.md").write_text(
+        "## FINDINGS\n- (R) HIGH — a — f:1 — w — FIX: x\n\n"
+        "## VERDICT\nNO-GO — 1 — reason\n<!-- spar-delivery-complete -->\n")
+    _run_post(art, "gemini", "001.i1.p2")
+
+    kept = sorted(p.name for p in (art / "superseded").iterdir())
+    assert kept == ["gemini.001.i1.p1.md", "gemini.001.i1.p2.md"], kept
+    first = (art / "superseded" / "gemini.001.i1.p1.md").read_text()
+    assert "GO — nothing blocking" in first, "the first verdict must stay recoverable"
+
+
+def test_superseded_copies_are_not_counted_as_panelists(tmp_path):
+    """They live in a subdirectory precisely so the collector's *.md glob misses
+    them — otherwise one panelist retried would inflate the roster."""
+    art = tmp_path / "artifacts"
+    art.mkdir()
+    art.joinpath("gemini.md").write_text(
+        "## FINDINGS\nNONE\n\n## VERDICT\nGO — fine\n<!-- spar-delivery-complete -->\n")
+    _run_post(art, "gemini", "001.i1.p1")
+    assert (art / "superseded").is_dir()
+    assert sorted(p.name for p in art.glob("*.md")) == ["gemini.md"]
