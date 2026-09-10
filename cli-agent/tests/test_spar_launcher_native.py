@@ -203,3 +203,28 @@ def test_a_container_is_named_after_its_run():
     assert 'container_name = f"medulla-{safe[:100]}"' in src
     assert "if run_dir_name:" in src
     assert 'f"medulla-{uuid.uuid4().hex[:8]}"' in src, "fallback stays for callers with no run dir"
+
+
+def test_a_round_that_died_at_startup_shows_the_reason(tmp_path):
+    """`start` is fire-and-forget: it prints the run directory and returns 0 the
+    moment medulla names it — before the container has done anything. When the engine
+    then dies (a workflow file that was not there, an image that will not build) there
+    is no run directory, no journal and no outcome, and the caller was told the panel
+    started. Reported live: medulla exited on FileNotFoundError for its own
+    workflow.yaml, and the lane had nothing but silence to go on. The launcher's own
+    stderr had the answer the whole time.
+    """
+    box = tmp_path / "box"
+    box.mkdir()
+    run = box / "2026-09-10_12-00-00-lane"          # named, never created
+    (box / "run.120000-4242.log").write_text(f"{run}\n")
+    (box / "err.120000-4242.log").write_text(
+        "Traceback (most recent call last):\n"
+        "FileNotFoundError: /mnt/medulla-workflows/spar/workflow.yaml\n")
+    res = subprocess.run(
+        ["/bin/bash", str(LAUNCHER), "wait", str(run), "--timeout", "120"],
+        capture_output=True, text=True, timeout=180, check=False,
+        env={**os.environ, "SPAR_STARTUP_GRACE_S": "0",
+             "PATH": f"/bin:/usr/bin:{os.environ.get('PATH', '')}"})
+    assert "died at startup" in res.stderr, res.stderr
+    assert "FileNotFoundError" in res.stderr, "the reason was one file away and unread"

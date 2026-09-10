@@ -282,12 +282,34 @@ cmd_wait() {
         # "Is it still alive" is asked differently per mode: a container by name, a
         # native run by its process. Asking docker in native mode reports every
         # healthy panel as dead sixty seconds in.
-        if [ "$waited" -ge 60 ] && [ "$(alive_count "$run")" -eq 0 ]; then
+        # The grace before "no container means dead" is a real container start, which
+        # is seconds — but a build makes it minutes, so it stays generous by default.
+        # Overridable so a test can reach this branch without sleeping through it.
+        if [ "$waited" -ge "${SPAR_STARTUP_GRACE_S:-60}" ] && [ "$(alive_count "$run")" -eq 0 ]; then
             gone=$((gone + 1))
             if [ "$gone" -ge 2 ]; then
                 echo "spar-run: no medulla container is running and no outcome was written." >&2
                 echo "  run dir: $run" >&2
-                [ -d "$run" ] || echo "  the run directory was never created — it died at startup" >&2
+                if [ ! -d "$run" ]; then
+                    echo "  the run directory was never created — it died at startup" >&2
+                    # AND THE REASON IS ONE FILE AWAY. `start` is fire-and-forget: it
+                    # prints the run directory and returns 0 the moment medulla names
+                    # it, which is BEFORE the container has done anything. When the
+                    # engine then dies — a workflow file that was not there, an image
+                    # that will not build — there is no run directory, no journal and
+                    # no outcome to read, and the caller was told the panel started.
+                    # Reported live: medulla exited on FileNotFoundError for its own
+                    # workflow.yaml and the lane had nothing to go on but silence.
+                    # The launcher's stderr caught it and nobody was looking there.
+                    for _l in "$(dirname "$run")"/run.*.log; do
+                        [ -f "$_l" ] || continue
+                        grep -qF "$run" "$_l" 2>/dev/null || continue
+                        _e="$(dirname "$_l")/err.${_l##*/run.}"
+                        [ -s "$_e" ] || continue
+                        echo "  the launcher's error log ($_e) says:" >&2
+                        tail -20 "$_e" | sed 's/^/    /' >&2
+                    done
+                fi
                 exit 3
             fi
         else
