@@ -163,7 +163,7 @@ def main():
 
     try:
         secret_policy, selected_env = prepare_run_secrets(
-            workflow, _collect_dotenv, _add_claude_token_fallback,
+            workflow, _collect_dotenv, _add_claude_token_fallback, cli_vars,
         )
     except SecretPolicyError as exc:
         raise SystemExit(f"error: {exc}") from exc

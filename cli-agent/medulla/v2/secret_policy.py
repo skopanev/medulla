@@ -88,18 +88,22 @@ def _validate_secrets(raw, fail) -> None:
                        f"{sorted(unknown_bundles)}")
 
 
-def resolve_policy(workflow: str | None) -> dict:
+def resolve_policy(workflow: str | None, cli_vars: dict | None = None) -> dict:
     """Return the finite per-harness env/file policy for one workflow."""
     data = _read_workflow(workflow)
     docker = data.get("docker") or {}
     validate_docker_block(docker, SecretPolicyError)
     block = docker.get("secrets") or {}
-    discovered, unresolved = _discover_harnesses(data)
+    declared_vars = data.get("vars") if isinstance(data.get("vars"), dict) else {}
+    vars_map = {**declared_vars, **(cli_vars or {})}   # the launcher's --var wins
+    discovered, unresolved = _discover_harnesses(data, vars_map)
     declared = block.get("harnesses", "auto")
     if declared == "auto":
         if unresolved:
             raise SecretPolicyError(
-                "dynamic agent harness cannot be resolved before docker run; declare "
+                "agent harness cannot be resolved before docker run: it is neither a "
+                "literal, nor a pool input, nor a var with a literal value. Give the "
+                "var a default in `vars:`, pass --var, or declare "
                 "docker.secrets.harnesses as a finite list")
         selected = discovered
     else:
@@ -155,9 +159,9 @@ def encoded_policy(policy: dict) -> str:
     return json.dumps(policy, separators=(",", ":"), sort_keys=True)
 
 
-def prepare_run_secrets(workflow, collect_dotenv, add_claude_fallback):
+def prepare_run_secrets(workflow, collect_dotenv, add_claude_fallback, cli_vars=None):
     """Resolve policy and values while keeping dotenv ownership in dockerlib."""
-    policy = resolve_policy(workflow)
+    policy = resolve_policy(workflow, cli_vars)
     dotenv = collect_dotenv(workflow)
     if "CLAUDE_CODE_OAUTH_TOKEN" in policy["all_env"]:
         add_claude_fallback(dotenv)
@@ -210,9 +214,31 @@ def _read_workflow(workflow: str | None) -> dict:
     return data
 
 
-def _discover_harnesses(data: dict) -> tuple[set[str], bool]:
+_VAR_ONLY = re.compile(r"^\{\{\s*var:([A-Za-z_][A-Za-z0-9_]*)\s*\}\}$")
+
+
+def _literal_var(text: str, vars_map: dict) -> str | None:
+    """`{{var:HARNESS}}` whose value is already a literal is not dynamic.
+
+    A default in the workflow's own `vars:` — or a `--var` the launcher just
+    typed — is known before `docker run`, so refusing it as unresolvable made
+    the common shape (one HARNESS var, one literal default) declare a list that
+    only restated the file. Anything else — a var built from another var, a
+    value arriving from a runtime signal — stays dynamic and still fails closed.
+    """
+    match = _VAR_ONLY.match(text)
+    if not match:
+        return None
+    value = vars_map.get(match.group(1))
+    if isinstance(value, str) and value.strip() and "{{" not in value:
+        return value.strip()
+    return None
+
+
+def _discover_harnesses(data: dict, vars_map: dict | None = None) -> tuple[set[str], bool]:
     found: set[str] = set()
     unresolved = False
+    vars_map = {} if vars_map is None else vars_map
 
     def visit(action, pool_harnesses: set[str] | None = None):
         nonlocal unresolved
@@ -224,7 +250,10 @@ def _discover_harnesses(data: dict) -> tuple[set[str], bool]:
         if isinstance(harness, str) and harness.strip():
             harness = harness.strip()
             if "{{" in harness:
-                if pool_harnesses is None:
+                rendered = _literal_var(harness, vars_map)
+                if rendered is not None:
+                    found.add(rendered)
+                elif pool_harnesses is None:
                     unresolved = True
                 else:
                     found.update(pool_harnesses)

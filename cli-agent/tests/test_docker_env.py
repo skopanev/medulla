@@ -281,3 +281,46 @@ def test_image_tag_drops_the_yaml_extension_but_keeps_dir_names_whole(dockerpy, 
     dotted = tmp_path / "my.workflows"       # a DIRECTORY with a dot keeps its full name
     dotted.mkdir()
     assert dockerpy.image_tag_for(str(dotted), df).startswith("medulla-my.workflows:")
+
+
+def test_a_var_with_a_literal_default_is_not_dynamic(tmp_path):
+    """One HARNESS var with a literal default is the common shape, not a puzzle.
+
+    Refusing it made 118 of 213 live definitions unrunnable and asked each to
+    declare a list that only restated the file. A value the launcher can already
+    see — a default in `vars:`, or a `--var` just typed — is known before
+    `docker run`.
+    """
+    from medulla.v2.secret_policy import resolve_policy
+    workflow = tmp_path / "workflow.yaml"
+    workflow.write_text('''version: "2"
+vars: {HARNESS: codex, MODEL: gpt-5.6}
+nodes:
+  one: {agent: {harness: "{{var:HARNESS}}", model: "{{var:MODEL}}"}}
+''', encoding="utf-8")
+    assert set(resolve_policy(str(workflow))["harnesses"]) == {"codex"}
+
+    # The launcher's --var wins, and the policy follows it rather than the default.
+    policy = resolve_policy(str(workflow), {"HARNESS": "claude-code"})
+    assert set(policy["harnesses"]) == {"claude-code"}
+    assert "OPENAI_API_KEY" not in policy["all_env"], "the default's keys do not linger"
+
+
+def test_a_harness_only_a_run_can_know_still_fails_closed(tmp_path):
+    """A var built from another var, or one no one declared, stays dynamic."""
+    from medulla.v2.secret_policy import SecretPolicyError, resolve_policy
+    workflow = tmp_path / "workflow.yaml"
+    workflow.write_text('''version: "2"
+vars: {HARNESS: "{{var:PICKED}}"}
+nodes:
+  one: {agent: {harness: "{{var:HARNESS}}"}}
+''', encoding="utf-8")
+    with pytest.raises(SecretPolicyError, match="cannot be resolved"):
+        resolve_policy(str(workflow))
+
+    workflow.write_text('''version: "2"
+nodes:
+  one: {agent: {harness: "{{var:NEVER_DECLARED}}"}}
+''', encoding="utf-8")
+    with pytest.raises(SecretPolicyError, match="cannot be resolved"):
+        resolve_policy(str(workflow))
