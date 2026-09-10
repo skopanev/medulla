@@ -186,6 +186,23 @@ what you want it to mean. Guessing it is what makes reconstruction useless:
 Deterministic across runs on one tree, verified. Treat it as a contract: changing the
 layout invalidates every recorded digest, so it moves only with a version bump.
 
+**For a HISTORICAL run, read the recipe out of `<run-dir>/workflow.yaml` instead.**
+Every run freezes its own definition there, so that file is the code that computed
+THAT digest on THAT engine — a contract published later, against a different version,
+is an assumption about an old artifact rather than a fact about it. The published
+layout above is for what runs next.
+
+Two details cost a lane five failed attempts, both worth knowing before you try:
+the `untracked:<path>` prefix precedes each file's CONTENT, and `git ls-files
+--others` prints paths RELATIVE to the repository — `spar-candidate.diff`, never
+`./spar-candidate.diff`. Adding the `./` yields a different hash, so a correct
+reconstruction looks like a failed one.
+
+Done right, this answers the third question after all: WHAT the dirt was. A lane
+rebuilt its dirty digest byte for byte and thereby proved its round read exactly one
+commit plus one untracked file, with nothing writing during the read — any other file,
+or a partial write, changes the hash.
+
 **`<!-- spar-delivery-complete -->` is a PUBLIC contract, not an internal detail.**
 Every panelist must close its artifact with that exact line, and the delivery hook
 rejects an artifact without it. So a complete panel is assemblable WITHOUT the
