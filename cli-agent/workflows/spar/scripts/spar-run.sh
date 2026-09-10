@@ -193,6 +193,16 @@ cmd_start() {
         echo "spar-run: is still reachable, but the round is thinner than in a container." >&2
         echo "spar-run: the tree is NOT mounted read-only in this mode." >&2
     fi
+    # NAME THE LANE. The run directory, and therefore the container, is named from
+    # this; without it both are a timestamp and eight random hex, and an owner asking
+    # "how many lanes are up and on what" gets a list that answers neither. The box
+    # already carries the worktree or ticket this round is about, so use it. A caller
+    # that set its own MEDULLA_RUN_ID keeps it — this is a default, not a policy. The
+    # pid keeps two rounds started in the same second in the same box from colliding
+    # on a directory name, which fire-and-forget makes possible.
+    : "${MEDULLA_RUN_ID:="${box##*/}-$$"}"
+    export MEDULLA_RUN_ID
+
     medulla --print-run-dir --runs-folder "$box" \
         -w "$WORKFLOW" "$@" --var-file "QUESTION=$qfile" \
         >"$log" 2>"$err" &

@@ -178,7 +178,7 @@ def main():
 
     # A SHARED definition lives outside the workspace (~/.medulla/workflows/<name>), and
     # only cwd is mounted — so the container would not find it. Mount it OUTSIDE
-    # /workspace, never into it (fback-yimerxmy0y): a mount target inside a bind mount
+    # /workspace, never into it (reported live): a mount target inside a bind mount
     # is created by the daemon when missing, and for a file that means an EMPTY FILE
     # appearing in the user's repo. That debris then outranked the shared definition and
     # broke every run, and the symptom read as panelists failing to deliver — a day went
@@ -232,7 +232,7 @@ def main():
         # whether the session is actually used, because that check is one more thing
         # to get wrong, and an unused name costs one idle container per pipeline.
         return run_docker(image, volumes, args, runs_under=shared_runs_under,
-                          run_dir_name=run_dir_name,
+                          run_dir_name=run_dir_name, workflow=workflow,
                           keep_session=workflow_names_a_session(workflow))
     finally:
         _remove_made_mountpoints(made_mountpoints)

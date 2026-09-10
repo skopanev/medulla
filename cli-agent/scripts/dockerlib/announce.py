@@ -26,9 +26,21 @@ def announce(args: list[str], workflow, runs_folder, image) -> tuple[list[str], 
     run_dir_name = None
     if not resuming and ("--print-run-dir" in args or "--print-run-json" in args):
         import datetime
+        import os
+        import re
         import uuid
+        # A CALLER'S OWN ID WINS. `--help` has always promised MEDULLA_RUN_ID is
+        # "settable from outside for correlation", and the engine honours it — but only
+        # when the name is decided INSIDE the container. This branch decides it outside
+        # and used to invent a uuid unconditionally, so every panel launch (the spar
+        # launcher passes --print-run-dir) threw the caller's id away and produced a run
+        # directory, and therefore a container name, that says nothing: an owner asking
+        # "how many lanes are running and on what" got a list of timestamps and random
+        # hex. Sanitised to a bare name — this string becomes a directory and a
+        # container name, and a slash or a `..` in either is somebody else's directory.
+        given = re.sub(r"[^A-Za-z0-9_.-]", "-", os.environ.get("MEDULLA_RUN_ID", "").strip())[:60]
         run_dir_name = (datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                        + "-" + uuid.uuid4().hex[:8])
+                        + "-" + (given.strip("-.") or uuid.uuid4().hex[:8]))
         base = runs_folder or (runs_under_for(Path(workflow)) / "runs" if workflow
                                else Path("runs"))
         host_run_dir = Path(base) / run_dir_name

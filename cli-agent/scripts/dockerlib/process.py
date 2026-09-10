@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import uuid
+from pathlib import Path
 
 from dockerlib import env as dockerenv
 from dockerlib import paths as dockerpaths
@@ -74,11 +75,36 @@ def docker_client_env(runs_under: str | None = None,
         env["MEDULLA_RUN_DIR_NAME"] = run_dir_name
     return env
 
+def run_labels(workflow, run_dir_name: str | None, runs_under: str | None) -> dict:
+    """What this container IS, readable with docker's own tools.
+
+    An owner asking "how many lanes are running, and on what" had two ways to answer,
+    and both were archaeology: count `medulla-*` containers and learn nothing but a
+    timestamp, or `docker inspect` each one and dig the worktree out of its mount list.
+    Labels are the flat answer — `docker ps --filter label=medulla.workflow=spar` — and
+    they cost one flag each. Only facts known before the container starts go here;
+    anything a workflow computes later belongs in its run directory, not in a label
+    that would be a lie by the time it is read.
+    """
+    name = Path(str(workflow)).name if workflow else ""
+    if name in ("workflow.yaml", "workflow.yml"):
+        name = Path(str(workflow)).parent.name        # -w took a path to the file
+    return {k: v for k, v in {
+        "medulla.workflow": name,
+        "medulla.run_dir_name": run_dir_name or "",
+        "medulla.runs_under": runs_under or "",
+        "medulla.workspace": str(Path.cwd()),
+    }.items() if v}
+
+
 def build_run_command(image, volumes, args, container_name: str,
                       run_dir_name: str | None = None,
                       runs_under: str | None = None,
-                      forward_env: bool = True) -> list[str]:
+                      forward_env: bool = True,
+                      labels: dict | None = None) -> list[str]:
     cmd = ["docker", "run", "--init", "--rm", "--name", container_name]
+    for key, value in (labels or {}).items():
+        cmd.extend(["--label", f"{key}={value}"])
     if sys.stdin.isatty():
         cmd.append("-i")
     if interactive_stdio():
@@ -111,7 +137,8 @@ def build_run_command(image, volumes, args, container_name: str,
 
 
 def run_docker(image, volumes, args, runs_under: str | None = None,
-               run_dir_name: str | None = None, keep_session: bool = False):
+               run_dir_name: str | None = None, keep_session: bool = False,
+               workflow=None):
     """Run medulla in a container. keep_session: the workflow named an agent session,
     so the container is reused across nested runs and removed at the end of the
     pipeline rather than by --rm — a conversation lives in the CLI's own state inside
@@ -139,7 +166,8 @@ def run_docker(image, volumes, args, runs_under: str | None = None,
         container_name = f"medulla-{uuid.uuid4().hex[:8]}"
     cmd = build_run_command(image, volumes, args, container_name,
                             run_dir_name=run_dir_name,
-                            runs_under=runs_under)
+                            runs_under=runs_under,
+                            labels=run_labels(workflow, run_dir_name, runs_under))
 
     # single subprocess path (no execvp): the temp env-file must outlive the
     # docker client's startup read; stdio inheritance keeps -it interactive

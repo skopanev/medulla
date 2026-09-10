@@ -218,3 +218,60 @@ def test_an_explicit_excludes_file_wins_over_the_xdg_default(dockerpy, tmp_path,
     monkeypatch.setattr(mounts.subprocess, "run", lambda *a, **k: Result())
     vols = dockerpy.build_volumes(tmp_path / "no-claude", mount_agy=False)
     assert f"{chosen}:/home/hltm/.config/git/ignore:ro" in vols, vols
+
+
+# ── identity: what a container says it is ───────────────────────────────────────
+
+def test_a_caller_can_name_its_own_run(monkeypatch):
+    """`--help` has always promised MEDULLA_RUN_ID is "settable from outside for
+    correlation", and the engine honours it — but the panel launcher passes
+    --print-run-dir, and that path named the run OUTSIDE the container with an
+    unconditional uuid. So every panel threw the caller's id away, and an owner asking
+    which lanes were running got timestamps and random hex."""
+    import sys as _s
+    from pathlib import Path as _P
+    _s.path.insert(0, str(_P(__file__).resolve().parent.parent / "scripts"))
+    from dockerlib import announce
+    monkeypatch.setenv("MEDULLA_RUN_ID", "lane-ticket-9d3b")
+    _, name = announce.announce(["--print-run-dir", "-w", "spar"], "spar", None, "img")
+    assert name.endswith("-lane-ticket-9d3b"), name
+
+
+def test_a_run_id_cannot_escape_the_runs_directory(monkeypatch):
+    """It becomes a directory name AND a container name, and it arrives from the
+    environment — which any body inherits."""
+    import sys as _s
+    from pathlib import Path as _P
+    _s.path.insert(0, str(_P(__file__).resolve().parent.parent / "scripts"))
+    from dockerlib import announce
+    monkeypatch.setenv("MEDULLA_RUN_ID", "../../etc/passwd")
+    _, name = announce.announce(["--print-run-dir", "-w", "spar"], "spar", None, "img")
+    assert "etc" in name, f"the id was ignored, so this proves nothing: {name}"
+    assert "/" not in name and _P(name).name == name, name
+
+
+def test_a_container_carries_what_it_is(monkeypatch):
+    """`docker ps --filter label=medulla.workflow=spar` instead of inspecting each
+    container and digging the worktree out of its mount list."""
+    import sys as _s
+    from pathlib import Path as _P
+    _s.path.insert(0, str(_P(__file__).resolve().parent.parent / "scripts"))
+    from dockerlib.process import build_run_command, run_labels
+    labels = run_labels("spar", "2026-09-10_10-12-34-wt-ticket-9d3b", None)
+    cmd = build_run_command("img", [], ["-w", "spar"], "medulla-x", labels=labels)
+    joined = " ".join(cmd)
+    assert "medulla.workflow=spar" in joined
+    assert "medulla.run_dir_name=2026-09-10_10-12-34-wt-ticket-9d3b" in joined
+
+
+def test_a_workflow_given_as_a_path_is_labelled_by_NAME(monkeypatch):
+    """-w takes a bare name, a directory, or a path to workflow.yaml. A label holding
+    "/Users/.../workflows/spar/workflow.yaml" cannot be filtered on by anyone."""
+    import sys as _s
+    from pathlib import Path as _P
+    _s.path.insert(0, str(_P(__file__).resolve().parent.parent / "scripts"))
+    from dockerlib.process import run_labels
+    assert run_labels("/home/me/.medulla/workflows/spar/workflow.yaml", None, None)[
+        "medulla.workflow"] == "spar"
+    assert run_labels("/home/me/.medulla/workflows/spar", None, None)[
+        "medulla.workflow"] == "spar"
