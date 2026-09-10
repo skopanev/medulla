@@ -116,8 +116,16 @@ refuses to report a run directory it cannot vouch for.
 `start` returns in about a second and the panel keeps working for 10-20 minutes. Do
 not sit on it: go do other work, then `medulla launch spar wait <run-dir>`. It blocks
 until `outcome.json` exists, lists what was delivered, and exits non-zero if the run
-failed or never finished (45 minutes by default, `--timeout` to change). A hang and a
-verdict need different reactions, so it distinguishes them.
+failed or never finished. The default wait is the workflow's own deadline plus room to
+conclude — not an independent number, so raising one moves the other; `--timeout`
+overrides it. A hang and a verdict need different reactions, so it distinguishes them.
+
+**A wait that returns is not proof the round ended.** Any bounded wait against a longer
+job hands you a SNAPSHOT: the timeout can expire while the run is still legitimately
+inside its budget. That was live — a wait gave up at 45 minutes on a container that
+had every right to 60, and a lane recorded "timed out, no verdict" for a round that
+had already met quorum. The constants are aligned now, but the shape of the risk is
+permanent, so when a wait reports a timeout, read `outcome.json` before believing it.
 
 List the artifacts with your Glob tool, then read them **one file at a time**:
 
