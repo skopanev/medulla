@@ -194,6 +194,17 @@ full panel from `len(panelists)` alone. In the pre-hook message the reason carri
 class: `[provider]` is the vendor refusing or silent (retry later), `[config]` is our
 side unable to ask (a fix that will not heal itself).
 
+**A digest can be BOUNDED, and `reviewed_digest_scope` says which.** `full` means the
+digest covers the bytes — HEAD, the diff, and the content of untracked files. Over
+2000 untracked files it covers NAMES only and says `names-only`. The reason is not
+tidiness: the untracked term reads every file git does not track, and `--exclude-standard`
+needs `.gitignore` to be in force. Where it is not — a handout tree, a fresh clone, a
+broken `.git` — the same repository went from 3 files to 170378, hashing them did not
+finish in five minutes against a 30-second node budget, and nine rounds died as
+`rc=124 body died`, which reads as a panelist refusing when the round had not begun.
+Two `names-only` digests that match mean the same FILES were there, not the same
+bytes; do not compare one against a `full` digest at all.
+
 **`reviewed_state` has FOUR values, not two.** `clean` and `dirty` are the git cases;
 `git-unavailable` means git itself failed (a worktree whose `.git` file points outside
 the mount) and `not-a-git-repository` means there is no repository at all — a handout

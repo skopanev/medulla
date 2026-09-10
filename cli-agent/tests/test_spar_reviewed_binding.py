@@ -219,3 +219,62 @@ def test_a_tree_of_empty_directories_writes_NO_digest(tmp_path):
     assert state_of(out) == "not-a-git-repository", out
     assert digest_of(out) is None, "hashed nothing and called it a digest"
     assert "e3b0c44298fc1c149afbf4c8996fb924" not in out, "the empty hash is not a binding"
+
+
+def scope_of(out):
+    for line in out.splitlines():
+        if "REVIEWED_DIGEST_SCOPE" in line:
+            return line.split(">", 1)[1].split("<", 1)[0]
+    return None
+
+
+def test_a_huge_untracked_tree_does_not_read_every_file(repo):
+    """The defect that killed nine rounds. The untracked term hashes the CONTENT of
+    every file git does not track — correct, because those bytes are what a panelist
+    can open — but `--exclude-standard` needs .gitignore to be in force. Where it is
+    not (a handout tree, a fresh clone, a broken .git) the same command went from 3
+    files to 170378, and hashing those did not finish in five minutes against a 30s
+    node budget. It died as rc=124 "body died", which reads as a panelist refusing
+    when the round had not begun.
+    """
+    big = repo / "vendor"
+    big.mkdir()
+    for i in range(2100):                      # over the limit, and untracked
+        (big / f"f{i}.txt").write_text("x" * 50)
+    import time as _t
+    start = _t.monotonic()
+    out = run_prepare(repo)
+    assert _t.monotonic() - start < 20, "still reading every file"
+    assert scope_of(out) == "names-only", out
+    assert len(digest_of(out)) == 64, "a bounded digest is still a digest"
+
+
+def test_a_names_only_digest_SAYS_it_is_names_only(repo):
+    """A partial fingerprint passed off as a whole one is worse than none: it compares
+    equal to nothing and unequal to everything, and the reader cannot tell why."""
+    out = run_prepare(repo)
+    assert scope_of(out) == "full", "an ordinary repo must still be hashed in full"
+
+
+def test_a_names_only_digest_still_notices_a_new_file(repo):
+    """Bounded is not blind: names are still a fingerprint of WHAT was there."""
+    big = repo / "vendor"
+    big.mkdir()
+    for i in range(2100):
+        (big / f"f{i}.txt").write_text("x")
+    before = digest_of(run_prepare(repo))
+    (big / "one-more.txt").write_text("x")
+    assert digest_of(run_prepare(repo)) != before
+
+
+def test_a_non_git_tree_of_many_files_is_bounded_too(tmp_path):
+    """Worse without a repository: no ignore rules exist at all, so a handout tree
+    carrying node_modules would be read file by file."""
+    for i in range(2100):
+        (tmp_path / f"f{i}.txt").write_text("x" * 50)
+    import time as _t
+    start = _t.monotonic()
+    out = run_prepare(tmp_path)
+    assert _t.monotonic() - start < 20, "still reading every file"
+    assert state_of(out) == "not-a-git-repository"
+    assert scope_of(out) == "names-only", out
