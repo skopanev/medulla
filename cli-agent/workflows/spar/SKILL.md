@@ -80,6 +80,14 @@ cascade `-w` uses, from any directory. Write your prompt to a file and hand it t
 file; nothing about the question passes through a shell argument, so quoting, `$`,
 backticks and length stop mattering.
 
+**A file beside the repository is INVISIBLE to the panel.** Only the working
+directory becomes `/workspace`; a sibling path is not mounted and never was. Measured
+live: a handout written to `../spar-handout/diff.txt` returned ENOENT inside the
+container while `/workspace/.git` resolved fine, so the panel reviewed the tree with
+no idea the handout existed. Put material the panel must read INSIDE the reviewed
+tree, or pass it explicitly with `--mount` — which lands at `/workspace/<basename>`,
+not at the path you typed.
+
 **Write that file under `$TMPDIR` — never in the repo, never in `$HOME`.** `start`
 copies the question into the run's own box before the panel ever reads it, so the file
 you wrote is dead weight one second later. Left in the tree it is litter that outlives

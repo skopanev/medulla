@@ -109,3 +109,24 @@ def test_a_non_git_tree_says_so_instead_of_inventing(tmp_path):
     assert state_of(out) == "not-a-git-repository", out
     assert "REVIEWED_DIGEST" not in out
     assert "<signal:ready>" in out, "the round still starts"
+
+
+def test_a_worktree_without_its_gitdir_is_not_called_unversioned(tmp_path):
+    """A lane worktree's .git is a FILE pointing at a gitdir OUTSIDE the mount, so
+    inside a container every git command fails with "not a git repository" while
+    the tree plainly is one. Reported by finik-pm from a live round.
+
+    Calling that "not a git repository" lies in the dangerous direction: the reader
+    concludes the code is unversioned, when the truth is the MOUNT is wrong. And the
+    opposite fix — asserting git always works — is the same error with the sign
+    flipped, because both mounts are real. Only a probe separates them.
+    """
+    tree = tmp_path / "wt"
+    tree.mkdir()
+    (tree / "file.py").write_text("x = 1\n")
+    (tree / ".git").write_text("gitdir: /nonexistent/gitdir\n")
+    out = run_prepare(tree)
+    assert state_of(out) == "git-unavailable", out
+    assert digest_of(out) is None, "nothing can be bound to a revision here"
+    assert "<signal:ready>" in out, "the round still runs — the bytes are reviewable"
+    assert "worktree" in out.lower(), "say WHY, or the reader guesses"

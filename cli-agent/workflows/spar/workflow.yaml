@@ -100,6 +100,20 @@ nodes:
         echo "<signal:var key=REVIEWED_HEAD>$head</signal:var>"
         echo "<signal:var key=REVIEWED_STATE>$([ -n "$dirty" ] && echo dirty || echo clean)</signal:var>"
         echo "<signal:var key=REVIEWED_DIGEST>$content</signal:var>"
+      elif [ -e .git ]; then
+        # A .git that exists while git refuses is NOT "no repository". It is the
+        # signature of a LANE WORKTREE mounted without its gitdir: a worktree's
+        # .git is a FILE pointing at a directory outside the mount, so every git
+        # command fails with "not a git repository" while the tree plainly is one.
+        # Reported by finik-pm, reproduced here. Saying "not a git repository"
+        # would be a lie in the useful direction — the reader needs to know the
+        # MOUNT is wrong, not that the code is unversioned. And the opposite fix,
+        # asserting that git always works, is the same error with the sign flipped:
+        # both mounts are real, and only a probe can tell them apart.
+        echo "<signal:var key=REVIEWED_STATE>git-unavailable</signal:var>"
+        echo "spar: .git is present but git cannot read it — a worktree mounted" >&2
+        echo "spar: without its gitdir? The panel will review these bytes anyway," >&2
+        echo "spar: but nothing can bind them to a revision." >&2
       else
         echo "<signal:var key=REVIEWED_STATE>not-a-git-repository</signal:var>"
       fi

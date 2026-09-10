@@ -148,3 +148,30 @@ def test_the_override_flag_is_not_passed_through_to_medulla():
     assert "--allow-outside-tmp" in src
     body = src.split("cmd_start() {")[1]
     assert "rotate each argument exactly once" in body, "the flag must be stripped, not forwarded"
+
+
+def test_the_wait_outlives_the_workflow_deadline(tmp_path):
+    """How long to wait is not an independent opinion — it is the workflow's own
+    deadline plus room to conclude. They had drifted: the wait gave up at 2700s while
+    the run was entitled to 3600, so a lane read "timed out, no verdict" fifteen
+    minutes before the engine would have stopped anything. Measured live by finik-pm:
+    container up 56 minutes, wait expired at 45, three of four delivered and
+    min_success was already met — a finished round whose last worker was still inside
+    its budget, pinning a lane slot with no work left in it."""
+    wf = tmp_path / ".medulla" / "workflows" / "spar"
+    wf.mkdir(parents=True)
+    (wf / "workflow.yaml").write_text('version: "2"\ntimeout: 1234\nstart: n\n')
+    body = "\n".join([
+        'WORKFLOW=spar', 'FALLBACK_TIMEOUT=3900',
+        _extract(LAUNCHER.read_text(), "default_timeout"),
+        'default_timeout',
+    ])
+    out = subprocess.run(["/bin/bash", "-c", body], cwd=tmp_path,
+                         capture_output=True, text=True, check=False).stdout.strip()
+    assert out == "1534", f"deadline+grace expected, got {out!r}"
+
+
+def _extract(src, fname):
+    start = src.index(f"{fname}() {{")
+    end = src.index("\n}", start) + 2
+    return src[start:end]

@@ -26,7 +26,28 @@ set -uo pipefail
 # its full path so two worktrees of the same project never share.
 # MEDULLA_PANEL_RUNS overrides it whole.
 WORKFLOW="spar"               # a bare name: local .medulla/workflows/spar wins, else machine-wide
-DEFAULT_TIMEOUT=2700          # 45 min: a panel is 10-20, so this is "something hung"
+FALLBACK_TIMEOUT=3900         # only when the workflow's own deadline cannot be read
+
+# How long to wait is not an independent opinion — it is the workflow's deadline plus
+# room to conclude. They had drifted apart: the wait gave up at 2700s while the run was
+# entitled to 3600, so a lane saw "timed out, no verdict" fifteen minutes before the
+# engine would have stopped anything. Measured live: container up 56 minutes, wait
+# expired at 45, three of four panelists delivered and the round had already met
+# min_success — a completed run whose last worker was still inside its budget, holding
+# a lane slot with no work left in it. Deriving the number keeps them together when
+# either changes.
+default_timeout() {
+    local wf grace=300
+    for wf in ".medulla/workflows/$WORKFLOW/workflow.yaml" \
+              "$HOME/.medulla/workflows/$WORKFLOW/workflow.yaml"; do
+        [ -f "$wf" ] || continue
+        local t
+        t=$(sed -n 's/^timeout:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$wf" | head -1)
+        case "$t" in ''|*[!0-9]*) continue ;; esac
+        echo $((t + grace)); return 0
+    done
+    echo "$FALLBACK_TIMEOUT"
+}
 
 die() { echo "spar-run: $*" >&2; exit 1; }
 
@@ -219,10 +240,10 @@ panel_state() {
 
 cmd_wait() {
     local run="${1:-}"; shift || true
-    local timeout=$DEFAULT_TIMEOUT
+    local timeout; timeout=$(default_timeout)
     while [ $# -gt 0 ]; do
         case "$1" in
-            --timeout) timeout="${2:-$DEFAULT_TIMEOUT}"; shift 2 ;;
+            --timeout) timeout="${2:-$(default_timeout)}"; shift 2 ;;
             *) die "unknown option: $1" ;;
         esac
     done
