@@ -91,24 +91,38 @@ nodes:
       # working exactly as before, with the fields simply absent.
       if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         head=$(git rev-parse HEAD 2>/dev/null || echo "no-commits")
-        dirty=$(git status --porcelain --untracked-files=all 2>/dev/null | head -c 1)
-        # COUNT BEFORE READING. The untracked term reads the CONTENT of every file
-        # git does not track — the right definition, since those bytes are exactly what
-        # a panelist can open and no commit records them. It is also a trap wherever
+
+        # ONE WALK OF THE TREE, not four. This block used to run `git status` for the
+        # dirty flag, `git status` again inside the digest, `git ls-files --others` to
+        # count, and `git diff` — four full traversals. On the host that is under a
+        # second; through virtiofs in a container it was measured at 20.99s against a
+        # 30s budget, and nine rounds had already died in this node. Nine seconds of
+        # headroom is not headroom when three panels run at once.
+        status=$(git status --porcelain --untracked-files=all 2>/dev/null)
+        dirty=$(printf '%s' "$status" | head -c 1)
+        untracked_n=$(printf '%s\n' "$status" | grep -c '^??' || true)
+
+        # COUNT BEFORE READING. The untracked term reads the CONTENT of every file git
+        # does not track — the right definition, since those bytes are exactly what a
+        # panelist can open and no commit records them. It is also a trap wherever
         # .gitignore does not apply: a handout tree, a fresh clone, a broken .git. Same
         # repository, same command: 3 files with the ignore rules in force, 170378
-        # without. Hashing those did not finish in FIVE MINUTES against a 30s node
-        # budget. Nine rounds died on it, and they died as rc=124 "body died" — which
-        # reads as a panelist refusing, when the round had not begun at all.
+        # without. Hashing those did not finish in FIVE MINUTES against the 30s budget.
+        # They died as rc=124 "body died", which reads as a panelist refusing when the
+        # round had not begun at all.
         #
         # Over the limit the digest covers NAMES only, and says so. A partial
         # fingerprint passed off as a whole one is worse than none: it compares equal
         # to nothing and unequal to everything, and the reader cannot tell why.
-        untracked_n=$(git ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
         if [ "${untracked_n:-0}" -le 2000 ]; then
           scope=full
           content=$( { printf 'head:%s\n' "$head"
-                       git status --porcelain --untracked-files=all 2>/dev/null
+                       # NOT printf '%s\n': on a clean tree status is EMPTY, and a
+                       # printf would add one newline that git never printed. That
+                       # single byte changes the digest of every clean checkout and
+                       # would silently break the offline check a downstream reader
+                       # already relies on:  printf 'head:<sha>\n' | shasum -a 256
+                       [ -n "$status" ] && printf '%s\n' "$status"
                        git diff HEAD 2>/dev/null
                        git ls-files --others --exclude-standard -z 2>/dev/null \
                          | xargs -0 -I{} sh -c 'printf "untracked:%s\n" "{}"; cat "{}" 2>/dev/null' \

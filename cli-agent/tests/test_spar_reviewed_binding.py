@@ -278,3 +278,21 @@ def test_a_non_git_tree_of_many_files_is_bounded_too(tmp_path):
     assert _t.monotonic() - start < 20, "still reading every file"
     assert state_of(out) == "not-a-git-repository"
     assert scope_of(out) == "names-only", out
+
+
+def test_a_clean_digest_is_EXACTLY_the_hash_of_its_head_line(repo):
+    """A downstream reader audits clean rounds offline with
+
+        printf 'head:<sha>\\n' | shasum -a 256
+
+    and it works because every other term is empty on a clean checkout. That makes
+    it a TOOL: if it fails to reproduce, the tree carried uncommitted files and the
+    panel read bytes no commit records. One stray newline — a printf where git
+    printed nothing — changes the answer for every clean checkout and breaks it
+    silently, on their side, with no way to tell a bug from a dirty tree.
+    """
+    import hashlib
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    expected = hashlib.sha256(f"head:{head}\n".encode()).hexdigest()
+    assert digest_of(run_prepare(repo)) == expected
