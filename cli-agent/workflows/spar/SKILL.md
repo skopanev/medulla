@@ -142,6 +142,21 @@ machine-readable part: carry every line forward, attributed. `NONE` in FINDINGS 
 real answer, and so is `INSUFFICIENT` — a panelist who could not see enough says so
 instead of dressing a guess as a decision.
 
+**`<!-- spar-delivery-complete -->` is a PUBLIC contract, not an internal detail.**
+Every panelist must close its artifact with that exact line, and the delivery hook
+rejects an artifact without it. So a complete panel is assemblable WITHOUT the
+aggregator: an artifact carrying the marker plus its own `## VERDICT` line is a
+finished answer, whatever happened to `verdict.md`. A lane used exactly that to
+recover a complete round after the collector never ran — better than the rule it
+replaced ("no verdict.md means no result"), which would have reported a partial
+forever on a panel that was whole. Lean on the marker; it is not going to move.
+
+Rejected artifacts are kept, too. A retry writes to the SAME path, so the answer a
+panelist gave first would otherwise vanish under its replacement — one reader saw two
+different documents at one filename, with different finding ids and different
+severities. The superseded copy lands in `artifacts/superseded/<slug>.<attempt>.md`,
+outside the collector's glob.
+
 `verdict.md` sorts the findings HIGH first and numbers them `F1`, `F2`… so you can
 report back on each one by name.
 

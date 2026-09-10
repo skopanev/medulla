@@ -64,7 +64,20 @@ def _copy_bundle_over(src: Path, dst: Path) -> None:
             if target.is_symlink():         # never write through a file symlink
                 print(f"  skip symlink {target} (left as-is)")
                 continue
-            shutil.copy2(Path(base_dir) / f, target)
+            # Replace the NAME, not the contents. copy2 writes through to the same
+            # inode, and bash reads a script as it executes it — so refreshing under
+            # a running spar-run.sh fed it new bytes at an old offset and it died on
+            # `syntax error near unexpected token '('` mid-round, losing the verdict
+            # for a panel that had already finished its work. os.replace swaps the
+            # directory entry atomically: anything already reading keeps the old
+            # inode to the end, and the next start opens the new one.
+            tmp = tgt_dir / f".{f}.medulla-tmp-{os.getpid()}"
+            try:
+                shutil.copy2(Path(base_dir) / f, tmp)
+                os.replace(tmp, target)
+            except OSError:
+                tmp.unlink(missing_ok=True)
+                raise
 
 
 

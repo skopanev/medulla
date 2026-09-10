@@ -80,3 +80,30 @@ def test_an_unknown_engine_version_never_blocks(monkeypatch):
     from medulla.v2 import contract
     monkeypatch.setattr(contract, "engine_version", lambda: "")
     assert contract.engine_is_older_than("99.0.0") is False
+
+
+def test_refresh_replaces_the_name_not_the_contents(tmp_path, monkeypatch):
+    """copy2 writes through to the same inode, and bash reads a script AS it runs it.
+    Refreshing under a live spar-run.sh fed it new bytes at an old offset and it died
+    on `syntax error near unexpected token '('` mid-round — the verdict was lost for a
+    panel that had already finished its work. Measured by finik-pm during the
+    4.65.0 -> 4.66.0 upgrade, with source.txt recording the older engine while the CLI
+    reported the newer one."""
+    import os
+    from medulla.refresh import _copy_bundle_over
+
+    src = tmp_path / "bundle"
+    src.mkdir()
+    (src / "run.sh").write_text("original\n")
+    dst = tmp_path / "installed"
+    dst.mkdir()
+    (dst / "run.sh").write_text("old\n")
+
+    before = os.stat(dst / "run.sh").st_ino
+    _copy_bundle_over(src, dst)
+    after = os.stat(dst / "run.sh").st_ino
+
+    assert (dst / "run.sh").read_text() == "original\n"
+    assert before != after, "same inode: a running reader would see spliced bytes"
+    leftovers = [p.name for p in dst.iterdir() if "medulla-tmp" in p.name]
+    assert not leftovers, leftovers

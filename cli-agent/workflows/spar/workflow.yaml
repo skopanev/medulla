@@ -183,11 +183,25 @@ nodes:
     # the reason travels in the manifest row rather than being guessed at later.
     post: |
       f="$ROUND_DIR/$MEDULLA_INPUT_SLUG.md"
+      # A retry writes to the SAME path, so a rejected artifact used to vanish under
+      # its replacement. Measured live: one reader saw sonnet.md as 19.0K with two
+      # HIGH findings and "NO-GO 1,2,3", re-read it and got 15.8K, no HIGH, "NO-GO
+      # 1,2" — same root cause, different finding IDS and severities. Anyone who had
+      # judged finding 3 against the code would find it gone, and anyone citing
+      # "sonnet HIGH" in a ticket would be citing a severity the file no longer
+      # carries. Keep the rejected one: it is evidence of what the panelist said
+      # first, and the subdirectory keeps it out of the collector's *.md glob.
+      supersede() {
+        [ -s "$f" ] || return 0
+        mkdir -p "$ROUND_DIR/superseded" 2>/dev/null || return 0
+        cp "$f" "$ROUND_DIR/superseded/$MEDULLA_INPUT_SLUG.${MEDULLA_ATTEMPT_ID:-attempt}.md" \
+          2>/dev/null || true
+      }
       test -s "$f" || { echo "no artifact written" >&2; exit 1; }
       # Any heading level. A panelist wrote `### VERDICT`, the hook rejected a complete
       # artifact for it, and the round reported one fewer delivered than it had.
-      grep -qE '^#+ *FINDINGS' "$f" || { echo "no FINDINGS section" >&2; exit 1; }
-      grep -qE '^#+ *VERDICT'  "$f" || { echo "no VERDICT section" >&2; exit 1; }
+      grep -qE '^#+ *FINDINGS' "$f" || { supersede; echo "no FINDINGS section" >&2; exit 1; }
+      grep -qE '^#+ *VERDICT'  "$f" || { supersede; echo "no VERDICT section" >&2; exit 1; }
       # skip fences: a panelist that copied the prompt's example verbatim wraps the
       # verdict in ``` and repeats the heading inside it — the first non-empty line
       # was the fence, and a delivered artifact was failed for "no verdict"
@@ -195,16 +209,16 @@ nodes:
       # `**NO-GO**.` is a verdict; emphasis is the model decorating, not deciding
       v=$(printf '%s' "$v" | tr -d '*_`')
       printf '%s' "$v" | sed 's/^[[:space:]]*//' | grep -qE '^(GO|NO-GO|INSUFFICIENT)' \
-        || { echo "VERDICT is not one of GO / NO-GO / INSUFFICIENT" >&2; exit 1; }
+        || { supersede; echo "VERDICT is not one of GO / NO-GO / INSUFFICIENT" >&2; exit 1; }
       # And it must say WHY. A bare "GO" is a file, not an answer: it cannot be argued
       # with, and a reader cannot tell a considered pass from a panelist that gave up.
       # Anything after the word counts — including bare citations for a NO-GO — so this
       # rejects only the truly empty verdict.
       printf '%s' "$v" | sed -E 's/^(NO-GO|INSUFFICIENT|GO)//' | grep -q '[^ [:punct:]]' \
-        || { echo "VERDICT gives no reason (format: <WORD> — one line: why)" >&2; exit 1; }
+        || { supersede; echo "VERDICT gives no reason (format: <WORD> — one line: why)" >&2; exit 1; }
       last=$(awk 'NF {line=$0} END {print line}' "$f")
       [ "$last" = '<!-- spar-delivery-complete -->' ] \
-        || { echo "delivery marker missing: last non-empty line must be <!-- spar-delivery-complete -->" >&2; exit 1; }
+        || { supersede; echo "delivery marker missing: last non-empty line must be <!-- spar-delivery-complete -->" >&2; exit 1; }
     post_confirms_delivery: true
     max_attempts: 2                       # a panelist that skips the file-write retries once
     timeout: 1800
