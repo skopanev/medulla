@@ -329,3 +329,31 @@ def test_a_verdict_without_source_txt_still_writes(tmp_path):
     _, data, _ = collect(tmp_path, [("s", "## FINDINGS\nNONE\n\n## VERDICT\nGO — ok\n")],
                          expected=1, delivered=1, min_decided=1)
     assert "engine" not in data
+
+
+def test_promotion_is_visible_in_the_artifact(tmp_path):
+    """A consumer found the gap: promotion is INVISIBLE to `verified_high - blocking`,
+    because making that difference empty is exactly what promotion does. Seeing it
+    required keeping a separate count of uncited verified HIGHs, and a reader should
+    not have to keep one — the artifact says which findings block on their own merit
+    rather than because a panelist named them."""
+    _, data, _ = collect(tmp_path, [
+        ("a", "## FINDINGS\n- (R) HIGH — uncited — f.py:1 — why — FIX: x\n\n"
+              "## VERDICT\nGO — nothing I would stop for\n"),
+        ("b", "## FINDINGS\n- (R) HIGH — cited — g.py:2 — why — FIX: y\n\n"
+              "## VERDICT\nNO-GO — 1 — that one\n"),
+    ], expected=2, delivered=2, min_decided=1)
+    assert data["verified_high"] == ["F1", "F2"]
+    assert data["blocking"] == ["F1", "F2"]
+    assert data["promoted_high"] == ["F1"], "only the uncited one was promoted"
+
+
+def test_nothing_is_promoted_when_every_high_was_cited(tmp_path):
+    """The common case, and the one that made the effect unobservable: an empty list
+    here says "the check ran and found nothing to promote", which a missing field
+    could not."""
+    _, data, _ = collect(tmp_path, [
+        ("b", "## FINDINGS\n- (R) HIGH — cited — g.py:2 — why — FIX: y\n\n"
+              "## VERDICT\nNO-GO — 1 — that one\n"),
+    ], expected=1, delivered=1, min_decided=1)
+    assert data["promoted_high"] == []

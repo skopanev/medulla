@@ -84,6 +84,13 @@ def build(round_dir: Path, delivered_slugs=None) -> dict:
     # at least one such finding, and in one of them it was a HIGH on the fault path —
     # fixed, but not because the list said so. Severity is the FINDER's call and HIGH
     # means "should stop the change", so an uncited one stops it too.
+    # What CITATION alone would have blocked — so the promotion is visible in the
+    # artifact instead of having to be inferred. A consumer noticed the gap: the
+    # effect is invisible to `verified_high - blocking`, because making that
+    # difference empty is exactly what promotion does. Seeing it needs a separate
+    # count, and a reader should not have to keep one.
+    cited = {b for b in blocking if b.startswith("F")}
+    promoted = [f for f in verified_high if f not in cited]
     blocking.extend(verified_high)
     return {
         "panelists": panelists,
@@ -94,6 +101,7 @@ def build(round_dir: Path, delivered_slugs=None) -> dict:
         "unsupported": unsupported,
         "counts": counts,
         "verified_high": verified_high,
+        "promoted_high": promoted,
         "malformed": {p["slug"]: p["malformed"] for p in panelists if p["malformed"]},
     }
 
@@ -228,6 +236,8 @@ def main(argv: list[str]) -> int:
                       or decided < a.min_decided)
                   else "CLEAR"),
         "verified_high": data["verified_high"],
+        # verified HIGHs nobody cited, blocking on their own merit
+        "promoted_high": data["promoted_high"],
         "parser": {"malformed": data["malformed"]},
         # coverage: what that panelist says it swept and what it did NOT reach. The
         # prompt has demanded it, and nothing carried it — so the one claim that
