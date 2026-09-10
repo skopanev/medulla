@@ -5,7 +5,7 @@ mount, a runs folder outside the reviewed tree and a var-file; an agent retyping
 gets it wrong). But a script is a FILE, and the path to it only exists where the
 workflow is installed — so `.medulla/workflows/spar/scripts/spar-run.sh` dies with "no
 such file or directory" in a git worktree, in a sibling repo, in any tree that does not
-carry its own copy. Reported live from a worktree of finik-backend, where the
+carry its own copy. Reported live from a worktree of a downstream repository, where the
 aggregator's `.medulla` symlink does not follow.
 
 The engine already solved this for itself: `-w spar` resolves by name through the

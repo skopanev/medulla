@@ -29,7 +29,7 @@ def shared_workflows() -> Path:
 
 def _usable(p: Path) -> bool:
     """A ZERO-BYTE yaml is debris, not a definition — an interrupted write, a stray
-    shell redirect, or a bind-mount target the Docker daemon created (fback-yimerxmy0y:
+    shell redirect, or a bind-mount target the Docker daemon created (reported live:
     one such file outranked the machine-wide definition and broke every run for a day,
     while the symptom read as 'the panelists did not deliver'). Empty carries no
     intent, so it does not count as a file at all. A file with content still wins,

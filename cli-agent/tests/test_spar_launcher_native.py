@@ -154,7 +154,7 @@ def test_the_wait_outlives_the_workflow_deadline(tmp_path):
     """How long to wait is not an independent opinion — it is the workflow's own
     deadline plus room to conclude. They had drifted: the wait gave up at 2700s while
     the run was entitled to 3600, so a lane read "timed out, no verdict" fifteen
-    minutes before the engine would have stopped anything. Measured live by finik-pm:
+    minutes before the engine would have stopped anything. Measured live downstream:
     container up 56 minutes, wait expired at 45, three of four delivered and
     min_success was already met — a finished round whose last worker was still inside
     its budget, pinning a lane slot with no work left in it."""

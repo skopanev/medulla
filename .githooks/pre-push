@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Enable once per clone:  git config core.hooksPath .githooks
+# Skip one push on purpose:  MEDULLA_COMPAT_GUARD=off git push
+exec python3 "$(git rev-parse --show-toplevel)/cli-agent/scripts/hooks/compat_guard.py" "$@"

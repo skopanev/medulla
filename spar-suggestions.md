@@ -2,7 +2,7 @@
 
 ## 2026-08-18 — full-roster delivery and OpenCode/Qwen timeout
 
-Observed during a five-model Finik review run:
+Observed during a five-model review run:
 
 - Qwen/OpenCode produced only its startup banner and no review artifact before the run timed out with `rc=124`.
 - The other panel inputs delivered normally, so the observed failure appeared isolated to the Qwen/OpenCode path rather than the whole panel pool.
@@ -18,7 +18,7 @@ Possible product-level improvements, without requiring callers to edit a deploye
 
 ## 2026-08-21 — Docker SPAR `cx` missing its `hltm` package
 
-Two consecutive five-model Finik diff rounds missed quorum. In both runs the GPT/Codex
+Two consecutive five-model diff rounds missed quorum. In both runs the GPT/Codex
 input failed twice before reviewing any code:
 
 ```text
@@ -43,7 +43,7 @@ harness attempt.
 
 ## 2026-08-25 — fail-closed verdict binding and parser completeness
 
-A class-X Finik diff was landed after a 2 GO / 2 NO-GO panel because the agent
+A class-X diff was landed after a 2 GO / 2 NO-GO panel because the agent
 reinterpreted remediated findings as sufficient and reported “green” without a final
 panel verdict on the remediated SHA. A repeat run produced `verdict.md`, but silently
 dropped Sonnet findings because its section heading was `## Findings` instead of exact

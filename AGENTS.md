@@ -14,6 +14,27 @@
 - **NEVER add "Co-Authored-By"** to commits
 - **NEVER `git add, commit, push`** unless the user explicitly asks.
 
+### The pre-push gate
+
+Activate once per clone:
+
+    git config core.hooksPath .githooks
+
+Before every push it asks two questions about the diff that is actually going out
+(`<remote sha>..<local sha>`), and stops the push if either answer is bad:
+
+1. **Does it name anyone?** Known names are a grep — instant, and no model is asked.
+   Names nobody listed are the model's job. A comment saying WHY something was done
+   is welcome; whose outage taught it to us is not ours to publish.
+2. **Does it break someone who upgrades without changing their own files?** A break
+   is allowed — an UNDECLARED one is not. Either bump the MAJOR version, or push it
+   knowingly with `MEDULLA_COMPAT_GUARD=off git push`.
+
+It runs `medulla -w compat` on the HOST, from an empty scratch directory, and is
+never handed the tree it judges. ~30s when it has to ask; instant when the grep
+already found something. If the gate cannot run at all, the push STOPS — a check
+that could not run is not a pass.
+
 ## Tooling
 
 - **Use dedicated tools first.** Use `Read` instead of `cat`/`head`/`tail`, `Write`/`Edit` instead of shell text rewriting, `Glob` instead of `find`/`ls`, and `Grep` instead of shell `grep`/`rg` when a dedicated tool exists.

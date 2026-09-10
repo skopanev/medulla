@@ -1,6 +1,6 @@
 """`medulla launch <name>` must find a workflow's launcher from anywhere.
 
-The failure it exists to stop, reported live: in a git worktree of finik-backend,
+The failure it exists to stop, reported live: in a git worktree of a downstream repository,
 `.medulla/workflows/spar/scripts/spar-run.sh` is "no such file or directory", because
 the aggregator's `.medulla` symlink does not follow into the worktree. The engine
 already resolves `-w spar` by name from any directory; the launcher had no such rule

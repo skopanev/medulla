@@ -39,7 +39,7 @@ def test_a_local_copy_beats_the_shared_one_in_both_paths(world, dockerpy):
 
 
 def test_zero_byte_debris_loses_to_shared_in_both_paths(world, dockerpy):
-    """fback-yimerxmy0y: an empty workflow.yaml appeared in a repo (a bind-mount
+    """Reported live: an empty workflow.yaml appeared in a repo (a bind-mount
     target the daemon created) and outranked the machine-wide definition."""
     shared = world.shared("spar")
     local = world.local("spar", body="")

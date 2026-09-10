@@ -88,7 +88,7 @@ def test_refresh_replaces_the_name_not_the_contents(tmp_path, monkeypatch):
     """copy2 writes through to the same inode, and bash reads a script AS it runs it.
     Refreshing under a live spar-run.sh fed it new bytes at an old offset and it died
     on `syntax error near unexpected token '('` mid-round — the verdict was lost for a
-    panel that had already finished its work. Measured by finik-pm during the
+    panel that had already finished its work. Measured downstream during the
     4.65.0 -> 4.66.0 upgrade, with source.txt recording the older engine while the CLI
     reported the newer one."""
     import os

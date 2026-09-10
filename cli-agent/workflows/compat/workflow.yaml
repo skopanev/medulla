@@ -1,0 +1,100 @@
+version: "2"
+# The pre-push gate, as a workflow rather than a script that shells out to a model.
+# The engine already owns what the gate would otherwise reinvent: which credentials
+# this harness may see, the timeout, the retry, the attempt log, and an artifact on
+# disk that survives the terminal scrolling away. A gate whose evidence disappears is
+# a gate nobody can argue with afterwards.
+#
+# Two questions, and only two:
+#   1. does this push name anyone — a company, a customer, a team, their tickets;
+#   2. does it break somebody who upgrades without changing their own files.
+#
+# IT RUNS ON THE HOST, NOT IN A CONTAINER, because it runs on every push and the
+# container's own startup — which re-checks and can reinstall the engine every time —
+# cost more than the review itself: 17s of reading inside a 71s run.
+#
+# So there is no read-only mount here: the engine refuses --cwd-ro outside docker, and
+# it is right to, because it could not keep that promise. What stands in for it is
+# that the gate is never given the tree. It runs from an empty scratch directory and
+# is told only WHERE to ask git and WHICH range; the diff it judges is written into
+# the run directory. A reviewer with no repository open cannot edit one.
+#
+
+start: prepare
+
+vars:
+  # What only the hook can know: which two commits git is about to reconcile. The
+  # gate collects the diff itself from those — handing 50kB of text in through an
+  # argument was the first design, and it made the caller responsible for assembling
+  # the very subject the gate is supposed to define.
+  RANGE: ""              # <remote sha>..<local sha>, or a single sha for a new branch
+  REPO: "."              # where to ask git; the gate itself runs outside the tree
+  OLD: ""
+  NEW: ""
+
+nodes:
+  prepare:
+    shell: |
+      set -eu
+      out="$MEDULLA_RUN_DIR/artifacts"
+      mkdir -p "$out"
+      [ -n "${RANGE:-}" ] || { echo "no commit range was given to the gate" >&2; exit 1; }
+
+      # The gate reads its own subject. Written to a file rather than carried in the
+      # prompt: a 50kB diff pasted into an argument is a different failure every time
+      # it grows, and the file is also the evidence — the run directory keeps exactly
+      # what was judged.
+      git -C "$REPO" diff --no-color "$RANGE" > "$out/subject.diff" 2>"$out/diff.err" || {
+        echo "git -C $REPO diff $RANGE failed:" >&2; cat "$out/diff.err" >&2; exit 1; }
+
+      # AN EMPTY SUBJECT IS NOT A CLEAN BILL OF HEALTH. It means we are about to
+      # review nothing and would answer "no findings" — the fail-open shape this file
+      # exists to prevent. Stop instead and let the caller see why.
+      if [ ! -s "$out/subject.diff" ]; then
+        echo "the range $RANGE contains no changes — nothing to review" >&2
+        exit 1
+      fi
+      git -C "$REPO" diff --stat "$RANGE" > "$out/subject.stat" 2>/dev/null || true
+
+      echo "<signal:var key=OUT>$out</signal:var>"
+      echo "<signal:update>reviewing $(wc -l < "$out/subject.diff" | tr -d " ") diff lines</signal:update>"
+      echo "<signal:ready>ok</signal:ready>"
+    on_signal:
+      ready: review
+
+  review:
+    agent:
+      harness: agy
+      model: gemini-3.8-flash-medium
+    timeout: 420
+    prompt: |
+      {{file:prompts/compat.md}}
+
+      Version at the remote tip: {{var:OLD}}
+      Version being pushed:      {{var:NEW}}
+
+      WRITE YOUR ANSWER as JSON to this exact path, and put nothing else in it:
+
+          {{var:OUT}}/verdict.json
+
+      That file IS the deliverable. Printing the JSON to stdout without writing the
+      file counts as no answer at all.
+
+      ## The diff under review
+
+      READ THIS FILE IN FULL — it is the subject, and the only one:
+
+          {{var:OUT}}/subject.diff
+
+      Its summary, so you can tell whether you have read all of it:
+
+          {{var:OUT}}/subject.stat
+
+      You are judging a DIFF, not a repository: the working directory holds nothing
+      but the diff under review, and the only file you write is the verdict above.
+    post: bash "$MEDULLA_WORKFLOW_DIR/scripts/check_shape.sh"
+    on_signal:
+      # An agent body that simply finishes routes __default__; __done__ is a pool's
+      # word. Naming only __done__ sent a perfectly good verdict to __exit_fail__.
+      __default__: __exit_ok__
+      __failed__: __exit_fail__
