@@ -129,3 +129,38 @@ def test_the_catalog_is_fetched_once_per_container(tmp_path):
     assert (tmp_path / "medulla-models-catalog.json").is_file()
     rc, err = _run(tmp_path, catalog="unreachable")
     assert rc == 0, err
+
+
+# ── which SIDE failed ───────────────────────────────────────────────────────────
+
+def test_a_vendor_refusal_and_a_broken_setup_are_not_the_same_word(tmp_path):
+    """Both leave rc=1 and reason "pre" in the manifest, and until now both read the
+    same. They are not the same fact: a vendor that refuses or goes dark is nothing
+    to fix here — retry later, and if it repeats it is a procurement question — while
+    a missing credential or a tool absent from the image will not heal by itself.
+    Counted as one class, a week of outages and a week of broken images look alike.
+    """
+    # SEPARATE homes: the first run writes auth.json, so a second one asked to have no
+    # credential would find the first one's and pass. The test failed on exactly that.
+    a, b = tmp_path / "vendor", tmp_path / "ours"
+    a.mkdir(); b.mkdir()
+    _, vendor = _run(a, ping_code="429",
+                     ping_body='{"error": {"message": "quota has been exhausted"}}')
+    _, ours = _run(b, auth=None)
+    assert "[provider]" in vendor, vendor
+    assert "[config]" in ours, ours
+
+
+def test_the_class_survives_beside_the_reason(tmp_path):
+    """A class that replaced the sentence would be a worse trade: the provider's own
+    words are what made the 429 case actionable in the first place."""
+    _, err = _run(tmp_path, ping_code="429",
+                  ping_body='{"error": {"message": "quota has been exhausted"}}')
+    assert "HTTP 429" in err and "quota has been exhausted" in err
+
+
+def test_an_unreachable_vendor_is_not_blamed_on_our_config(tmp_path):
+    """The catalog is a network fetch. Calling that a config problem would send
+    someone looking for a file that is perfectly fine."""
+    _, err = _run(tmp_path, catalog="unreachable")
+    assert "[provider]" in err and "[config]" not in err

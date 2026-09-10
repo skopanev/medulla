@@ -107,14 +107,39 @@ def test_a_non_git_tree_says_so_instead_of_inventing(tmp_path):
     (tmp_path / "notes.md").write_text("just a question\n")
     out = run_prepare(tmp_path)
     assert state_of(out) == "not-a-git-repository", out
-    assert "REVIEWED_DIGEST" not in out
+    assert "REVIEWED_HEAD" not in out, "there is no commit here to name"
     assert "<signal:ready>" in out, "the round still starts"
+
+
+def test_a_non_git_tree_still_records_WHAT_it_read(tmp_path):
+    """Absent a commit, the bytes are still a fact, and the only one available.
+
+    A handout round — copies of live sources assembled outside any repository —
+    used to produce a verdict bound to nothing at all: no head, no digest, no way
+    for anyone afterwards to reconstruct which text the four models actually read.
+    "Not a git repository" explains why there is no revision; it is not a reason
+    to record nothing.
+    """
+    (tmp_path / "notes.md").write_text("just a question\n")
+    assert len(digest_of(run_prepare(tmp_path)) or "") == 64, "nothing says what was read"
+
+
+def test_a_non_git_binding_is_reproducible_and_discriminating(tmp_path):
+    """Both halves, or it is decoration: the same tree must give the same answer,
+    and a single changed byte must give a different one."""
+    (tmp_path / "notes.md").write_text("alpha\n")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.md").write_text("beta\n")
+    first = digest_of(run_prepare(tmp_path))
+    assert digest_of(run_prepare(tmp_path)) == first, "same tree, different answer"
+    (tmp_path / "sub" / "b.md").write_text("gamma\n")
+    assert digest_of(run_prepare(tmp_path)) != first, "a changed byte left no trace"
 
 
 def test_a_worktree_without_its_gitdir_is_not_called_unversioned(tmp_path):
     """A lane worktree's .git is a FILE pointing at a gitdir OUTSIDE the mount, so
     inside a container every git command fails with "not a git repository" while
-    the tree plainly is one. Reported by finik-pm from a live round.
+    the tree plainly is one. Reported downstream from a live round.
 
     Calling that "not a git repository" lies in the dangerous direction: the reader
     concludes the code is unversioned, when the truth is the MOUNT is wrong. And the
@@ -177,3 +202,20 @@ def test_no_head_passed_behaves_as_before(repo):
     and inventing one would be worse than no check."""
     rc, out = run_prepare_with(repo)
     assert rc == 0 and "subject mismatch" not in out
+
+
+def test_a_tree_of_empty_directories_writes_NO_digest(tmp_path):
+    """shasum fed nothing answers e3b0c442... — the hash of the empty string — with the
+    same confidence as a real one, so "read nothing" and "could not read" produce ONE
+    identical 64-character fact and two rounds that saw nothing agree about what they
+    saw. A wholly empty tree is caught earlier by the empty-workspace guard, but this
+    tree is not empty to that guard: it counts visible ENTRIES, and directories are
+    entries. Bare directories with no files in them is exactly what a half-arrived
+    handout copy looks like.
+    """
+    (tmp_path / "src").mkdir()               # an entry, and not a file
+    (tmp_path / "src" / "nested").mkdir()
+    out = run_prepare(tmp_path)
+    assert state_of(out) == "not-a-git-repository", out
+    assert digest_of(out) is None, "hashed nothing and called it a digest"
+    assert "e3b0c44298fc1c149afbf4c8996fb924" not in out, "the empty hash is not a binding"

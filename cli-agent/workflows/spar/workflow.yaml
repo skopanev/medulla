@@ -127,7 +127,7 @@ nodes:
         # signature of a LANE WORKTREE mounted without its gitdir: a worktree's
         # .git is a FILE pointing at a directory outside the mount, so every git
         # command fails with "not a git repository" while the tree plainly is one.
-        # Reported by finik-pm, reproduced here. Saying "not a git repository"
+        # Reported downstream, reproduced here. Saying "not a git repository"
         # would be a lie in the useful direction — the reader needs to know the
         # MOUNT is wrong, not that the code is unversioned. And the opposite fix,
         # asserting that git always works, is the same error with the sign flipped:
@@ -137,7 +137,33 @@ nodes:
         echo "spar: without its gitdir? The panel will review these bytes anyway," >&2
         echo "spar: but nothing can bind them to a revision." >&2
       else
+        # NO GIT, BUT STILL A SUBJECT. A handout tree — copies of live sources
+        # assembled outside any repository — is a legitimate thing to review for a
+        # planning question, where the subject is an intention rather than a commit.
+        # But without a digest the verdict cannot say WHAT it read, and nobody, the
+        # author included, can reconstruct it afterwards. So hash the bytes directly:
+        # every file's path and content, sorted, excluding our own bookkeeping. Same
+        # property as the git form — reproducible on one tree, different when any
+        # byte moves — just without a commit to anchor it to.
+        # COUNT FIRST, and only then hash. shasum always prints something: fed
+        # nothing at all it answers e3b0c442... — the hash of the empty string — so a
+        # find that failed, a tree that is genuinely empty, and a pipe that broke in
+        # the middle all produce the SAME confident 64 hex characters. A digest that
+        # cannot tell "nothing to read" from "could not read" is worse than none: it
+        # reads as a fact. If there are no files, say nothing and let the round's own
+        # empty-workspace check speak.
+        finder() { find . -type f \
+                     -not -path './.git/*' -not -path './.medulla/*' -not -path './box/*' \
+                     "$@" 2>/dev/null; }
+        files=$(finder | wc -l | tr -d ' ')
         echo "<signal:var key=REVIEWED_STATE>not-a-git-repository</signal:var>"
+        if [ "${files:-0}" -gt 0 ]; then
+          content=$( finder -print0 \
+                     | LC_ALL=C sort -z \
+                     | xargs -0 -I{} sh -c 'printf "file:%s\n" "{}"; cat "{}" 2>/dev/null' \
+                     | shasum -a 256 2>/dev/null | cut -d' ' -f1 )
+          echo "<signal:var key=REVIEWED_DIGEST>$content</signal:var>"
+        fi
       fi
       echo "<signal:ready>ok</signal:ready>"
     timeout: 30
@@ -285,6 +311,9 @@ nodes:
         "$MEDULLA_RUN_DIR" "$ROUND_DIR" \
         --expected "$total" --delivered "$ok" --min-decided "$MIN_DECIDED" \
         --delivered-slugs "$(echo "$rows" | jq -r '[.[] | select(.ok) | (.input.slug // .key)] | join(",")')" \
+        --manifest-json "$(echo "$rows" | jq -c '[.[] | select(.ok | not)
+                            | {key, input: {slug: .input.slug}, ok, reason, attempts,
+                               message: (.message // "" | .[0:400])}]')" \
         --subject "ticket=$TICKET" --subject "purpose=$PURPOSE" \
         --subject "base=$BASE" --subject "head=$HEAD" \
         --subject "patch_digest=$PATCH_DIGEST" \

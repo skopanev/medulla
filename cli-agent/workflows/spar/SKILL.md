@@ -182,6 +182,31 @@ survivable — its volumes are outside the tree and its artefacts are gitignored
 build is not. `git status` before and after both showed nothing, and both were
 irrelevant: before and after are not during.
 
+**A seat that never sat is named in `absent`, not inferred from arithmetic.** A pre
+hook can refuse a panelist before any attempt — its provider went dark, or a credential
+is missing — and that seat then has no artifact, no row under `panelists`, and
+`attempts: 0`. A round of three reads as a unanimous three. `verdict.json` carries
+`absent: [{slug, reason, message}]` for exactly those seats, plus
+`{"slug": "unknown", "reason": "no manifest row"}` for a seat the engine never even
+recorded. The field is ABSENT on a full round. Do not look for the loss by scanning
+`panelists` for a failure flag — the row is not there to scan; and do not conclude a
+full panel from `len(panelists)` alone. In the pre-hook message the reason carries a
+class: `[provider]` is the vendor refusing or silent (retry later), `[config]` is our
+side unable to ask (a fix that will not heal itself).
+
+**`reviewed_state` has FOUR values, not two.** `clean` and `dirty` are the git cases;
+`git-unavailable` means git itself failed (a worktree whose `.git` file points outside
+the mount) and `not-a-git-repository` means there is no repository at all — a handout
+tree of copied sources, reviewed for a planning question. Only the first two say
+anything about dirt. Code that branches on `state != "clean"` and calls the rest dirty
+reports a confident falsehood on the last two, and does it in the direction that gets
+believed. `reviewed_head` is absent for both non-git states — there is no commit to
+name — while `reviewed_digest` is present for `not-a-git-repository` (hashed from the
+bytes directly, so a handout round can still say WHAT it read) and absent for
+`git-unavailable`, where the mount is wrong and nothing should be bound to anything.
+This is the third multi-valued panel field misread as binary, after
+`quorum.manifest_delivered` and `counts.INSUFFICIENT`: check the value you mean.
+
 **Auditing a `clean` claim without re-running anything.** For a clean tree every term
 after the head line is empty, so `reviewed_digest` collapses to a value anyone can
 recompute offline:

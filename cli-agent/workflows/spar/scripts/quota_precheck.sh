@@ -19,7 +19,14 @@ set -uo pipefail
 
 slug="${MEDULLA_INPUT_SLUG:-panelist}"
 
-out()  { echo "$slug sits this round out: $*" >&2; exit 1; }
+# The reason CLASS travels with the reason. Every refusal here reads the same in a
+# manifest — rc=1, reason "pre" — while two very different things happen: a vendor
+# refused or went dark (nothing to fix here, retry later, and if it repeats it is a
+# procurement fact), or OUR side cannot ask the question at all (a missing credential,
+# a tool absent from the image — a fix, and one that will not heal by itself). Reported
+# as one class, a week of provider outages and a week of broken images are the same
+# number. `[provider]` / `[config]` costs a word and separates them.
+out()  { cls="$1"; shift; echo "$slug sits this round out [$cls]: $*" >&2; exit 1; }
 
 # MEDULLA_INPUT_HARNESS first: in a pool MEDULLA_HARNESS still holds the unrendered
 # "{{input.harness}}" (the engine builds the tag before rendering).
@@ -31,13 +38,13 @@ model="${MEDULLA_INPUT_MODEL:-}"
 case "$model" in */*) ;; *) exit 0 ;; esac
 provider="${model%%/*}"; model_id="${model#*/}"
 
-command -v jq >/dev/null 2>&1 || out "jq is missing — the quota check cannot run"
+command -v jq >/dev/null 2>&1 || out config "jq is missing — the quota check cannot run"
 
 auth="$HOME/.local/share/opencode/auth.json"
-[ -r "$auth" ] || out "no readable $auth — opencode could not authenticate either"
+[ -r "$auth" ] || out config "no readable $auth — opencode could not authenticate either"
 key=$(jq -r --arg p "$provider" '.[$p].key // empty' "$auth" 2>/dev/null) \
-  || out "$auth is not valid JSON"
-[ -n "$key" ] || out "no credential for $provider in $auth"
+  || out config "$auth is not valid JSON"
+[ -n "$key" ] || out config "no credential for $provider in $auth"
 
 # ── the base url ────────────────────────────────────────────────────────────────
 # It lives in one field of a catalog that is 4.4 MB uncompressed. Fetching that per
@@ -59,34 +66,34 @@ for candidate in "$HOME/.cache/opencode/models.json" "$CATALOG_CACHE"; do
 done
 
 if [ -z "$catalog" ]; then
-    tmp=$(mktemp) || out "cannot write a temp file for the model catalog"
+    tmp=$(mktemp) || out config "cannot write a temp file for the model catalog"
     # --fail: an HTML error page is not a catalog. --retry: one flaky fetch is not an
     # outage. -m 25: the hook's whole budget is 60s and the quota ping still needs its
     # share. Transport first, then shape — a 200 that arrived truncated is still garbage.
     if ! curl -sS --compressed --fail --retry 1 --retry-max-time 25 -m 25 \
               -o "$tmp" https://models.dev/api.json 2>/dev/null; then
-        rm -f "$tmp"; out "could not fetch the model catalog (network or models.dev)"
+        rm -f "$tmp"; out provider "could not fetch the model catalog (network or models.dev)"
     fi
     if ! jq -e . "$tmp" >/dev/null 2>&1; then
         size=$(wc -c <"$tmp" 2>/dev/null | tr -d ' ')
         rm -f "$tmp"
-        out "the model catalog arrived unusable (${size:-0} bytes, not valid JSON)"
+        out provider "the model catalog arrived unusable (${size:-0} bytes, not valid JSON)"
     fi
     cp "$tmp" "$CATALOG_CACHE" 2>/dev/null || true
     catalog="$tmp"
 fi
 
 api=$(jq -r --arg p "$provider" '.[$p].api // empty' "$catalog" 2>/dev/null)
-[ -n "$api" ] || out "no base url for $provider in the model catalog"
+[ -n "$api" ] || out config "no base url for $provider in the model catalog"
 
 # ── does it answer? ─────────────────────────────────────────────────────────────
 body=$(jq -nc --arg m "$model_id" \
        '{model:$m,messages:[{role:"user",content:"ping"}],max_tokens:1}')
-ans=$(mktemp) || out "cannot write a temp file for the quota probe"
+ans=$(mktemp) || out config "cannot write a temp file for the quota probe"
 code=$(curl -sS -m 20 -o "$ans" -w '%{http_code}' \
        -H 'Content-Type: application/json' -H "Authorization: Bearer $key" \
        -d "$body" "${api%/}/chat/completions" 2>/dev/null)
 if [ "$code" = 200 ]; then rm -f "$ans"; exit 0; fi
 why=$(jq -r '.error.message // empty' "$ans" 2>/dev/null); rm -f "$ans"
-[ -n "$code" ] || out "$provider did not answer the quota probe at all"
-out "$provider answered HTTP $code${why:+ - $why}"
+[ -n "$code" ] || out provider "$provider did not answer the quota probe at all"
+out provider "$provider answered HTTP $code${why:+ - $why}"

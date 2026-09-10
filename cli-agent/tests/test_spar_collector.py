@@ -35,7 +35,7 @@ def run_dir(tmp_path):
 
 
 def collect(tmp_path, panelists, *, expected=None, delivered=None, min_decided=3,
-            delivered_slugs=None):
+            delivered_slugs=None, manifest_json=None):
     """Run the collector over a round: returns (markdown, parsed json, result)."""
     tmp_path.mkdir(parents=True, exist_ok=True)
     art = tmp_path / "artifacts"
@@ -48,7 +48,8 @@ def collect(tmp_path, panelists, *, expected=None, delivered=None, min_decided=3
          "--expected", str(n if expected is None else expected),
          "--delivered", str(n if delivered is None else delivered),
          "--min-decided", str(min_decided)]
-        + ([] if delivered_slugs is None else ["--delivered-slugs", delivered_slugs]),
+        + ([] if delivered_slugs is None else ["--delivered-slugs", delivered_slugs])
+        + ([] if manifest_json is None else ["--manifest-json", manifest_json]),
         capture_output=True, text=True, check=False)
     return ((tmp_path / "verdict.md").read_text(),
             json.loads((tmp_path / "verdict.json").read_text()), res)
@@ -399,3 +400,77 @@ def test_the_collector_version_needs_no_installed_package(tmp_path, monkeypatch)
     _, data, _ = collect(tmp_path, [("s", "## FINDINGS\nNONE\n\n## VERDICT\nGO — ok\n")],
                          expected=1, delivered=1, min_decided=1)
     assert data.get("collector"), "the script must name itself without importing anything"
+
+
+# ── the seat that never sat ─────────────────────────────────────────────────────
+
+def _seat(slug, reason, message, attempts=0):
+    return {"key": slug, "input": {"slug": slug}, "ok": False,
+            "reason": reason, "attempts": attempts, "message": message}
+
+
+def _three_of_four(tmp_path, manifest_json):
+    """Three artifacts, a roster of four — the shape of a refused pre hook."""
+    return collect(tmp_path / "r", [(s, PANELIST.format(claim=f"{s} thing", slug=s,
+                                                        verdict="NO-GO", sev="HIGH"))
+                                    for s in ("sonnet", "gpt5", "gemini")],
+                   expected=4, delivered=3, min_decided=3, manifest_json=manifest_json)
+
+
+def test_a_refused_seat_is_NAMED_in_the_machine_channel(tmp_path):
+    """A pre hook refused glm5 on its provider's HTTP 000: no attempt, no artifact, no
+    row under panelists. Every field agreed and the round read as a unanimous three.
+    The only trace was expected=4 beside delivered=3 — two numbers a reader has to
+    think to compare, and a published checker that keyed off ok==false or attempts>1
+    missed it, because a pre refusal has attempts=0."""
+    rows = json.dumps([_seat("glm5", "pre", "pre hook failed: rc=1; stderr: glm5 sits "
+                             "this round out [provider]: zai answered HTTP 000")])
+    _, data, _ = _three_of_four(tmp_path, rows)
+    absent = data.get("absent") or []
+    assert [x["slug"] for x in absent] == ["glm5"], "the empty seat left no trace"
+    assert absent[0]["reason"] == "pre"
+    assert "HTTP 000" in absent[0]["message"], "why it sat out is the point"
+
+
+def test_the_absent_seat_is_named_in_the_prose_too(tmp_path):
+    """The WARNING already said 3 of 4. It could not say WHO or WHY."""
+    rows = json.dumps([_seat("glm5", "pre", "provider answered HTTP 000")])
+    out, _, _ = _three_of_four(tmp_path, rows)
+    assert "3 of 4" in out and "glm5" in out.split("## Verdicts")[0]
+
+
+def test_a_seat_that_wrote_no_row_at_all_is_still_counted(tmp_path):
+    """A cancelled queue writes no manifest row by design. Reported as an unnamed
+    absence rather than dropped — dropping it is what turns 3 of 4 into a clean 3."""
+    _, data, _ = _three_of_four(tmp_path, json.dumps([]))
+    assert [x["slug"] for x in (data.get("absent") or [])] == ["unknown"]
+
+
+def test_a_delivered_panelist_is_not_reported_absent(tmp_path):
+    """It sat, it spoke, and a failed row can still exist for it — a post-hook veto
+    fails the row while the artifact is on disk. That case is refused_by_engine, and
+    calling it an empty seat would double-count one panelist as two losses."""
+    rows = json.dumps([_seat("gemini", "post", "post hook vetoed: no FINDINGS", attempts=1)])
+    _, data, _ = collect(tmp_path / "r2",
+                         [(s, PANELIST.format(claim=f"{s} thing", slug=s,
+                                              verdict="NO-GO", sev="HIGH"))
+                          for s in ("sonnet", "gpt5", "gemini")],
+                         expected=3, delivered=3, min_decided=3, manifest_json=rows)
+    assert not data.get("absent"), "a panelist that delivered is not an empty seat"
+
+
+def test_a_full_round_carries_no_absent_field(tmp_path):
+    """Absent stays absent: an empty list in a gate field reads as an answer."""
+    _, data, _ = collect(tmp_path / "r3",
+                         [(s, PANELIST.format(claim=f"{s} thing", slug=s,
+                                              verdict="GO", sev="LOW"))
+                          for s in ("sonnet", "gpt5", "gemini")],
+                         expected=3, delivered=3, min_decided=3, manifest_json="[]")
+    assert "absent" not in data
+
+
+def test_a_malformed_handoff_does_not_cost_the_verdict(tmp_path):
+    """The manifest projection is jq output built in shell. If it ever arrives broken,
+    losing the verdict over it would trade a reporting gap for a total loss."""
+    _, data, res = _three_of_four(tmp_path, "{not json at all")
+    assert data["counts"]["NO-GO"] == 3 and res.returncode == 0

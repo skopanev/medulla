@@ -23,7 +23,7 @@ from verdict_parse import NOT_PANELISTS, SEVERITY_ORDER, read_panelist
 # wrong answer anyway: the collector is a FILE from the mounted workflow directory,
 # refreshed on the host independently of the engine in the container. That is why two
 # rounds with one engine stamp can differ in fields. A test pins this to pyproject.
-COLLECTOR_VERSION = "4.72.1"
+COLLECTOR_VERSION = "4.74.1"
 
 
 def build(round_dir: Path, delivered_slugs=None) -> dict:
@@ -133,7 +133,37 @@ HOW_TO_READ = """HOW TO READ THIS (rules, not suggestions):
 """
 
 
-def render(data: dict, delivered: int, expected: int) -> str:
+def _absent_seats(manifest_json, seated: set, expected: int, delivered: int) -> list:
+    """Seats the round expected and did not get, each with why — the engine's word.
+
+    Two kinds, and both are losses a reader must see. A seat with a manifest row
+    failed somewhere the engine could name (`pre`, `watchdog`, `rc`). A seat with no
+    row at all — a cancelled queue writes none by design — can only be counted, so it
+    is reported as an unnamed absence rather than quietly dropped, because dropping
+    it is what turns "3 of 4" into a clean "3 of 3".
+    """
+    seats = []
+    try:
+        rows = json.loads(manifest_json) if manifest_json else []
+    except (ValueError, TypeError):
+        rows = []                      # a malformed hand-off must not lose the verdict
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict) or r.get("ok"):
+            continue
+        slug = ((r.get("input") or {}).get("slug") if isinstance(r.get("input"), dict)
+                else None) or r.get("key") or "unknown"
+        if slug in seated:
+            continue                   # it delivered; refused_by_engine covers that case
+        seats.append({"slug": slug,
+                      **({"reason": r["reason"]} if r.get("reason") else {}),
+                      **({"attempts": r["attempts"]} if r.get("attempts") is not None else {}),
+                      **({"message": str(r["message"])[:400]} if r.get("message") else {})})
+    unnamed = (expected or 0) - delivered - len(seats)
+    seats += [{"slug": "unknown", "reason": "no manifest row"}] * max(0, unnamed)
+    return seats
+
+
+def render(data: dict, delivered: int, expected: int, absent=()) -> str:
     c = data["counts"]
     out = [f"# Panel verdict — GO {c['GO']} · NO-GO {c['NO-GO']} · INSUFFICIENT {c['INSUFFICIENT']}"
            + (f" · no verdict {c['none']}" if c["none"] else ""),
@@ -156,7 +186,10 @@ def render(data: dict, delivered: int, expected: int) -> str:
         out += [""]
     if expected and delivered < expected:
         out += [f"> **WARNING:** only {delivered} of {expected} panelists delivered. This is a",
-                "> partial panel — do not report it as a full one.", ""]
+                "> partial panel — do not report it as a full one."]
+        out += [f">   {s['slug']} — {s.get('message') or s.get('reason') or 'no reason recorded'}"
+                for s in absent]
+        out += [""]
     out += [HOW_TO_READ, "## Verdicts", ""]
 
     for p in data["panelists"]:
@@ -187,6 +220,10 @@ def main(argv: list[str]) -> int:
     # Comma-separated slugs the ENGINE accepted. Absent: every artifact on disk
     # counts, which is the pre-4.70 behaviour and what old callers still get.
     ap.add_argument("--delivered-slugs", default=None)
+    # The engine's own manifest rows, projected to what a reader needs. Used for ONE
+    # thing: naming the seats that produced no artifact. Never for counting — the
+    # artifacts on disk remain the single source of participant state.
+    ap.add_argument("--manifest-json", default=None)
     # Whatever the caller knows about WHAT was reviewed. Absent stays absent: an empty
     # string in a gate field is worse than no field, because it reads as an answer.
     ap.add_argument("--subject", action="append", default=[], metavar="KEY=VALUE")
@@ -204,7 +241,16 @@ def main(argv: list[str]) -> int:
     # reported 3 delivered beside 4 decided. Whatever a gate reads, it now reads it
     # from the same files the verdicts were parsed from.
     delivered = len(data["panelists"])
-    (a.run_dir / "verdict.md").write_text(render(data, delivered, a.expected),
+    # A SEAT THAT NEVER SAT LEAVES NO ROW, and a round of three then reads as a
+    # unanimous three. Measured live: a pre hook refused one panelist on an HTTP 000
+    # from its provider, attempts=0, no artifact, no entry under panelists — every
+    # field consistent, arithmetic sound, and the only trace was expected=4 beside
+    # delivered=3, two numbers a reader has to think to compare. The human channel
+    # already warned; the machine channel said nothing, so tooling that trusted the
+    # panelist list reported a full panel. Name the empty seats instead.
+    absent = _absent_seats(a.manifest_json, {p["slug"] for p in data["panelists"]},
+                           a.expected, delivered)
+    (a.run_dir / "verdict.md").write_text(render(data, delivered, a.expected, absent),
                                           encoding="utf-8")
     # written even when the round failed: why it failed is a fact a gate needs
     subject = dict(kv.split("=", 1) for kv in a.subject if "=" in kv and kv.split("=", 1)[1])
@@ -245,6 +291,8 @@ def main(argv: list[str]) -> int:
                    **({"manifest_delivered": a.delivered}
                       if a.delivered and a.delivered != delivered else {})},
         "counts": c,
+        # who was expected and did not appear, with the engine's reason
+        **({"absent": absent} if absent else {}),
         "blocking": data["blocking"],
         "unsupported_no_go": data["unsupported"],
         # One field a gate branches on. A NON-EMPTY blocking list is enough on its
