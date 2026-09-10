@@ -100,6 +100,28 @@ nodes:
         echo "<signal:var key=REVIEWED_HEAD>$head</signal:var>"
         echo "<signal:var key=REVIEWED_STATE>$([ -n "$dirty" ] && echo dirty || echo clean)</signal:var>"
         echo "<signal:var key=REVIEWED_DIGEST>$content</signal:var>"
+
+        # THE SUBJECT ITSELF CAN BE WRONG, and an empty-workspace check does not see
+        # it. Live: virtiofs served a STALE snapshot under /private/tmp — the tree was
+        # not empty, it held yesterday's code, and four panelists returned four
+        # confident INSUFFICIENTs about a subject that no longer existed. An empty
+        # tree at least produces honest INSUFFICIENT; a tree holding the wrong code
+        # produces a full-looking round with a machine-readable verdict and nothing
+        # anywhere saying the subject was swapped.
+        # The caller knows the HEAD it MEANS to review. We know the HEAD we SEE. When
+        # both exist and disagree, that is the swap, and it costs one comparison
+        # instead of twenty minutes and a full panel. Nothing is required: a caller
+        # who passes no HEAD gets today's behaviour, because there is nothing to
+        # check against and inventing an expectation would be worse than no check.
+        if [ -n "${HEAD:-}" ] && [ "$head" != "no-commits" ] \
+           && [ "${HEAD#"${head}"}" = "$HEAD" ] && [ "${head#"${HEAD}"}" = "$head" ]; then
+          echo "spar: the tree under review is NOT the one you named." >&2
+          echo "spar:   you passed HEAD: $HEAD" >&2
+          echo "spar:   the tree is at:  $head" >&2
+          echo "spar: a stale mount or the wrong worktree — check before spending a panel." >&2
+          echo "<signal:failed>subject mismatch: passed HEAD $HEAD, tree at $head</signal:failed>"
+          exit 1
+        fi
       elif [ -e .git ]; then
         # A .git that exists while git refuses is NOT "no repository". It is the
         # signature of a LANE WORKTREE mounted without its gitdir: a worktree's

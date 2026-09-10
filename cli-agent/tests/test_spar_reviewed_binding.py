@@ -130,3 +130,50 @@ def test_a_worktree_without_its_gitdir_is_not_called_unversioned(tmp_path):
     assert digest_of(out) is None, "nothing can be bound to a revision here"
     assert "<signal:ready>" in out, "the round still runs — the bytes are reviewable"
     assert "worktree" in out.lower(), "say WHY, or the reader guesses"
+
+
+def run_prepare_with(cwd, **extra):
+    import os as os_mod
+    run_dir = cwd.parent / f"{cwd.name}-run"
+    run_dir.mkdir(exist_ok=True)
+    res = subprocess.run(["bash", "-c", prepare_shell()], capture_output=True, text=True,
+                         cwd=cwd, env={**os_mod.environ, "QUESTION": "q",
+                                       "MEDULLA_RUN_DIR": str(run_dir), **extra},
+                         check=False)
+    return res.returncode, res.stdout + res.stderr
+
+
+def test_a_named_head_that_does_not_match_the_tree_stops_the_round(repo):
+    """virtiofs served a STALE snapshot: the tree was not empty, it held yesterday's
+    code, and four panelists returned four confident INSUFFICIENTs about a subject
+    that no longer existed. An empty tree produces honest INSUFFICIENT; the wrong
+    tree produces a full-looking round with a machine-readable verdict and nothing
+    saying the subject was swapped. One comparison beats twenty minutes."""
+    rc, out = run_prepare_with(repo, HEAD="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+    assert rc == 1, out
+    assert "subject mismatch" in out
+    assert "deadbeef" in out and "you passed HEAD" in out, "name BOTH, or it is unactionable"
+
+
+def test_a_matching_head_runs(repo):
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    rc, out = run_prepare_with(repo, HEAD=head)
+    assert rc == 0 and "<signal:ready>" in out, out
+
+
+def test_an_abbreviated_head_still_matches(repo):
+    """Callers paste short shas. Treating one as a mismatch would fail rounds that
+    are perfectly correct — worse than not checking, because it trains people to
+    ignore the check."""
+    full = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    rc, out = run_prepare_with(repo, HEAD=full[:9])
+    assert rc == 0 and "<signal:ready>" in out, out
+
+
+def test_no_head_passed_behaves_as_before(repo):
+    """Nothing is required: with no expectation there is nothing to check against,
+    and inventing one would be worse than no check."""
+    rc, out = run_prepare_with(repo)
+    assert rc == 0 and "subject mismatch" not in out

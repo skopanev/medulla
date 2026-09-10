@@ -8,6 +8,7 @@ something inside cannot find something that plainly exists outside.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -109,6 +110,29 @@ def build_volumes(claude_home, mount_agy=True, *,
     opencode_dir = home / ".config" / "opencode"
     if "opencode" in bundles and opencode_dir.is_dir():
         add(opencode_dir.resolve(), f"{CONTAINER_HOME}/.config/opencode", ro=True)
+
+    # The GLOBAL gitignore, or the panel sees files the developer never sees. git
+    # reads ~/.config/git/ignore by XDG default — no core.excludesFile needed — and
+    # without it inside the container every host-ignored path becomes untracked.
+    # Measured: a lane's tree was clean by `git status` on the host and came back
+    # reviewed_state=dirty from the round, because five .claude/settings.local.json
+    # files are hidden by one global rule that never travelled. A false dirty costs
+    # what a false clean does, pointing the other way: it teaches readers to distrust
+    # sound rounds. Honour an explicit core.excludesFile first, since a caller who set
+    # one means it.
+    excludes = None
+    try:
+        configured = subprocess.run(
+            ["git", "config", "--global", "core.excludesFile"],
+            capture_output=True, text=True, check=False).stdout.strip()
+        if configured:
+            excludes = Path(configured).expanduser()
+    except OSError:
+        pass
+    if excludes is None:
+        excludes = home / ".config" / "git" / "ignore"
+    if excludes.is_file():
+        add(excludes.resolve(), f"{CONTAINER_HOME}/.config/git/ignore", ro=True)
 
     ntk_dir = home / ".config" / "ntk"
     if ntk_dir.is_dir():

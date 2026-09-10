@@ -168,3 +168,53 @@ def test_sighup_does_not_kill_a_backgrounded_run(dockerpy):
     src = inspect.getsource(dockerpy.main)
     assert "SIGHUP" in src and "SIG_IGN" in src
     assert signal.getsignal(signal.SIGINT) is not signal.SIG_IGN   # still interruptible
+
+
+def test_the_global_gitignore_travels_into_the_container(dockerpy, tmp_path, monkeypatch):
+    """git reads ~/.config/git/ignore by XDG default — no core.excludesFile needed —
+    and without it inside the container every host-ignored path becomes untracked.
+
+    Measured: a lane's tree was clean by `git status` on the host and the round came
+    back reviewed_state=dirty, because five .claude/settings.local.json files are
+    hidden by one global rule that never travelled. A false dirty costs what a false
+    clean does, pointing the other way: it teaches readers to distrust sound rounds.
+    """
+    fake_home = tmp_path / "home"
+    (fake_home / ".config" / "git").mkdir(parents=True)
+    ignore = fake_home / ".config" / "git" / "ignore"
+    ignore.write_text("**/.claude/settings.local.json\n", encoding="utf-8")
+
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setattr(dockerpy.Path, "home", staticmethod(lambda: fake_home))
+    monkeypatch.setenv("PWD", str(cwd))
+    monkeypatch.chdir(cwd)
+
+    vols = dockerpy.build_volumes(tmp_path / "no-claude", mount_agy=False)
+    assert f"{ignore}:/home/hltm/.config/git/ignore:ro" in vols, vols
+
+
+def test_an_explicit_excludes_file_wins_over_the_xdg_default(dockerpy, tmp_path, monkeypatch):
+    """A caller who set core.excludesFile means it."""
+    fake_home = tmp_path / "home"
+    (fake_home / ".config" / "git").mkdir(parents=True)
+    (fake_home / ".config" / "git" / "ignore").write_text("xdg\n", encoding="utf-8")
+    chosen = fake_home / "my-ignores"
+    chosen.write_text("chosen\n", encoding="utf-8")
+
+    cwd = tmp_path / "repo"
+    cwd.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setattr(dockerpy.Path, "home", staticmethod(lambda: fake_home))
+    monkeypatch.setenv("PWD", str(cwd))
+    monkeypatch.chdir(cwd)
+
+    class Result:
+        stdout = f"{chosen}\n"
+
+    import sys
+    mounts = sys.modules["dockerlib.mounts"]
+    monkeypatch.setattr(mounts.subprocess, "run", lambda *a, **k: Result())
+    vols = dockerpy.build_volumes(tmp_path / "no-claude", mount_agy=False)
+    assert f"{chosen}:/home/hltm/.config/git/ignore:ro" in vols, vols
