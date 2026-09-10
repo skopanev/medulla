@@ -128,3 +128,46 @@ def test_a_callers_own_lane_id_is_not_overwritten(tmp_path):
                         "MEDULLA_RUN_ID": "orchestrator-lane-7",
                         "SPAR_TEST_RUN_ID": str(recorded)})
     assert recorded.read_text().strip() == "orchestrator-lane-7"
+
+
+# ── the run directory's own name must not be able to lose the outcome ───────────
+
+def test_a_lane_named_run_still_knows_when_it_started(tmp_path):
+    """`started_at` parsed the directory name with rsplit("-", 1), which assumed the
+    suffix was one dash-free token. That held while it was eight hex characters. Since
+    lane names arrived — `wt-x4lu-db-fence-8527c8f7-30130` — rsplit handed strptime a
+    timestamp with half the lane glued on, and it raised.
+
+    It raised from _normalize_outcome, which runs on the way OUT: the round had
+    finished, the verdict was on disk, and outcome.json was never written. Measured
+    before the fix: 22 rounds named that way in one day, 20 with no outcome.json —
+    the exact "finished but unmarked" symptom that was being chased in the observer.
+    """
+    import datetime
+    import sys as _s
+    from pathlib import Path as _P
+    _s.path.insert(0, str(_P(__file__).resolve().parent.parent))
+    from medulla.v2.rundir import RunStore
+
+    for name in ("2026-09-10_22-36-20-c465bdd7",                       # the old shape
+                 "2026-09-10_23-08-49-work-0c8fe162-30130",            # a lane name
+                 "2026-09-10_23-08-49-wt-x4lu-db-fence-8527c8f7-30130"):
+        store = RunStore.__new__(RunStore)
+        store.dir = tmp_path / name
+        assert store.started_at == datetime.datetime(2026, 9, 10,
+                                                     *([22, 36, 20] if "c465" in name
+                                                       else [23, 8, 49])), name
+
+
+def test_an_unparseable_run_name_does_not_cost_the_outcome(tmp_path):
+    """A duration is worth less than the record that the run finished. If the name
+    carries no timestamp at all, fall back rather than raise on the way out."""
+    import sys as _s
+    from pathlib import Path as _P
+    _s.path.insert(0, str(_P(__file__).resolve().parent.parent))
+    from medulla.v2.rundir import RunStore
+
+    store = RunStore.__new__(RunStore)
+    store.dir = tmp_path / "not-a-timestamp-at-all"
+    store.dir.mkdir()
+    store.started_at          # must not raise

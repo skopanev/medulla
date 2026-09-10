@@ -136,9 +136,26 @@ class RunStore(SessionStore):
     @property
     def started_at(self) -> datetime.datetime:
         """Boot time of the ORIGINAL invocation, parsed from the dir name —
-        cumulative duration across resumes with zero extra files."""
-        ts = self.dir.name.rsplit("-", 1)[0]
-        return datetime.datetime.strptime(ts, "%Y-%m-%d_%H-%M-%S")
+        cumulative duration across resumes with zero extra files.
+
+        THE PREFIX, NOT "EVERYTHING BEFORE THE LAST DASH". The old rsplit assumed the
+        suffix was one dash-free token, which held while it was eight hex characters.
+        Since 4.75.0 the run id can be a lane name — `wt-x4lu-db-fence-8527c8f7-30130`
+        — and rsplit then handed strptime a timestamp with half the lane glued to it.
+        It raised, and it raised from _normalize_outcome, which runs on the way OUT:
+        the round had finished, the verdict was on disk, and outcome.json was never
+        written. Measured on this machine before the fix: 22 rounds named that way
+        today, 20 of them with no outcome.json — the very "finished but unmarked"
+        symptom being chased elsewhere.
+
+        The timestamp is a fixed 19 characters, so read exactly those. And if the name
+        does not carry one at all, do NOT raise: nothing about a duration is worth
+        losing the outcome of a completed run over.
+        """
+        try:
+            return datetime.datetime.strptime(self.dir.name[:19], "%Y-%m-%d_%H-%M-%S")
+        except ValueError:
+            return datetime.datetime.fromtimestamp(self.dir.stat().st_mtime)
 
     # ── steps ──
     def new_step_dir(self, node_name: str) -> tuple[int, Path]:
