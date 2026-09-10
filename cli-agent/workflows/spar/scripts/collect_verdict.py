@@ -190,8 +190,25 @@ def main(argv: list[str]) -> int:
                                           encoding="utf-8")
     # written even when the round failed: why it failed is a fact a gate needs
     subject = dict(kv.split("=", 1) for kv in a.subject if "=" in kv and kv.split("=", 1)[1])
+    # Which engine computed THIS file. It was recorded only in source.txt beside the
+    # verdict, so a stored round could not say for itself what the collector of the
+    # day did or did not do — a reader comparing two rounds had to remember which
+    # version gained which behaviour. A replay never rewrites a stored verdict (and
+    # must not), so the number in an old file stays as it was computed; the stamp is
+    # what lets a reader tell that from a current one.
+    engine = ""
+    try:
+        src = (a.run_dir / "source.txt").read_text(encoding="utf-8")
+        for line in src.splitlines():
+            if line.startswith("engine:"):
+                engine = line.split(":", 1)[1].strip()
+                break
+    except OSError:
+        pass
+
     (a.run_dir / "verdict.json").write_text(json.dumps({
         "run_id": a.run_dir.name,
+        **({"engine": engine} if engine else {}),
         **({"subject": subject} if subject else {}),
         "quorum": {"expected": a.expected, "delivered": delivered,
                    "min_decided": a.min_decided, "decided": decided,

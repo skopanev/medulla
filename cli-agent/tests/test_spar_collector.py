@@ -309,3 +309,23 @@ def test_without_the_list_every_artifact_counts(tmp_path):
            ("gpt5", "## FINDINGS\nNONE\n\n## VERDICT\nGO — fine\n")]
     _, data, _ = collect(tmp_path, art, expected=2, delivered=2, min_decided=1)
     assert data["counts"]["GO"] == 2
+
+
+def test_the_verdict_names_the_engine_that_computed_it(tmp_path):
+    """The version lived only in source.txt beside the verdict, so a stored round
+    could not say for itself what the collector of the day did. A reader comparing
+    two rounds had to remember which version gained which behaviour — and since a
+    replay never rewrites a stored verdict (and must not), an old file keeps its old
+    arithmetic with nothing on it to say so."""
+    (tmp_path / "source.txt").write_text("workflow: /x/workflow.yaml\nengine: 4.70.1\n")
+    _, data, _ = collect(tmp_path, [("s", "## FINDINGS\nNONE\n\n## VERDICT\nGO — ok\n")],
+                         expected=1, delivered=1, min_decided=1)
+    assert data["engine"] == "4.70.1", data.get("engine")
+
+
+def test_a_verdict_without_source_txt_still_writes(tmp_path):
+    """Older runs have no source.txt. Absent is absent — not an empty string that
+    reads like an answer."""
+    _, data, _ = collect(tmp_path, [("s", "## FINDINGS\nNONE\n\n## VERDICT\nGO — ok\n")],
+                         expected=1, delivered=1, min_decided=1)
+    assert "engine" not in data
