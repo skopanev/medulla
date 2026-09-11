@@ -2,7 +2,7 @@
 
   medulla -w <workflow-dir> [--var K=V ...] [--node NAME]
   medulla -w <workflow-dir> --resume | --run <dir>
-  medulla -w <workflow-dir> --validate | --dry-run
+  medulla -w <workflow-dir> --validate | --dry-run | --graph
 """
 from __future__ import annotations
 
@@ -46,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="continue a specific run directory")
     parser.add_argument("--validate", action="store_true", help="load + validate, no run")
     parser.add_argument("--dry-run", action="store_true", help="validate + print the plan, no run")
+    parser.add_argument("--graph", action="store_true",
+                        help="validate + print the routing table as mermaid, no run")
     parser.add_argument("--version", action="store_true", help="print version + installed commit")
     parser.add_argument("--runs-folder", type=Path, metavar="DIR",
                         help="write this run's history under DIR instead of beside the "
@@ -72,13 +74,15 @@ def main(argv: list[str] | None = None) -> int:
 
     yaml_path = _resolve_workflow_yaml(ns.workflow)
 
-    if ns.validate or ns.dry_run:
+    if ns.validate or ns.dry_run or ns.graph:
         try:
             workflow = load_workflow(yaml_path)
         except EngineCrash as crash:
             print(f"{crash.code}: {crash.message}", file=sys.stderr)
             return 1
-        if ns.dry_run:
+        if ns.graph:
+            _print_graph(workflow)
+        elif ns.dry_run:
             _print_plan(workflow)
         else:
             print("ok")
@@ -194,6 +198,80 @@ def _print_plan(workflow) -> None:
         for sig, target in edges.items():
             inherited = "" if sig in node.on_signal else "  (defaults)"
             print(f"    {sig} -> {target}{inherited}")
+
+
+TERMINALS_SHAPE = {"__exit_ok__", "__exit_fail__"}
+
+
+def _mermaid_id(name: str) -> str:
+    """A node name is free text; a mermaid id is not."""
+    safe = "".join(c if (c.isalnum() or c == "_") else "_" for c in name)
+    return safe if safe and not safe[0].isdigit() else f"n_{safe}"
+
+
+def _node_label(name: str, node) -> str:
+    """What the box says. The kind and the harness belong here: without them a
+    reader cannot see where the workflow spends money, which is half of why the
+    picture is being read at all."""
+    kind = "pool" if node.is_pool else "decision"
+    if node.action.kind == "shell":
+        what = "shell"
+    else:
+        a = node.action.agent
+        what = a.harness + (f" {a.model}" if a.model else "")
+    lines = [name, f"{kind} · {what}"]
+    if node.is_pool:
+        pool = node.pool
+        mp = pool.max_parallel if pool.max_parallel is not None else "all"
+        ms = pool.min_success if pool.min_success is not None else "all"
+        # The pool is ONE box. Expanding its inputs would draw the roster, not the
+        # graph, and the roster changes for reasons the graph does not care about.
+        lines.append(f"max_parallel {mp} · min_success {ms}")
+    return "<br/>".join(lines)
+
+
+def _print_graph(workflow) -> None:
+    """The routing table as a picture, generated from the same structure the engine
+    routes on — so it cannot disagree with the workflow the way a hand-drawn diagram
+    does. A drawn graph is a CLAIM about the workflow; this is a view of it."""
+    p = workflow
+    print("```mermaid")
+    print("flowchart TD")
+    seen_terminal = set()
+    edges = []
+    for name, node in p.nodes.items():
+        print(f'  {_mermaid_id(name)}["{_node_label(name, node)}"]')
+        merged = dict(p.defaults.on_signal)
+        merged.update(node.on_signal)
+        for sig, target in merged.items():
+            edges.append((name, sig, target, sig in node.on_signal))
+            if target in TERMINALS_SHAPE:
+                seen_terminal.add(target)
+    for term in sorted(seen_terminal):
+        print(f'  {_mermaid_id(term)}(["{term}"])')      # terminals get their own shape
+    print()
+    for src, sig, target, own in edges:
+        label = sig if own else f"{sig} (defaults)"
+        if sig == "__failed__":
+            # Failure wiring dashed: the solid edges alone are the skeleton, and a
+            # reader looking for "what normally happens" should not have to subtract
+            # the error handling by eye.
+            print(f"  {_mermaid_id(src)} -. {label} .-> {_mermaid_id(target)}")
+        else:
+            print(f"  {_mermaid_id(src)} -->|{label}| {_mermaid_id(target)}")
+    print("```")
+    print()
+
+    # WHERE EDGES CONVERGE — the thing a diagram renders badly and a table renders
+    # well. One workflow had twenty edges arriving at a single node; nobody sees that
+    # by following arrows.
+    incoming: dict[str, list[str]] = {}
+    for src, sig, target, _own in edges:
+        incoming.setdefault(target, []).append(f"{src} ({sig})")
+    print("| target | in | from |")
+    print("|---|---|---|")
+    for target, sources in sorted(incoming.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        print(f"| {target} | {len(sources)} | {', '.join(sorted(sources))} |")
 
 
 if __name__ == "__main__":

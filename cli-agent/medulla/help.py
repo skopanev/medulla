@@ -123,6 +123,8 @@ BEFORE A LONG RUN
 
     medulla -w <name> --validate       parse and check, run nothing
     medulla -w <name> --dry-run        the above, plus the plan it would execute
+    medulla -w <name> --graph          the same routing, as mermaid + a table of
+                                       where edges converge (reads better past ~10 nodes)
 
 PATHS INSIDE --docker — the mistake worth naming twice
 

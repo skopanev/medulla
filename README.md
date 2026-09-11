@@ -30,6 +30,7 @@ medulla help                      # the launch contract + every workflow that re
 
 medulla -w my-pipe                # run — a BARE NAME is the reliable form, from any directory
 medulla -w my-pipe --dry-run      # print the resolved plan, run nothing
+medulla -w my-pipe --graph        # the same routing as mermaid + convergence table
 medulla -w my-pipe --var KEY=VAL  # override vars (fresh runs only)
                                   # under --docker a --var value crosses AS-IS:
                                   # a host path in it does not exist inside.
