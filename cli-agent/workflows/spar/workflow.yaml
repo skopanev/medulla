@@ -246,7 +246,25 @@ nodes:
 
   panel:
     inputs:
-      - {slug: glm5,   harness: opencode,    model: zai-coding-plan/glm-5.3, effort: max}
+      # SEAT FOUR, TEMPORARILY DEEPSEEK. zai-coding-plan answers 429 "Weekly/Monthly
+      # Limit Exhausted, resets 2026-09-13 10:00" to every request, so glm5 has been
+      # refusing before the body since the 10th and the panel has been running three
+      # seats against a threshold of three — no margin, and any format slip costs the
+      # round. Measured, not assumed: a live ping to glm-5.3 returns 429 while
+      # deepseek-v4-pro-0813 returns 200.
+      #
+      # WHY DEEPSEEK AND NOT THE OBVIOUS SUBSTITUTES. A second zai account would be
+      # rotating identities to evade a vendor limit — refused. Another model on agy or
+      # claude-code would put two seats on one account, so one exhausted quota would
+      # take both, and independence is the point of a panel. qwen3.8-max is not a
+      # candidate either: the owner removed it on measurement (three first-attempt
+      # timeouts in three runs, 100%/94%/100% of the budget, one review delivered).
+      # alibaba-token-plan is an account no other seat uses, and deepseek is a vendor
+      # no other seat uses.
+      #
+      # REVERT ON 2026-09-13: put glm5 back once the quota resets, unless deepseek has
+      # by then earned the seat on its own numbers.
+      - {slug: deepseek, harness: opencode,  model: alibaba-token-plan/deepseek-v4-pro-0813, effort: max}
       - {slug: gpt5,   harness: codex,       model: gpt-5.6-sol,             effort: high}
       - {slug: sonnet, harness: claude-code, model: claude-sonnet-5}
       - {slug: gemini, harness: agy,         model: "Gemini 3.1 Pro (High)"}
