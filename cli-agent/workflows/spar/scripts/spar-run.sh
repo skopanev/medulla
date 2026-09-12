@@ -56,13 +56,58 @@ die() { echo "spar-run: $*" >&2; exit 1; }
 alive_count() {
     # "Is MY round alive", not "is any panel alive". Filtering on `^medulla-` answered
     # for every panel on the machine, so a wait sat quietly through its own round's
-    # death whenever a stranger's round was up — measured by a lane whose wait hung on
-    # a round that had already died. Containers are named after their run directory
-    # (4.72.0+), so the question can finally be asked about one run.
+    # death whenever a stranger's round was up.
+    #
+    # THREE QUESTIONS, and a fourth answer. The name alone can be missing from a
+    # container that is plainly alive: a running panel was called medulla-ab862829
+    # while its run directory was 2026-09-10_21-43-55-510c31cd — the directory name
+    # arrived from outside and was used, the container name fell back to random hex.
+    # The lookup found nothing and the round was declared dead at fourteen minutes old.
+    # Naming by run directory landed in 4.72.0 and labels in 4.75.0; two installations
+    # of medulla coexist here (4.76.4 in PATH, 4.56.2 under pipx), so the old shape is
+    # not history.
+    #
+    # AND A FAILURE TO OBSERVE IS NOT A DEATH. Every query below can fail — a daemon
+    # that went away, a socket that timed out — and a failed query returns no rows,
+    # which counts as zero, which reads as "dead". That is the same fail-open shape we
+    # have paid for twice: a check that could not run must not pass for an answer.
+    # rc 0 = a real count on stdout; rc 2 = could not ask, and the caller must not
+    # treat it as absence.
     local run="${1:-}"
-    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    # THE OUTER BRANCH CAN FAIL THE SAME WAY. `docker info` failing means one of two
+    # very different things: docker is not installed here (this round is native, and
+    # counting host processes is the right question), or docker IS installed and the
+    # daemon is not answering (we simply do not know, and the container may well be
+    # running). Folding both into the native branch turns an unreachable daemon into
+    # a process count of zero — the fail-open shape again, one level up from where I
+    # first fixed it.
+    if command -v docker >/dev/null 2>&1 && ! docker info >/dev/null 2>&1; then
+        return 2                       # installed but unreachable: cannot ask
+    fi
+    if command -v docker >/dev/null 2>&1; then
         if [ -n "$run" ]; then
-            docker ps -q --filter "name=^medulla-$(basename "$run")\$" 2>/dev/null | wc -l
+            local seat out
+            out=$(docker ps -q --filter "name=^medulla-$(basename "$run")\$" 2>/dev/null) || return 2
+            seat=$(printf '%s' "$out" | grep -c . || true)
+            [ "${seat:-0}" -gt 0 ] && { echo "$seat"; return 0; }
+
+            out=$(docker ps -q --filter "label=medulla.run_dir_name=$(basename "$run")" 2>/dev/null) || return 2
+            seat=$(printf '%s' "$out" | grep -c . || true)
+            [ "${seat:-0}" -gt 0 ] && { echo "$seat"; return 0; }
+
+            # LAST: the environment names the run directory even when nothing else
+            # does. One inspect per medulla container, only after the cheap questions
+            # failed. NOT the run directory's mount — the BOX is mounted, one box holds
+            # many rounds, and matching it would call this round alive because a
+            # neighbour is.
+            local ids id count=0 env_out
+            ids=$(docker ps -q --filter 'name=^medulla-' 2>/dev/null) || return 2
+            for id in $ids; do
+                env_out=$(docker inspect "$id" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null) || return 2
+                printf '%s' "$env_out" | grep -qxF "MEDULLA_RUN_DIR_NAME=$(basename "$run")" && count=$((count + 1))
+            done
+            echo "$count"
+            return 0
         else
             docker ps -q --filter 'name=^medulla-' 2>/dev/null | wc -l
         fi
@@ -312,7 +357,17 @@ cmd_wait() {
         # The grace before "no container means dead" is a real container start, which
         # is seconds — but a build makes it minutes, so it stays generous by default.
         # Overridable so a test can reach this branch without sleeping through it.
-        if [ "$waited" -ge "${SPAR_STARTUP_GRACE_S:-60}" ] && [ "$(alive_count "$run")" -eq 0 ]; then
+        # rc 2 from alive_count means the question could not be asked — a daemon that
+        # went away, a socket that timed out. Not knowing is not the same as knowing
+        # the round is gone, and treating it as death is how a healthy panel gets
+        # declared a zombie. Keep waiting instead; the round's own deadline still ends
+        # the wait, and a real death still shows up as a confirmed zero next round.
+        local seats seats_rc
+        seats=$(alive_count "$run"); seats_rc=$?
+        if [ "$seats_rc" -eq 2 ]; then
+            gone=0
+            echo "spar-run: could not ask docker whether the round is alive — still waiting" >&2
+        elif [ "$waited" -ge "${SPAR_STARTUP_GRACE_S:-60}" ] && [ "${seats:-0}" -eq 0 ]; then
             gone=$((gone + 1))
             if [ "$gone" -ge 2 ]; then
                 echo "spar-run: no medulla container is running and no outcome was written." >&2
