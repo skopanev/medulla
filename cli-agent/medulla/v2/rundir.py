@@ -93,6 +93,7 @@ class RunStore(SessionStore):
         # or just another shell) would otherwise recompute a different set of secrets
         # for the very same run.
         (run_dir / "launch.txt").write_text(str(Path.cwd().resolve()), encoding="utf-8")
+        _record_mounts(run_dir)
         store = cls(run_dir, run_id)
         store._acquire_flock()
         return store
@@ -236,5 +237,35 @@ from .runlayout import (  # noqa: E402,F401
 )
 
 
+def _record_mounts(run_dir: Path) -> None:
+    """The mount table this run actually got, when it runs in a container.
 
+    Asked after the fact whether a panel could have written into the tree it was
+    reviewing, the only answer available was inference: read the launcher, find the
+    branch that adds --cwd-ro, confirm the run took it. The container was long gone
+    (--rm), so the question could not be answered from the run's own evidence — which
+    is what a run directory is for. Read-only or not is a fact about THIS process, and
+    /proc/self/mountinfo is where the kernel keeps it.
 
+    Only the mounts a reader would ask about: the workspace and everything under /mnt.
+    Absent outside Linux (a native run on a mac has no /proc), and never fatal — a run
+    that cannot describe its mounts still has work to do.
+    """
+    try:
+        raw = Path("/proc/self/mountinfo").read_text(encoding="utf-8")
+    except OSError:
+        return
+    rows = []
+    for line in raw.splitlines():
+        # mountinfo: id parent maj:min root MOUNTPOINT OPTIONS ... - fstype source ...
+        parts = line.split()
+        if len(parts) < 6:
+            continue
+        point, opts = parts[4], parts[5]
+        if point != "/workspace" and not point.startswith("/mnt/"):
+            continue
+        mode = "ro" if "ro" in opts.split(",") else "rw"
+        rows.append(f"{mode}\t{point}")
+    if rows:
+        (run_dir / "mounts.txt").write_text("\n".join(sorted(rows)) + "\n",
+                                            encoding="utf-8")
