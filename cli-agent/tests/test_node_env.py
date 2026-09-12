@@ -149,3 +149,132 @@ def test_the_panel_workflow_still_loads(tmp_path):
     """The contract gained a key; every shipped workflow must still parse."""
     wf = ROOT / "workflows/spar/workflow.yaml"
     assert pyyaml.safe_load(wf.read_text())["nodes"]
+
+
+# ── values are templates ─────────────────────────────────────────────────────
+#
+# They were not rendered at all: the block was parsed at load time and merged raw, so a
+# node written as REGION: "{{var:region}}" handed its body the literal six-character
+# template. Reported by a lane converting three nodes off pre hooks, measured on 4.83.0:
+# both {{var:ticket}} and {{vars.ticket}} arrived verbatim. Substitution is most of the
+# reason to declare env on a node at all — handing a node its coordinate out of the run's
+# variables — so these pin the rendering, and pin what must NOT be rendered with it.
+
+def test_a_node_env_value_is_rendered(tmp_path):
+    res, run_dir = run(tmp_path, """
+version: "2"
+start: a
+vars: {ticket: T-42}
+nodes:
+  a:
+    env: {TICKET: "{{var:ticket}}"}
+    shell: 'echo "got=[$TICKET]"; echo "<signal:ok>k</signal:ok>"'
+    on_signal: {ok: __exit_ok__}
+""")
+    assert res.returncode == 0, res.stderr
+    assert "got=[T-42]" in bodies(run_dir)
+
+
+def test_a_literal_env_value_is_left_alone(tmp_path):
+    res, run_dir = run(tmp_path, """
+version: "2"
+start: a
+nodes:
+  a:
+    env: {ROLE: reviewer}
+    shell: 'echo "got=[$ROLE]"; echo "<signal:ok>k</signal:ok>"'
+    on_signal: {ok: __exit_ok__}
+""")
+    assert res.returncode == 0, res.stderr
+    assert "got=[reviewer]" in bodies(run_dir)
+
+
+def test_an_env_value_may_render_empty(tmp_path):
+    # A prompt that renders to nothing is a broken prompt; FLAG="" is a value. Rendering
+    # env with required=True would fail the node for declaring an empty default.
+    res, run_dir = run(tmp_path, """
+version: "2"
+start: a
+nodes:
+  a:
+    env: {FLAG: "{{var:missing:-}}"}
+    shell: 'echo "got=[$FLAG]"; echo "<signal:ok>k</signal:ok>"'
+    on_signal: {ok: __exit_ok__}
+""")
+    assert res.returncode == 0, res.stderr
+    assert "got=[]" in bodies(run_dir)
+
+
+def test_env_sees_a_var_its_own_pre_hook_set(tmp_path):
+    # The rendering is lazy on purpose: env_fn is called again after the pre hook runs,
+    # so a node can compute its own coordinate and then read it. Rendering once at node
+    # entry would hand the body the value from BEFORE its own hook.
+    res, run_dir = run(tmp_path, """
+version: "2"
+start: a
+nodes:
+  a:
+    pre: 'echo "<signal:var key=lane>north</signal:var>"'
+    env: {LANE: "{{var:lane}}"}
+    shell: 'echo "got=[$LANE]"; echo "<signal:ok>k</signal:ok>"'
+    on_signal: {ok: __exit_ok__}
+""")
+    assert res.returncode == 0, res.stderr
+    assert "got=[north]" in bodies(run_dir)
+
+
+def test_a_seat_env_value_is_rendered_from_its_input(tmp_path):
+    # A pool seat's env is where per-seat coordinates belong, and {{input.x}} is how a
+    # seat names its own. Unrendered, every seat received the same six characters.
+    res, run_dir = run(tmp_path, """
+version: "2"
+start: a
+nodes:
+  a:
+    inputs:
+      - {name: north, env: {LANE: "{{input.name}}"}}
+      - {name: south, env: {LANE: "{{input.name}}"}}
+    min_success: 2
+    shell: 'echo "seat=[$LANE]"; echo "<signal:ok>k</signal:ok>"'
+    on_signal: {__done__: __exit_ok__}
+""")
+    assert res.returncode == 0, res.stderr
+    out = bodies(run_dir)
+    assert "seat=[north]" in out and "seat=[south]" in out
+
+
+def test_a_seat_env_still_beats_the_node_env_after_rendering(tmp_path):
+    # Precedence is documented and was verified before rendering existed; rendering must
+    # not reorder the merge.
+    res, run_dir = run(tmp_path, """
+version: "2"
+start: a
+vars: {who: node}
+nodes:
+  a:
+    env: {OWNER: "{{var:who}}"}
+    inputs:
+      - {name: s1, env: {OWNER: "seat-{{input.name}}"}}
+    min_success: 1
+    shell: 'echo "owner=[$OWNER]"; echo "<signal:ok>k</signal:ok>"'
+    on_signal: {__done__: __exit_ok__}
+""")
+    assert res.returncode == 0, res.stderr
+    assert "owner=[seat-s1]" in bodies(run_dir)
+
+
+def test_an_env_NAME_is_never_a_template(tmp_path):
+    # Names are validated at load time against VAR_NAME_RE, and braces do not match it.
+    # A name built from a variable would be a variable whose very existence depends on
+    # runtime state — the failure would land in the body, not in the yaml.
+    res, _ = run(tmp_path, """
+version: "2"
+start: a
+nodes:
+  a:
+    env: {"{{var:name}}": x}
+    shell: 'echo "<signal:ok>k</signal:ok>"'
+    on_signal: {ok: __exit_ok__}
+""")
+    assert res.returncode != 0
+    assert "invalid name" in (res.stderr + res.stdout)

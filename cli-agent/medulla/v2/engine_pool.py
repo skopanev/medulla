@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from .contract import VAR_NAME_RE
+from .engine_body import render_env
 from .engine_inputs import InputsMixin
 from .engine_scan import _input_hash, log
 from .errors import E_DEADLINE, EngineCrash
@@ -72,7 +73,10 @@ class PoolMixin(InputsMixin):
             base = self._base_env(None if sequential else {**pool_vars, **local_ctx})
             # node env, then seat env: the seat is more specific, so it wins. Neither
             # is written back to the run's vars — that is the whole point.
-            return {**base, **node.env, **seat_env, **input_env}
+            return {**base,
+                    **render_env(node.env, render_fn, "env"),
+                    **render_env(seat_env, render_fn, "input env"),
+                    **input_env}
 
         def apply_pre_vars(pending: dict[str, str]) -> None:
             if sequential:

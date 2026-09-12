@@ -17,6 +17,24 @@ from .procrun import run as proc_run
 from .signals import SIGNAL_PROTOCOL
 
 
+def render_env(mapping: dict, render_fn, where: str) -> dict:
+    """Render the VALUES of an `env:` block. Names are literal, values are templates.
+
+    They were not rendered at all: contract_node parsed the block at load time and the
+    engine merged it raw, so a node written as REGION: "{{var:region}}" handed its body
+    the six characters of the template and nobody found out until runtime. Reported from
+    a live conversion of three nodes off pre hooks. Substitution is most of the reason
+    to declare env on a node — the point is to hand a node its coordinate out of the
+    run's variables — so the fix is to render, not to document the gap.
+
+    required=False: an env var may legitimately be empty. A prompt that renders to
+    nothing is a broken prompt; FLAG="" is a value.
+    """
+    if not mapping:
+        return {}
+    return {k: render_fn(v, f"{where}['{k}']", required=False) for k, v in mapping.items()}
+
+
 class BodyMixin:
     _last_resume = ""          # set by the last agent body prepared (see below)
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .classify import Move, Verdict, classify_attempt, next_move
-from .engine_body import BodyMixin
+from .engine_body import BodyMixin, render_env
 from .engine_message import conclusion_message, retry_note
 from .engine_scan import (
     AttemptsOutcome,
@@ -50,7 +50,11 @@ class AttemptsMixin(BodyMixin):
             # the difference from a pre hook emitting <signal:var>, whose value stays
             # in vars.yaml for the rest of the run: a node whose pre was forgotten
             # silently picks up a neighbour's role instead of failing.
-            env_fn = (lambda: {**self._base_env(), **node.env}) if node.env else self._base_env
+            # Rendered inside the lambda, not once here: a pre hook can set a var the
+            # body's env reads, and env_fn is called again after the hook runs.
+            env_fn = ((lambda: {**self._base_env(),
+                                **render_env(node.env, render_fn, "env")})
+                      if node.env else self._base_env)
         action = node.action
 
         pre_updates: list[str] = []
