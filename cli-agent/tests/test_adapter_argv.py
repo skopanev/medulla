@@ -43,12 +43,38 @@ def test_claude_argv_and_env(tmp_path):
     inv = a.build(AgentSpec(harness="claude-code", model="sonnet"),
                   tmp_path / "prompt.md", "PROMPT", 600)
     assert inv.argv[0] == "claude"
-    assert "--append-system-prompt-file" in inv.argv
-    assert inv.argv[-2:] == ["-p", "Execute."]
+    assert inv.argv[-1] == "-p"
     assert "--model" in inv.argv and "sonnet" in inv.argv
     assert inv.env["API_TIMEOUT_MS"] == str((600 + 300) * 1000)
     assert "ANTHROPIC_API_KEY" in inv.env_remove
-    assert inv.stdin is None
+
+
+def test_claude_sends_the_task_as_the_USER_message(tmp_path):
+    """It used to arrive as an appended SYSTEM prompt while the user message was the
+    literal "Execute." — a v1 convention that outlived its reason. The agent still saw
+    the task, so nothing looked broken; what could not see it was anything listening to
+    the user message. Measured downstream: a hook on UserPromptSubmit retrieved against
+    the string "Execute." and returned unrelated memories, while the same store answered
+    precisely when asked with the real task. `--resume` made it permanent — every turn
+    of a continued conversation repeated the placeholder.
+
+    codex and opencode already deliver the prompt this way; claude was the outlier.
+    """
+    a = H.ClaudeAdapter.__new__(H.ClaudeAdapter)
+    inv = a.build(AgentSpec(harness="claude-code"), tmp_path / "prompt.md", "THE TASK", 600)
+    assert inv.stdin == "THE TASK"
+    assert "Execute." not in inv.argv
+    assert "--append-system-prompt-file" not in inv.argv, "the task is not a system prompt"
+
+
+def test_claude_carries_the_task_across_a_resume(tmp_path):
+    """The second turn of a continued conversation must carry the task too — that is
+    where the placeholder did its lasting damage."""
+    a = H.ClaudeAdapter.__new__(H.ClaudeAdapter)
+    inv = a.build(AgentSpec(harness="claude-code"), tmp_path / "p.md", "SECOND TURN",
+                  600, resume="conv-1")
+    assert "--resume" in inv.argv and "conv-1" in inv.argv
+    assert inv.stdin == "SECOND TURN"
 
 
 def test_codex_argv_stdin_and_effort(tmp_path):

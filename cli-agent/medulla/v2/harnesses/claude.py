@@ -30,11 +30,19 @@ class ClaudeAdapter(HarnessAdapter):
             argv += ["--effort", spec.effort]   # low|medium|high|xhigh|max (claude --help)
         if resume:
             argv += ["--resume", resume]     # same conversation, second turn
-        argv += ["--append-system-prompt-file", str(prompt_file)]
         argv += spec.args
-        argv += ["-p", "Execute."]
+        # THE TASK IS THE USER MESSAGE, as it already is for codex and opencode. It
+        # used to go in as an appended SYSTEM prompt while the user message was the
+        # literal "Execute." — a v1 convention that outlived its reason here. The
+        # agent still saw the task, so nothing looked broken; what could not see it
+        # was anything listening to the user message. Measured downstream: a hook on
+        # UserPromptSubmit retrieved against the string "Execute." and returned
+        # unrelated memories, while the same store answered precisely when asked with
+        # the real task. `--resume` made it permanent — every turn of a continued
+        # conversation repeated the same placeholder.
+        argv += ["-p"]
         inner_ms = (int(timeout_s) + INNER_SLACK_S) * 1000
-        return Invoke(argv=argv,
+        return Invoke(argv=argv, stdin=prompt_text,
                       env={"API_TIMEOUT_MS": str(inner_ms)},
                       env_remove=["ANTHROPIC_API_KEY"])   # the OAuth account must win
 
