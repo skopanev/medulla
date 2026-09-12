@@ -123,3 +123,57 @@ nodes:
 """)
     assert "step_one[" in out, "the id must be safe"
     assert "step-one<br/>" in out, "the label must keep the real name"
+
+
+def test_edges_are_coloured_by_SIGNAL_not_by_target(tmp_path):
+    """The owner's first ask was colour-by-target and was withdrawn: different
+    outcomes converge on one handler, so colouring by target paints them alike —
+    exactly what needs telling apart. By signal, the graph's spine reads as one line
+    and each distinct outcome gets its own colour."""
+    out = graph(tmp_path, """
+version: "2"
+start: a
+nodes:
+  a: {shell: "echo", on_signal: {ok: b, fail: sink}}
+  b: {shell: "echo", on_signal: {ok: sink}}
+  sink: {shell: "echo", on_signal: {ok: __exit_ok__}}
+""")
+    styles = [ln for ln in out.splitlines() if ln.strip().startswith("linkStyle")]
+    assert styles, out
+    # `ok` appears three times and must be ONE colour; `fail` its own
+    ok_line = next(ln for ln in styles if ln.count(",") >= 2)
+    assert "stroke:" in ok_line
+
+
+def test_two_signals_never_share_a_colour_in_one_graph(tmp_path):
+    """Hashing alone was not enough — in this repository's own panel `failed`,
+    `no_quorum` and `no_verdict` collided on one colour, painting three different
+    outcomes alike."""
+    out = graph(tmp_path, """
+version: "2"
+start: a
+nodes:
+  a: {shell: "echo", on_signal: {failed: x, no_quorum: x, no_verdict: x, ok: x}}
+  x: {shell: "echo", on_signal: {ok: __exit_ok__}}
+""")
+    colours = [ln.split("stroke:")[1].split(",")[0] for ln in out.splitlines()
+               if ln.strip().startswith("linkStyle")]
+    # Four distinct signals leave this node; without the assertion on COUNT this test
+    # passes on an empty list, which is how it read green before the colouring existed.
+    assert len(colours) == 4, colours
+    assert len(colours) == len(set(colours)), colours
+
+
+def test_failure_and_default_keep_their_meaning(tmp_path):
+    """Red for failure and a quiet grey for the ordinary continuation are fixed, not
+    hashed: a palette must not scramble the two colours that carry meaning."""
+    out = graph(tmp_path, """
+version: "2"
+start: a
+defaults: {on_signal: {__failed__: __exit_fail__}}
+nodes:
+  a: {shell: "echo", on_signal: {__default__: __exit_ok__}}
+""")
+    styles = "\n".join(ln for ln in out.splitlines() if ln.strip().startswith("linkStyle"))
+    assert "#d62728" in styles, "failure is not red"
+    assert "#7f7f7f" in styles, "the ordinary continuation is not quiet"

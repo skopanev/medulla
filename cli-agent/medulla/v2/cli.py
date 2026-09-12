@@ -230,6 +230,44 @@ def _node_label(name: str, node) -> str:
     return "<br/>".join(lines)
 
 
+# Mid-lightness colours: mermaid renders on both light and dark backgrounds, and a
+# pale or near-black stroke disappears on one of them.
+_PALETTE = ("#1f77b4", "#2ca02c", "#9467bd", "#8c564b",
+            "#e377c2", "#17becf", "#bcbd22", "#ff7f0e")
+
+
+_FIXED = {"__failed__": "#d62728", "__default__": "#7f7f7f"}
+
+
+def _signal_colours(signals) -> dict[str, str]:
+    """One name, one colour, and NO TWO NAMES SHARING ONE inside a graph.
+
+    Two names are fixed rather than hashed because they carry meaning a palette must
+    not scramble: failure reads red, and the ordinary continuation stays quiet so the
+    exceptions stand out against it.
+
+    The rest start from a hash of the name, which keeps a signal's colour stable as a
+    workflow grows, and step to the next free slot on collision. Hashing alone was not
+    enough: in this repository's own panel, `failed`, `no_quorum` and `no_verdict`
+    landed on the same colour — three different outcomes painted alike, which is the
+    exact thing the colouring was asked for to prevent.
+    """
+    taken: dict[str, str] = {}
+    used = set()
+    for sig in sorted(signals):
+        if sig in _FIXED:
+            taken[sig] = _FIXED[sig]
+            continue
+        start = sum(sig.encode()) % len(_PALETTE)
+        for step in range(len(_PALETTE)):
+            colour = _PALETTE[(start + step) % len(_PALETTE)]
+            if colour not in used:
+                break
+        used.add(colour)
+        taken[sig] = colour
+    return taken
+
+
 def _print_graph(workflow) -> None:
     """The routing table as a picture, generated from the same structure the engine
     routes on — so it cannot disagree with the workflow the way a hand-drawn diagram
@@ -259,6 +297,22 @@ def _print_graph(workflow) -> None:
             print(f"  {_mermaid_id(src)} -. {label} .-> {_mermaid_id(target)}")
         else:
             print(f"  {_mermaid_id(src)} -->|{label}| {_mermaid_id(target)}")
+    # COLOUR BY SIGNAL NAME, not by target. The owner's first ask was by target and was
+    # withdrawn: different outcomes converge on one handler, so colouring by target
+    # paints them alike — exactly what needs telling apart. By signal, __default__ is
+    # one colour everywhere and the graph's spine reads as a single line, while FAIL,
+    # REJECT, CONFLICT and the rest each get their own.
+    #
+    # The colour comes from a hash of the name, so it is stable across graphs too: a
+    # signal keeps its colour when a node is added, and __failed__ looks the same in
+    # every workflow. Positional palettes drift on the next edit.
+    by_signal: dict[str, list[int]] = {}
+    for i, (_src, sig, _target, _own) in enumerate(edges):
+        by_signal.setdefault(sig, []).append(i)
+    colours = _signal_colours(by_signal)
+    for sig, idxs in sorted(by_signal.items()):
+        print(f"  linkStyle {','.join(str(i) for i in idxs)} "
+              f"stroke:{colours[sig]},stroke-width:2px")
     print("```")
     print()
 
