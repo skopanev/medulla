@@ -11,6 +11,37 @@ from .engine_scan import _tail, scan_stdout
 from .model import SIG_DEFAULT, SIG_FAILED
 
 
+def retry_note(attempt_id: str, post_rc, post_stderr: str) -> str | None:
+    """What to tell the agent about the attempt that was just thrown away.
+
+    Only the veto case gets a note. When the BODY died — rc!=0, a timeout, a watchdog
+    kill — there is nothing to tell: the thing that would read the note is the thing
+    that never answered, and the next attempt starts from a clean process anyway.
+    A post hook returning non-zero is the other case entirely: the agent finished, said
+    something, and a check the author wrote refused it. Until now the refusal went to
+    the manifest and nowhere else, so the retry re-read the identical prompt and, very
+    often, made the identical mistake. Measured over the stored corpus: of 662 retries,
+    310 ended in the SAME complaint as the attempt they replaced — the loop was paying
+    for an answer it had already been given.
+
+    Returned text is appended to the prompt, before the signal protocol.
+    """
+    if not post_rc:
+        return None
+    reason = _tail(post_stderr).strip()
+    if not reason:
+        # A hook that vetoes without saying why leaves nothing to pass on. Naming the
+        # rc alone would be worse than silence: it invites the agent to guess.
+        return None
+    return ("\n\n---\n"
+            f"YOUR PREVIOUS ANSWER ON THIS STEP ({attempt_id}) WAS REJECTED by the check "
+            f"that runs after you. It said:\n\n"
+            f"{reason}\n\n"
+            "That is the only reason you are being asked again. Fix what it names. "
+            "Sending the same answer again will fail the same check.\n"
+            "---\n")
+
+
 def conclusion_message(signal, action, result, total, limit_reason, fallback_used,
                        post_signal, post_scan, body_scan, known, *, agent_spec=None,
                        post_rc=None, post_stderr=""):

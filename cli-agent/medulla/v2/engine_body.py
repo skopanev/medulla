@@ -18,12 +18,21 @@ from .signals import SIGNAL_PROTOCOL
 
 
 class BodyMixin:
+    _last_resume = ""          # set by the last agent body prepared (see below)
+
     def _prepare_body(self, action: Action, node: Node, step_dir: Path,
-                      render_fn, phase: str, inherited_prompt: str | None = None):
+                      render_fn, phase: str, inherited_prompt: str | None = None,
+                      retry_note: str | None = None, retry_n: int = 0,
+                      keep_resume: str | None = None):
         """Returns (Invoke, rendered_prompt_text_or_None, rendered_AgentSpec_or_None).
 
         Every scalar agent field is a template (contract: an ensemble is just a pool
-        with per-input harness/model). Optional fields rendering empty count as absent."""
+        with per-input harness/model). Optional fields rendering empty count as absent.
+
+        retry_note carries WHY the previous attempt was rejected — see retry_note() in
+        engine_message.py. keep_resume pins the conversation id the caller already had,
+        so rebuilding a body for a retry cannot silently change which conversation the
+        attempt continues."""
         from .harness import Invoke
         if action.kind == "shell":
             # BASH, not $SHELL. A workflow is code committed to a repo and must behave the
@@ -61,12 +70,15 @@ class BodyMixin:
             prompt_text = inherited_prompt      # fallback reuses the primary's rendered prompt
         else:
             raise EngineCrash(E_RENDER, "agent action has no prompt", node=node.name)
-        prompt_file = step_dir / ("prompt.md" if phase == "primary" else "prompt-fallback.md")
+        stem = "prompt" if phase == "primary" else "prompt-fallback"
+        if retry_n:
+            stem += f"-retry-{retry_n}"      # keep the prompt each attempt actually got
+        prompt_file = step_dir / f"{stem}.md"
         # the protocol must ride in whatever text actually reaches the agent —
         # file (claude), stdin (codex) AND argv (opencode/agy). Battle test t2
         # found it riding in the file only: stdin/argv harnesses never saw it.
         # inherited prompt_text stays clean so a fallback doesn't double-stamp.
-        full_prompt = prompt_text + SIGNAL_PROTOCOL
+        full_prompt = prompt_text + (retry_note or "") + SIGNAL_PROTOCOL
         prompt_file.write_text(full_prompt, encoding="utf-8")
         timeout_s = self._clamp(self.p.action_timeout(action))
         # Continue the named conversation if this run already opened one. The FIRST
@@ -85,7 +97,12 @@ class BodyMixin:
                 f"conversation cannot move between CLIs. Use a different session name "
                 f"for the {harness} node.",
                 node=node.name)
-        resume = entry.get("id") if entry else None
+        resume = keep_resume if keep_resume is not None else (entry.get("id") if entry else None)
+        # Remembered so a retry can rebuild this body and continue the SAME conversation
+        # it was already continuing. Recomputing it there would read a store that this
+        # very attempt may have just written to, and the retry would silently switch
+        # conversations mid-node — a behaviour change hiding inside a bug fix.
+        self._last_resume = resume or ""
         if resume:
             log(f"  [{node.name}] continuing session '{session}' ({resume})")
         invoke = adapter.build(rendered_spec, prompt_file, full_prompt, timeout_s,

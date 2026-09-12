@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .classify import Move, Verdict, classify_attempt, next_move
 from .engine_body import BodyMixin
-from .engine_message import conclusion_message
+from .engine_message import conclusion_message, retry_note
 from .engine_scan import (
     AttemptsOutcome,
     ScanResult,
@@ -241,6 +241,16 @@ class AttemptsMixin(BodyMixin):
             if move.move is Move.RETRY_SAME:
                 log(f"attempt {attempt_id} failed (rc={result.rc}), retrying")
                 _retry_delay(self.deadline)      # a zero-delay retry on a 429 is a provider-ban request
+                note = retry_note(attempt_id, post_rc, post_stderr)
+                if note and current.kind == "agent":
+                    # Rebuild the body so the veto rides in the prompt the agent
+                    # actually reads. Pinned to the conversation this attempt was
+                    # already continuing (see _prepare_body) — the retry must not
+                    # change WHICH conversation it is, only what it is told.
+                    invoke, prompt_text, agent_spec = self._prepare_body(
+                        current, node, step_dir, render_fn, phase,
+                        inherited_prompt=prompt_text, retry_note=note,
+                        retry_n=total, keep_resume=self._last_resume)
                 continue
             if move.move is Move.SWITCH_FALLBACK:
                 log(f"attempt {attempt_id} failed (rc={result.rc}), switching to fallback")
