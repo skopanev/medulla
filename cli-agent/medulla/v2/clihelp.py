@@ -11,6 +11,9 @@ this machine, each with the exact command. This page is the reference, not the s
 environment the engine provides to bodies and hooks (agents: read this, it is the API):
 
   always
+    <node env>              each key of a node's `env:` (and a pool input's `env:`),
+                            layered over the run's vars for THAT node only — it is
+                            never written back, so the next node cannot inherit it
     MEDULLA_RUN_ID          run id (settable from outside for correlation)
     MEDULLA_RUN_DIR         this run's directory; put deliverables in $MEDULLA_RUN_DIR/artifacts/
     MEDULLA_PIPELINE_ID     the OUTERMOST run's id, inherited by every nested medulla

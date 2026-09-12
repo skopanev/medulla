@@ -43,8 +43,16 @@ class PoolMixin(InputsMixin):
             "MEDULLA_INPUT_COUNT": str(count),
             "MEDULLA_INPUT_KEY": key,
         }
+        # `env` ON AN INPUT is the one field that does NOT become MEDULLA_INPUT_ENV:
+        # it names real environment variables for THIS seat. Three harnesses in one
+        # pool each need their own role, and every other route sets one value for the
+        # whole node.
+        seat_env: dict[str, str] = {}
         if isinstance(value, dict):
             for k, v in value.items():
+                if k == "env" and isinstance(v, dict):
+                    seat_env = {str(ek): "" if ev is None else str(ev) for ek, ev in v.items()}
+                    continue
                 if isinstance(v, (str, int, float, bool)) and VAR_NAME_RE.match(str(k)):
                     suffix = str(k).upper()
                     if suffix not in ("INDEX", "COUNT", "KEY"):
@@ -62,7 +70,9 @@ class PoolMixin(InputsMixin):
 
         def env_fn() -> dict[str, str]:
             base = self._base_env(None if sequential else {**pool_vars, **local_ctx})
-            return {**base, **input_env}
+            # node env, then seat env: the seat is more specific, so it wins. Neither
+            # is written back to the run's vars — that is the whole point.
+            return {**base, **node.env, **seat_env, **input_env}
 
         def apply_pre_vars(pending: dict[str, str]) -> None:
             if sequential:

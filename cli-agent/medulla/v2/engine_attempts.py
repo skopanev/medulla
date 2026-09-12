@@ -44,7 +44,13 @@ class AttemptsMixin(BodyMixin):
         # the next call); part-3 pool workers pass their own (base + input ctx + local
         # pre-vars overlay) so parallel inputs never touch shared engine state.
         if env_fn is None:
-            env_fn = self._base_env
+            # A DECISION NODE'S `env` LIVES AND DIES WITH THE NODE. It is layered over
+            # the run's vars when the body and its hooks are launched, and never
+            # written back — so the next node cannot inherit it by accident. That is
+            # the difference from a pre hook emitting <signal:var>, whose value stays
+            # in vars.yaml for the rest of the run: a node whose pre was forgotten
+            # silently picks up a neighbour's role instead of failing.
+            env_fn = (lambda: {**self._base_env(), **node.env}) if node.env else self._base_env
         action = node.action
 
         pre_updates: list[str] = []

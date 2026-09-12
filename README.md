@@ -68,6 +68,10 @@ nodes:
     on_signal: {found: plan, clean: __exit_ok__}
 ```
 
+A node may declare `env:` — variables for THAT node only, layered over `vars:` and
+never written back, so nothing leaks into the next node. A pool input takes its own
+`env:` too, which is how three harnesses in one pool each get their own role.
+
 A node runs exactly one of `shell:` (a command) or `agent:` (an AI harness). The body prints **signals** to stdout; `on_signal` maps them to the next node or a terminal. That's the whole model.
 
 ### Signals

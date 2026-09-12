@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import re
 
+VAR_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+
 from .errors import E_VALIDATION, EngineCrash
 from .model import (
+    ENV_BLACKLIST_EXACT,
+    ENV_BLACKLIST_PREFIX,
     CHANNEL_SIGNALS,
     DEFAULT_SOURCE_TIMEOUT,
     ENGINE_FACTS,
@@ -173,8 +177,37 @@ def _parse_inputs(raw, where: str) -> InputsSpec:
 NODE_KEYS = {
     "shell", "agent", "prompt", "timeout", "max_attempts", "ignore_exit_code", "fallback",
     "inputs", "max_parallel", "min_success", "pre", "post", "post_confirms_delivery",
-    "on_signal",
+    "on_signal", "env",
 }
+
+
+def _parse_env(raw, where: str) -> dict[str, str]:
+    """`env:` on a node — variables that exist for THIS node and nowhere after it.
+
+    Before this, the only per-node route was a pre hook printing <signal:var>, and
+    that value outlives its node: measured on a live run, an AGENT_ROLE set by the
+    triage node was still in vars.yaml afterwards. A node whose pre was forgotten then
+    inherits a neighbour's value silently — no error, just different behaviour. It is
+    also an assignment disguised as printing a signal, which reads as a side effect
+    rather than a declaration.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise _err(f"{where}: env must be a mapping of NAME: value")
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not VAR_NAME_RE.match(key):
+            raise _err(f"{where}: env has an invalid name {key!r}")
+        # Same reservations as workflow vars: PATH, HOME and the engine's own MEDULLA_*
+        # are not a workflow's to redefine — a body that loses its PATH fails in a way
+        # nobody traces back to a yaml line.
+        if key in ENV_BLACKLIST_EXACT or any(key.startswith(pfx) for pfx in ENV_BLACKLIST_PREFIX):
+            raise _err(f"{where}: env['{key}'] is reserved")
+        if isinstance(value, (dict, list)):
+            raise _err(f"{where}: env['{key}'] must be a scalar")
+        out[key] = "" if value is None else str(value)
+    return out
 
 
 def _parse_node(name: str, raw: dict, where: str) -> Node:
@@ -240,5 +273,6 @@ def _parse_node(name: str, raw: dict, where: str) -> Node:
         raise _err(f"{where}: post_confirms_delivery requires post")
 
     return Node(name=name, action=action, pool=pool,
+                env=_parse_env(raw.get("env"), where),
                 pre=raw.get("pre"), post=raw.get("post"),
                 post_confirms_delivery=confirms_delivery, on_signal=dict(on_signal))
