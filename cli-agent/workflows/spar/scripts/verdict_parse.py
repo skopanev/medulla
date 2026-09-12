@@ -27,17 +27,34 @@ def _section(text: str, heading: str) -> list[str]:
     exact: list[str] | None = None
     prefix: list[str] | None = None
     cur: list[str] | None = None
+    level = 0
     for line in text.splitlines():
         if line.startswith("#"):
+            depth = len(line) - len(line.lstrip("#"))
             head = line.strip("# \t").upper()
-            cur = None
             # A REPEAT of the same heading continues the same section rather than
             # opening a rival one: the fenced example makes a panelist write
             # `## VERDICT` twice, and the second one carries the actual verdict.
             if head == want:
                 exact = cur = exact if exact is not None else []
-            elif head.startswith(want):
+                level = depth
+                continue
+            if head.startswith(want):
                 prefix = cur = prefix if prefix is not None else []
+                level = depth
+                continue
+            # A DEEPER HEADING IS STILL INSIDE THE SECTION. Panelists group their
+            # findings under `### Finding 1`, `### Finding 2` and put the actual
+            # `- (R) HIGH — ...` lines beneath those. Ending the section at the first
+            # heading of ANY depth cut it off immediately after `## FINDINGS`, so the
+            # findings were dropped — and `malformed` stayed empty, because the
+            # HEADING was present and that is all it checks. The panelist sees a
+            # complete artifact with the delivery marker, and the verdict records
+            # zero findings. Measured across stored runs: three artifacts, 15
+            # findings lost, two of them in the last two days.
+            if cur is not None and depth > level:
+                continue                     # a subheading is structure, not content
+            cur = None
             continue
         # A fence is not content. The prompt used to show the verdict INSIDE triple
         # backticks, so a panelist copied the fence too and the first non-empty line

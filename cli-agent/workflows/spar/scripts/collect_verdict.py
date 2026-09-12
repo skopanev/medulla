@@ -23,7 +23,7 @@ from verdict_parse import NOT_PANELISTS, SEVERITY_ORDER, read_panelist
 # wrong answer anyway: the collector is a FILE from the mounted workflow directory,
 # refreshed on the host independently of the engine in the container. That is why two
 # rounds with one engine stamp can differ in fields. A test pins this to pyproject.
-COLLECTOR_VERSION = "4.78.0"
+COLLECTOR_VERSION = "4.78.1"
 
 
 def build(round_dir: Path, delivered_slugs=None) -> dict:
