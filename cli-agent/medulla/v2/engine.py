@@ -48,6 +48,8 @@ from .engine_scan import (  # noqa: E402,F401
     load_dotenv,
     log,
     scan_stdout,
+    step_end,
+    step_start,
 )
 from .engine_vars import VarsMixin
 
@@ -173,7 +175,7 @@ class Engine(VarsMixin, AttemptsMixin, PoolMixin):
             self._check_deadline()
             self.steps += 1
             step, step_dir = self.store.new_step_dir(node.name)
-            log(f"step {step} | {node.name}")
+            log(step_start(step, node.name))
             t0 = time.monotonic()
 
             if node.is_pool:
@@ -209,7 +211,7 @@ class Engine(VarsMixin, AttemptsMixin, PoolMixin):
                     "signals": stats.get("signals") or [],
                 })
             self.store.journal_append(journal_row)
-            log(f"step {step} | {node.name} -> {signal_name} -> {target} ({duration}s)")
+            log(step_end(step, node.name, signal_name, target, duration))
 
             if target in TERMINALS:
                 total = round(time.monotonic() - started, 2)

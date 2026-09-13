@@ -19,8 +19,7 @@ from .model import CHANNEL_SIGNALS
 from .signals import extract_signals
 
 
-def log(msg: str) -> None:
-    print(f"[medulla] {msg}", file=sys.stderr)
+from .logfmt import log, step_end, step_start  # noqa: F401  (re-exported)
 
 
 def _tail(text: str, n: int = 400) -> str:

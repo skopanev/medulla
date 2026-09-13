@@ -15,6 +15,7 @@ from pathlib import Path
 from .contract import load_workflow
 from .engine import Engine
 from .engine_scan import log
+from .logfmt import run_started_now
 from .errors import EngineCrash
 from .model import TERMINALS
 from .rundir import (
@@ -89,6 +90,7 @@ def run_workflow(
     # child FIRST (pool workers unblock from proc.wait), then raise into the
     # ordinary interrupt flow -> outcome interrupted, exit 130, resumable.
     # v1 had this handler; the rewrite lost it (spar panel, sonnet).
+    run_started_now()          # the +MM:SS in every log line counts from HERE
     prev_handlers = {}
     if _threading.current_thread() is _threading.main_thread():
         def _graceful(signum, frame):
