@@ -48,14 +48,29 @@ def classify_attempt(
             return AttemptDecision(Verdict.SILENT)   # artifact truth beats body wall
         return AttemptDecision(Verdict.RETRY, failure_class="timeout")
     if post_rc is not None and post_rc != 0:
-        # A body killed by the wall did not fail its hook — it never finished for
-        # the hook to judge. Reporting the veto as the cause replaces the reason
-        # with a symptom, and resume and diagnosis both read that field. Measured:
-        # six archive rows said reason=post at timed_out=True while their own
-        # message said `body died: rc=124`, against five honestly recorded
-        # timeouts. The post failure itself is not lost — it travels in message.
-        return AttemptDecision(Verdict.RETRY,
-                               failure_class="timeout" if timed_out else "post")
+        # A body that did not survive did not fail its hook — it never finished for the
+        # hook to judge. The hook then reports the only thing it can see, "no artifact",
+        # and reporting THAT as the cause replaces the reason with a symptom. Resume,
+        # diagnosis and every count of why rounds fail read this field.
+        #
+        # First measured for the wall: six archive rows said reason=post at
+        # timed_out=True while their own message said `body died: rc=124`, against five
+        # honestly recorded timeouts. That half was fixed; the other half was not, and
+        # it is the larger one. Re-measured across 3104 stored attempts: of 369 rows
+        # classed "post", 101 died with a non-zero rc — a provider refusing a stream, a
+        # broker with no room, a CLI killed at -15 — while the artifact they were judged
+        # for was never written. 27% of everything counted as a malformed answer was a
+        # transport failure wearing its name.
+        #
+        # conclusion_message has drawn this line correctly all along (it says "body
+        # died" whenever the body died), so the human-readable sentence and the
+        # machine-readable class disagreed on the same attempt. The class now follows
+        # the sentence. The post failure itself is not lost — it travels in message.
+        if timed_out:
+            return AttemptDecision(Verdict.RETRY, failure_class="timeout")
+        if rc != 0:
+            return AttemptDecision(Verdict.RETRY, failure_class="rc")
+        return AttemptDecision(Verdict.RETRY, failure_class="post")
     if post_rc == 0 and post_signal is not None:
         return AttemptDecision(Verdict.ROUTE, post_signal)   # post override
     if body_signal is not None:

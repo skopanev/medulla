@@ -7,6 +7,7 @@ from medulla.v2.classify import (
     classify_attempt,
     next_move,
 )
+from medulla.v2.engine_scan import ScanResult
 from medulla.v2.model import SIG_DEFAULT, SIG_FAILED
 
 # ── classify_attempt ─────────────────────────────────────────────────────────
@@ -157,3 +158,69 @@ def test_a_wall_clock_kill_is_not_reported_as_a_post_veto():
 def test_a_post_veto_without_a_timeout_is_still_a_post_veto():
     d = classify_attempt("agent", 0, False, None, 1, None, False)
     assert d.verdict is Verdict.RETRY and d.failure_class == "post"
+
+
+# ── a dead body is not a rejected answer ────────────────────────────────────
+#
+# The post hook reports the only thing it can see when a body dies: no artifact. Counted
+# as the CAUSE, that turns every provider refusal, broker outage and killed CLI into a
+# malformed answer. Measured across 3104 stored attempts: of 369 rows classed "post",
+# 101 had a non-zero rc and no timeout — 27% of everything counted as a bad answer was a
+# transport failure wearing its name. Reported from the field as two review rounds lost
+# to "stream disconnected before completion", filed against format rejection.
+#
+# conclusion_message has always drawn this line correctly ("body died: rc=..."), so the
+# sentence a human read and the class a tool counted disagreed about the same attempt.
+
+def _classify(rc=0, timed_out=False, post_rc=1):
+    return classify_attempt(kind="agent", rc=rc, timed_out=timed_out, body_signal=None,
+                            post_rc=post_rc, post_signal=None, ignore_exit_code=False,
+                            pool_mode=True)
+
+
+def test_a_body_that_died_is_classed_by_its_own_failure():
+    """codex exiting 1 on "stream disconnected" is an rc failure, not a veto."""
+    assert _classify(rc=1).failure_class == "rc"
+
+
+def test_a_body_killed_by_a_signal_is_not_a_veto_either():
+    """-15 and 143 are both SIGTERM; 24 archive rows carried them under reason=post."""
+    for rc in (-15, 143, 2):
+        assert _classify(rc=rc).failure_class == "rc", rc
+
+
+def test_a_body_killed_by_the_wall_is_still_a_timeout():
+    """The half that was already fixed, kept fixed: the wall wins over the hook."""
+    assert _classify(rc=124, timed_out=True).failure_class == "timeout"
+
+
+def test_a_veto_of_a_SURVIVING_body_is_still_a_veto():
+    """The 268 honest rows. Narrowing the class must not empty it — a delivered answer
+    that the hook refused for its format is exactly what "post" is for."""
+    assert _classify(rc=0).failure_class == "post"
+
+
+def test_the_class_agrees_with_the_sentence_a_human_reads():
+    """The invariant behind all of the above: conclusion_message says "post hook vetoed"
+    only when the body survived (rc=0, no timeout). The class must draw the same line,
+    or the archive counts one thing while the manifest says another."""
+    from medulla.v2.engine_message import conclusion_message
+
+    class R:
+        def __init__(self, rc, timed_out):
+            self.rc, self.timed_out, self.stderr = rc, timed_out, "boom"
+            self.killed_because = ""
+            self.stdout = ""
+
+    class Act:
+        # shell, so the sentence builder does not go mining a harness for error detail —
+        # the branch under test (veto vs died) is decided before kind is consulted.
+        kind = "shell"
+
+    for rc, timed_out in ((1, False), (-15, False), (124, True), (0, False)):
+        decision = _classify(rc=rc, timed_out=timed_out)
+        sentence = conclusion_message(
+            "__failed__", Act(), R(rc, timed_out), 1, None, False, None,
+            ScanResult(), ScanResult(), set(), post_rc=1, post_stderr="no artifact")
+        says_veto = "post hook vetoed" in sentence
+        assert says_veto == (decision.failure_class == "post"), (rc, timed_out, sentence)
