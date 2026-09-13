@@ -118,8 +118,12 @@ Close with this section, verbatim heading, exactly three lines. Write it as plai
 text — NOT inside a code block, and do not repeat the heading inside itself:
 
     ## VERDICT
-    GO | NO-GO — <n>, <n> | INSUFFICIENT — one line: why
+    <WORD> — one line: why
     <!-- spar-delivery-complete -->
+
+`<WORD>` is GO, NO-GO or INSUFFICIENT. The word and its reason go on the SAME line —
+EVERY verdict carries a reason, GO included. A NO-GO names its own findings by number
+first: `NO-GO — 1, 3 — the cache defect leaks across tenants`.
 
 Write `<!-- spar-delivery-complete -->` as the final non-empty line of the file.
 This marker IS part of the deliverable: without it the response is incomplete and
@@ -127,7 +131,10 @@ will be rejected and retried, even when the verdict above it says GO.
 
 Pick ONE word:
 
-- **GO** — ship it. Findings may still exist; none of them is a reason to stop.
+- **GO** — ship it. Findings may still exist; none of them is a reason to stop. Say in
+  one line why they do not — a bare `GO` is a file, not an answer: nobody can argue with
+  it, and a reader cannot tell a considered pass from a panelist that gave up. It is
+  rejected and retried like any other incomplete verdict.
 - **NO-GO** — do not ship until named findings are addressed, and NAME THEM by their
   position in your own FINDINGS list — bare numbers, nothing else in that clause:
   `NO-GO — 1, 3 — the cache defect leaks across tenants`. Prose there ("NO-GO — this

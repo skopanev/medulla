@@ -408,3 +408,82 @@ def test_a_missing_findings_section_is_STILL_rejected(tmp_path):
     section at all is still incomplete."""
     rc, err = _post_verdict(tmp_path, "## VERDICT\nGO — because\n")
     assert rc == 1 and "no FINDINGS section" in err
+
+
+# ── the prompt and the hook must agree ──────────────────────────────────────
+#
+# They did not. The prompt's template read
+#
+#     GO | NO-GO — <n>, <n> | INSUFFICIENT — one line: why
+#
+# in which the reason attaches to NO-GO and INSUFFICIENT and a bare GO is a legal
+# branch; the GO bullet then said "ship it, findings may still exist" and asked for
+# nothing more. The hook rejects every verdict without a reason, GO included. A panelist
+# that followed the prompt exactly was refused by the checker, twice in the same round —
+# it repeated the bare GO even after the veto reason reached it, because the instruction
+# it could see said the veto was wrong. Measured on a live round: gemini, two attempts,
+# both "VERDICT gives no reason", artifact otherwise complete with the delivery marker.
+#
+# A spec the validator disagrees with is a defect in the pair, and it is invisible to
+# any test that exercises only one of them.
+
+PROMPT = Path(__file__).resolve().parent.parent / "workflows/spar/prompts/spar.md"
+
+
+def _verdict_template():
+    """The verdict line from the prompt's indented example block."""
+    lines = PROMPT.read_text().splitlines()
+    i = next(n for n, l in enumerate(lines) if l.strip() == "## VERDICT" and l.startswith("    "))
+    return lines[i + 1].strip()
+
+
+def test_the_verdict_template_offers_one_slot_not_a_choice_of_branches(tmp_path):
+    """The old template was `GO | NO-GO — <n>, <n> | INSUFFICIENT — one line: why`.
+
+    Read as a model reads it, the reason attaches to the branches it follows and a bare
+    GO is legal. Read as the hook reads it — first non-empty line, strip the word, is
+    anything left — the whole string passes, because "| NO-GO — ..." IS something left.
+    That is exactly why a test that only feeds the template to the hook cannot see the
+    defect: the ambiguity lives in the alternation, and the hook never sees alternation,
+    it sees one line from one panelist.
+
+    So this asserts the shape: one slot, no branch choice on the verdict line.
+    """
+    tmpl = _verdict_template()
+    assert "|" not in tmpl, (
+        f"the template offers branches ({tmpl!r}); a panelist may take the one without "
+        "a reason, and the hook will refuse it")
+
+
+def test_every_filled_in_form_of_the_template_passes_the_hook(tmp_path):
+    """The slot, filled with each word the prompt allows, must survive the checker."""
+    tmpl = _verdict_template()
+    for word in ("GO", "NO-GO — 1", "INSUFFICIENT"):
+        line = tmpl.replace("<WORD>", word)
+        assert "<WORD>" not in line, f"template slot is not named <WORD>: {tmpl!r}"
+        rc, err = _post(tmp_path, f"## FINDINGS\nNONE\n\n## VERDICT\n{line}\n")
+        assert rc == 0, f"the prompt's own form {line!r} is refused: {err}"
+
+
+def test_the_GO_bullet_says_a_reasonless_verdict_is_refused():
+    """The template is not the only thing a model reads; the bullet explaining GO is.
+
+    That bullet used to end at "ship it. Findings may still exist; none of them is a
+    reason to stop" — nothing about owing an explanation, while the hook refused a GO
+    without one. This is an ANCHOR, not an invariant: there is no way to assert from
+    text that a paragraph conveys an obligation, so it pins the one word that makes the
+    consequence explicit. A looser check ("does the bullet contain the word reason")
+    passes on the OLD text — it contains "a reason to stop" — and was doing nothing.
+    """
+    text = PROMPT.read_text()
+    bullet = text.split("- **GO**", 1)[1].split("- **NO-GO**", 1)[0]
+    assert "rejected" in bullet.lower(), (
+        "the GO bullet no longer states that a verdict without a reason is refused; "
+        f"the hook still refuses it. Bullet: {bullet!r}")
+
+
+def test_the_placeholder_verdict_is_rejected_when_it_reaches_the_hook_unfilled(tmp_path):
+    """<WORD> is a slot, not a verdict. If a panelist copies the template verbatim the
+    hook must still refuse it — otherwise the fix to the prompt would open a hole."""
+    rc, err = _post(tmp_path, "## FINDINGS\nNONE\n\n## VERDICT\n<WORD> — one line: why\n")
+    assert rc != 0 and "not one of GO" in err
