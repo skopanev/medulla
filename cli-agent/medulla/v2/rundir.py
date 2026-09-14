@@ -247,7 +247,17 @@ def _record_mounts(run_dir: Path) -> None:
     is what a run directory is for. Read-only or not is a fact about THIS process, and
     /proc/self/mountinfo is where the kernel keeps it.
 
-    Only the mounts a reader would ask about: the workspace and everything under /mnt.
+    EVERY real mount, not a chosen few. The first cut recorded /workspace and /mnt/* on
+    the reasoning that those are what a reader asks about. Measured against the question
+    it was built for and it failed it: `--mount` places a sibling repository at
+    /workspace/<name>, a NESTED mount, and the filter dropped exactly that line — a round
+    was asked why its tree read dirty and its own mount table did not mention the mount
+    that made it so. A record that answers only the questions its author predicted is not
+    a record.
+
+    Pseudo-filesystems are still dropped — /proc, /sys, /dev and the container's own root
+    are the kernel talking to itself, not a decision anybody made about this run.
+
     Absent outside Linux (a native run on a mac has no /proc), and never fatal — a run
     that cannot describe its mounts still has work to do.
     """
@@ -262,10 +272,12 @@ def _record_mounts(run_dir: Path) -> None:
         if len(parts) < 6:
             continue
         point, opts = parts[4], parts[5]
-        if point != "/workspace" and not point.startswith("/mnt/"):
+        if point == "/" or point.startswith(("/proc", "/sys", "/dev")):
             continue
         mode = "ro" if "ro" in opts.split(",") else "rw"
         rows.append(f"{mode}\t{point}")
     if rows:
-        (run_dir / "mounts.txt").write_text("\n".join(sorted(rows)) + "\n",
+        # Sorted by PATH, so a nested mount sits directly under the mount it is nested
+        # in and the relationship is visible without reconstructing it.
+        (run_dir / "mounts.txt").write_text("\n".join(sorted(set(rows))) + "\n",
                                             encoding="utf-8")

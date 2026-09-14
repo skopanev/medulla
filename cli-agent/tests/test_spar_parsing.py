@@ -119,3 +119,82 @@ def test_a_sibling_heading_still_ENDS_the_section(tmp_path):
         "- (R) LOW — OUTSIDE the section — b.py:2 — breaks — FIX: fix\n"
         "## VERDICT\nNO-GO — 1\n\n<!-- spar-delivery-complete -->\n")
     assert len(_read_panelist(art)["findings"]) == 1
+
+
+# ── the digest keeps its inputs ─────────────────────────────────────────────
+#
+# The digest was recorded and its inputs were not, so a dirty fingerprint could be
+# trusted and never checked. Asked to verify one from a real round, nobody could —
+# including the engine that produced it. The reviewed-inputs/ directory is what makes it
+# answerable; the digest itself must not move a byte, or every stored digest and the
+# published offline clean-tree check break at once.
+
+def _prepare_dir():
+    import yaml as pyyaml
+    wf = Path(__file__).resolve().parent.parent / "workflows/spar/workflow.yaml"
+    return pyyaml.safe_load(wf.read_text())["nodes"]["prepare"]["shell"]
+
+
+def _run_prepare(tmp_path, files, extra_untracked=None):
+    """Run the prepare node's shell against a throwaway git repo."""
+    import subprocess
+    work = tmp_path / "work"
+    work.mkdir()
+    run = tmp_path / "run"
+    (run / "artifacts").mkdir(parents=True)
+    env = {**os.environ, "MEDULLA_RUN_DIR": str(run), "TICKET": "T-1",
+           "PURPOSE": "p", "BASE": "b", "HEAD": "h", "PATCH_DIGEST": "d",
+           "QUESTION": "does this ship?"}
+    for name, body in files.items():
+        (work / name).write_text(body)
+    for cmd in (["git", "init", "-q"], ["git", "add", "-A"],
+                ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                 "commit", "-qm", "x"]):
+        subprocess.run(cmd, cwd=work, check=True, capture_output=True)
+    for name, body in (extra_untracked or {}).items():
+        (work / name).write_text(body)
+    res = subprocess.run(["bash", "-c", _prepare_dir()], cwd=work, env=env,
+                         capture_output=True, text=True)
+    return res, run
+
+
+def test_the_inputs_of_a_dirty_digest_are_kept(tmp_path):
+    res, run = _run_prepare(tmp_path, {"a.py": "x\n"},
+                            extra_untracked={"from_a_mount.tf": "resource {}\n"})
+    inputs = run / "reviewed-inputs"
+    assert inputs.is_dir(), res.stdout + res.stderr
+    assert "from_a_mount.tf" in (inputs / "status.txt").read_text()
+    rows = (inputs / "untracked.tsv").read_text().split()
+    assert "./from_a_mount.tf" in rows or "from_a_mount.tf" in rows, rows
+    assert (inputs / "MANIFEST.txt").read_text().count("digest:") == 1
+
+
+def test_untracked_CONTENT_is_never_copied(tmp_path):
+    """Those bytes can be a mounted sibling repository, and a run directory is no place
+    to duplicate somebody else's project. The sha256 is what is kept."""
+    secret = "resource aws_kms_key very_specific_string {}\n"
+    _res, run = _run_prepare(tmp_path, {"a.py": "x\n"},
+                             extra_untracked={"sibling.tf": secret})
+    blob = "".join(p.read_text(errors="replace")
+                   for p in (run / "reviewed-inputs").iterdir() if p.is_file())
+    assert "very_specific_string" not in blob
+    assert "sibling.tf" in blob                      # the NAME is kept, the bytes are not
+
+
+def test_the_digest_itself_does_not_move(tmp_path):
+    """A clean tree must still satisfy the published offline check, or every digest
+    recorded before this change compares unequal to the same tree after it."""
+    import hashlib
+    import re
+    res, _run = _run_prepare(tmp_path, {"a.py": "x\n"})
+    digest = re.search(r"<signal:var key=REVIEWED_DIGEST>([0-9a-f]+)<", res.stdout).group(1)
+    head = re.search(r"<signal:var key=REVIEWED_HEAD>([0-9a-f]+)<", res.stdout).group(1)
+    assert digest == hashlib.sha256(f"head:{head}\n".encode()).hexdigest()
+
+
+def test_a_clean_tree_writes_no_inputs_record(tmp_path):
+    """And must not: its inputs are the head line and nothing else, the published formula
+    checks it offline already, and writing the record would cost a `git diff HEAD` — a
+    full traversal on the one path that exists to avoid one."""
+    _res, run = _run_prepare(tmp_path, {"a.py": "x\n"})
+    assert not (run / "reviewed-inputs").exists()

@@ -156,7 +156,54 @@ nodes:
                        git ls-files --others --exclude-standard -z 2>/dev/null
                      } | shasum -a 256 2>/dev/null | cut -d' ' -f1 )
         fi
-        echo "<signal:update>prepare: digest computed ($scope)</signal:update>"
+        # WHAT WENT INTO THE DIGEST, kept beside it. The digest was recorded and its
+        # inputs were not, so a dirty fingerprint could be trusted and never checked —
+        # asked to verify one, nobody could, including the engine that produced it.
+        #
+        # The untracked term is stored as path+sha256 per file, NOT as copies: those
+        # bytes can be a mounted sibling repository, and a run directory is no place to
+        # duplicate somebody else's project. The list is what makes the digest legible —
+        # a reader can see that a path came from a mount rather than from the subject,
+        # which is the question that prompted this.
+        #
+        # The digest itself is unchanged, byte for byte: this writes a record ALONGSIDE
+        # the same pipeline, it does not feed it. The offline clean-tree check
+        #     printf 'head:<sha>\n' | shasum -a 256
+        # still holds, and digests from before this change still compare equal.
+        # ONLY FOR A DIRTY TREE. A clean one needs no record: its inputs are the head
+        # line and nothing else, and the published formula checks it offline already.
+        # Writing it anyway would cost a `git diff HEAD` — a full traversal on the very
+        # path that exists to avoid one. Measured before: a clean checkout carrying 28576
+        # built files spent 12s in that walk at moderate load and died at 30s under it,
+        # with zero untracked files to hash. A test holds the clean path to one walk.
+        inputs="$MEDULLA_RUN_DIR/reviewed-inputs"
+        if [ -n "$status" ] && mkdir -p "$inputs" 2>/dev/null; then
+          printf 'head:%s\n' "$head" > "$inputs/head.txt"
+          printf '%s' "$status" > "$inputs/status.txt"
+          git diff HEAD > "$inputs/diff.patch" 2>/dev/null || true
+          if [ "$scope" = full ]; then
+            git ls-files --others --exclude-standard -z 2>/dev/null \
+              | xargs -0 -I{} sh -c 'printf "%s\t%s\n" "$(shasum -a 256 "{}" 2>/dev/null | cut -d" " -f1)" "{}"' \
+              > "$inputs/untracked.tsv" 2>/dev/null || true
+          fi
+          { echo "digest:   $content"
+            echo "scope:    $scope"
+            echo "state:    $([ -n "$dirty" ] && echo dirty || echo clean)"
+            echo "head:     $head"
+            echo "untracked_files: ${untracked_n:-0}"
+            echo
+            echo "The digest hashes, in this order: head line, status (if any),"
+            echo "git diff HEAD, then for each untracked file 'untracked:<path>'"
+            echo "followed by its raw bytes."
+            echo
+            echo "Stored here: head.txt, status.txt, diff.patch, and untracked.tsv"
+            echo "(sha256<TAB>path per untracked file). Untracked CONTENT is not copied"
+            echo "— it can be a mounted sibling repository. So this record proves WHAT"
+            echo "was hashed and lets each file be re-checked against its sha256; it is"
+            echo "not a standalone offline recomputation of a dirty digest."
+          } > "$inputs/MANIFEST.txt"
+        fi
+        echo "<signal:update>prepare: digest computed ($scope), inputs in reviewed-inputs/</signal:update>"
         echo "<signal:var key=REVIEWED_HEAD>$head</signal:var>"
         echo "<signal:var key=REVIEWED_STATE>$([ -n "$dirty" ] && echo dirty || echo clean)</signal:var>"
         echo "<signal:var key=REVIEWED_DIGEST>$content</signal:var>"

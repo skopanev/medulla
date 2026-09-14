@@ -57,12 +57,33 @@ def test_rw_is_not_read_as_ro(tmp_path, fake_proc):
     assert (tmp_path / "mounts.txt").read_text().startswith("rw\t")
 
 
-def test_mnt_mounts_are_kept_and_the_rest_dropped(tmp_path, fake_proc):
+def test_pseudo_filesystems_are_dropped_and_real_mounts_kept(tmp_path, fake_proc):
     fake_proc(_mountinfo(("/workspace", "ro"), ("/mnt/medulla-workflows", "ro"),
-                         ("/proc", "rw"), ("/sys/fs/cgroup", "ro")))
+                         ("/proc", "rw"), ("/sys/fs/cgroup", "ro"), ("/dev/shm", "rw"),
+                         ("/", "rw"), ("/Volumes/hdd/.medulla/panel-runs", "rw")))
     rundir._record_mounts(tmp_path)
     lines = (tmp_path / "mounts.txt").read_text().splitlines()
-    assert lines == ["ro\t/mnt/medulla-workflows", "ro\t/workspace"]
+    assert lines == ["ro\t/mnt/medulla-workflows", "ro\t/workspace",
+                     "rw\t/Volumes/hdd/.medulla/panel-runs"]
+
+
+def test_a_NESTED_mount_is_recorded(tmp_path, fake_proc):
+    """The case the first cut dropped. `--mount` places a sibling repository at
+    /workspace/<name>, inside the reviewed tree, and that mount is why the tree reads
+    dirty. A round was asked to explain its own dirty state and its mount table did not
+    mention the mount responsible."""
+    fake_proc(_mountinfo(("/workspace", "ro"), ("/workspace/sibling-repo", "ro")))
+    rundir._record_mounts(tmp_path)
+    lines = (tmp_path / "mounts.txt").read_text().splitlines()
+    assert lines == ["ro\t/workspace", "ro\t/workspace/sibling-repo"]
+
+
+def test_the_writable_run_directory_is_recorded(tmp_path, fake_proc):
+    """It was invisible before, so "every line says ro" read as "nothing was writable" —
+    which was never true. The run directory is writable by design, outside the tree."""
+    fake_proc(_mountinfo(("/workspace", "ro"), ("/host/panel-runs", "rw")))
+    rundir._record_mounts(tmp_path)
+    assert "rw\t/host/panel-runs" in (tmp_path / "mounts.txt").read_text()
 
 
 def test_no_proc_writes_nothing(tmp_path, fake_proc):
