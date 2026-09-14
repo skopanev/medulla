@@ -84,9 +84,49 @@ def test_two_different_signals_do_not_share_a_colour():
 
 def test_the_palette_holds_more_than_the_hues():
     """Seven author signals exhausted a six-hue palette and painted two alike — found by
-    running it, not by reasoning about it. Bold doubles the slots."""
-    assert len(E._PALETTE) > len(E._HUES)
-    assert len(set(E._PALETTE)) == len(E._PALETTE)
+    running it, not by reasoning about it."""
+    assert len(E._BASIC_PALETTE) > len(E._HUES)
+    assert len(set(E._BASIC_PALETTE)) == len(E._BASIC_PALETTE)
+
+
+def test_fifty_slots_on_a_256_colour_terminal(monkeypatch):
+    monkeypatch.setenv("TERM", "xterm-256color")
+    assert len(E._palette()) == 50
+    assert len(set(E._palette())) == 50
+
+
+def test_truecolor_without_256_in_TERM_still_gets_the_rich_palette(monkeypatch):
+    monkeypatch.setenv("TERM", "xterm")
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    assert E._palette() is E._RICH_PALETTE
+
+
+def test_a_plain_terminal_falls_back_rather_than_printing_garbage(monkeypatch):
+    """A terminal without 256 colours either prints the escape as text or eats it, and
+    either way the reader loses the line."""
+    monkeypatch.setenv("TERM", "xterm")
+    monkeypatch.delenv("COLORTERM", raising=False)
+    assert E._palette() is E._BASIC_PALETTE
+
+
+def test_no_cube_colour_reads_as_red_green_or_yellow():
+    """The whole point of requiring a blue component: red, green and yellow are exactly
+    the cube corners with no blue in them, so one rule keeps the palette off all three
+    of the engine's colours."""
+    for idx in E._CUBE:
+        i = idx - 16
+        r, g, b = i // 36, (i // 6) % 6, i % 6
+        assert b >= max(r, g) - 1, (idx, r, g, b)
+        assert max(r, g, b) - min(r, g, b) >= 2, f"{idx} is a grey"
+        assert 5 <= r + g + b <= 13, f"{idx} is too dark or too washed out"
+
+
+def test_the_rich_palette_is_usable_by_paint(monkeypatch):
+    """Every slot must name a style paint() can resolve, or a signal prints raw."""
+    monkeypatch.setenv("MEDULLA_COLOR", "always")
+    for slot in E._RICH_PALETTE:
+        out = E.paint("X", *slot)
+        assert out.startswith("\033[38;5;") and out.endswith("\033[0m"), out
 
 
 def test_an_author_signal_never_borrows_a_reserved_colour():

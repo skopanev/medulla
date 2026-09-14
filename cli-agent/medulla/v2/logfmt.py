@@ -29,14 +29,45 @@ _C = {"dim": "\033[2m", "bold": "\033[1m", "red": "\033[31m", "green": "\033[32m
 # Red, green and yellow are NOT here: they are the engine's own vocabulary, and a
 # workflow's `RETRY` must never be able to borrow the colour that means failure.
 #
-# Twelve slots, not six: six hues plain, then the same six bold. A first cut with six ran
-# out on a workflow with seven author signals and painted two of them alike — the exact
-# failure this exists to prevent, found by running it rather than by reasoning about it.
-# Bold reads as a different style, not a different hue, so the pairs stay distinguishable
-# even on a terminal that renders bright colours poorly. Node names are bold and
-# UNcoloured, so a bold-coloured signal is not confusable with one.
+# Sizing this went from six to twelve to fifty. Six ran out on a seven-signal workflow
+# and painted two alike — the exact failure the colouring exists to prevent, found by
+# running it. Twelve covers anything here today and nothing beyond it. Fifty makes a
+# collision something you have to go looking for, and an xterm-256 terminal costs nothing
+# to ask for it.
+#
+# The fifty are picked out of the 6x6x6 colour cube by rule, not by taste: drop anything
+# too dark to read or too washed out, drop the greys (dim already owns that register),
+# and require a blue component — `b >= max(r, g) - 1`. That single test is what keeps the
+# whole palette clear of the engine's three colours, because red, green and yellow are
+# exactly the corners with no blue in them. What is left is blues, cyans, teals, purples
+# and pinks, evenly spaced across the survivors.
 _HUES = ("cyan", "magenta", "blue", "bcyan", "bmagenta", "bblue")
-_PALETTE = tuple((h,) for h in _HUES) + tuple((h, "bold") for h in _HUES)
+_BASIC_PALETTE = tuple((h,) for h in _HUES) + tuple((h, "bold") for h in _HUES)
+
+_CUBE = (21, 26, 31, 32, 36, 37, 39, 44, 45, 51, 56, 61, 62, 67, 69,
+         72, 74, 75, 80, 86, 87, 92, 93, 98, 99, 105, 111, 115, 117, 122,
+         126, 127, 129, 133, 134, 140, 141, 153, 159, 163, 165, 169, 171, 175, 177,
+         200, 201, 207, 212, 218)
+for _n in _CUBE:                       # 256-colour slots, named so paint() resolves them
+    _C[f"c{_n}"] = f"\033[38;5;{_n}m"
+_RICH_PALETTE = tuple((f"c{n}",) for n in _CUBE)
+
+
+def _palette() -> tuple:
+    """Fifty where the terminal has 256 colours, twelve where it does not.
+
+    A terminal that cannot render 256 colours prints the escape as garbage or eats it,
+    and either way the reader loses the line. TERM is what says so; COLORTERM covers the
+    terminals that support truecolor without announcing 256 in TERM."""
+    term = os.environ.get("TERM", "")
+    if "256color" in term or "direct" in term:
+        return _RICH_PALETTE
+    if os.environ.get("COLORTERM", "").lower() in ("truecolor", "24bit"):
+        return _RICH_PALETTE
+    return _BASIC_PALETTE
+
+
+_PALETTE = _BASIC_PALETTE              # rebound per run by assign_signal_colours
 
 # The class of a signal, for colour only. __default__ is yellow and not red on purpose:
 # it is not a failure, it is a node that concluded without saying anything — which is
@@ -95,6 +126,8 @@ def assign_signal_colours(signals) -> None:
     With more author signals than the palette holds, later names reuse a slot rather than
     fail: a repeat is still better than the one colour this replaced.
     """
+    global _PALETTE
+    _PALETTE = _palette()
     _ASSIGNED.clear()
     used = set()
     for sig in sorted(s for s in signals if s not in _SIGNAL_COLOUR):
