@@ -36,6 +36,7 @@ EXIT_CODE = {"succeeded": 0, "crashed": 1, "failed": 2, "interrupted": 130}
 # the suite and several call sites have always imported them from here.
 from .engine_attempts import AttemptsMixin
 from .engine_pool import PoolMixin
+from .logfmt import assign_signal_colours  # noqa: E402
 from .engine_scan import (  # noqa: E402,F401
     AttemptsOutcome,
     ScanResult,
@@ -167,6 +168,11 @@ class Engine(VarsMixin, AttemptsMixin, PoolMixin):
         current = start_override or self.p.start
         if current not in self.p.nodes:
             raise EngineCrash(E_VALIDATION, f"--node: unknown node '{current}'")
+        # Hand the whole graph's vocabulary to the palette BEFORE the first step: the
+        # assignment must see every signal at once, or the third one to appear cannot be
+        # kept off a colour the first two already took.
+        assign_signal_colours(
+            {sig for n in self.p.nodes.values() for sig in self.p.known_signals(n)})
         self.store.write_vars(self.vars)
         started = time.monotonic()
 

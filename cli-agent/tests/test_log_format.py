@@ -55,22 +55,61 @@ def test_MEDULLA_COLOR_never_wins_over_NO_COLOR_being_unset(monkeypatch):
 # ── which colour means what ─────────────────────────────────────────────────
 
 def test_failure_is_red_and_success_is_green():
-    assert E.signal_colour("__failed__") == "red"
-    assert E.signal_colour("__exit_fail__") == "red"
-    assert E.signal_colour("__exit_ok__") == "green"
-    assert E.signal_colour("__done__") == "green"
+    assert E.signal_colour("__failed__") == ("red",)
+    assert E.signal_colour("__exit_fail__") == ("red",)
+    assert E.signal_colour("__exit_ok__") == ("green",)
+    assert E.signal_colour("__done__") == ("green",)
 
 
 def test_default_is_yellow_not_red():
     """__default__ is not a failure — it is a node that concluded without saying
     anything. Painted red, it sends people hunting a crash that never happened."""
-    assert E.signal_colour("__default__") == "yellow"
+    assert E.signal_colour("__default__") == ("yellow",)
 
 
-def test_an_authors_own_signal_is_not_graded():
-    # `OK` and `retry` are both just where the graph went next; the engine has no
-    # opinion about a workflow's vocabulary.
-    assert E.signal_colour("OK") == E.signal_colour("retry") == "cyan"
+# ── every signal gets its OWN colour ────────────────────────────────────────
+#
+# The first cut painted every author signal cyan, on the reasoning that the engine has no
+# opinion about a workflow's vocabulary. True, and beside the point: three steps in a row
+# that ended differently then looked identical, which is what the colouring exists to
+# prevent. Not grading them does not mean painting them alike.
+
+def test_two_different_signals_do_not_share_a_colour():
+    E.assign_signal_colours({"OK", "READY", "RETRY", "CONFLICT", "DONE", "NOPE", "ok"})
+    colours = [E.signal_colour(s) for s in
+               ("OK", "READY", "RETRY", "CONFLICT", "DONE", "NOPE", "ok")]
+    assert len(colours) == 7
+    assert len(set(colours)) == 7, colours
+
+
+def test_the_palette_holds_more_than_the_hues():
+    """Seven author signals exhausted a six-hue palette and painted two alike — found by
+    running it, not by reasoning about it. Bold doubles the slots."""
+    assert len(E._PALETTE) > len(E._HUES)
+    assert len(set(E._PALETTE)) == len(E._PALETTE)
+
+
+def test_an_author_signal_never_borrows_a_reserved_colour():
+    """`RETRY` must not be able to arrive in the colour that means failure."""
+    reserved = {c for t in E._SIGNAL_COLOUR.values() for c in t}
+    assert reserved == {"red", "green", "yellow"}
+    for slot in E._PALETTE:
+        assert not (set(slot) & reserved), slot
+
+
+def test_a_signals_colour_is_stable_across_runs():
+    """A hash start, not a position: adding a node must not repaint the whole run."""
+    E.assign_signal_colours({"OK", "READY"})
+    first = E.signal_colour("OK")
+    E.assign_signal_colours({"OK", "READY", "ADDED_LATER", "AND_ANOTHER"})
+    assert E.signal_colour("OK") == first
+
+
+def test_an_undeclared_signal_still_gets_a_colour():
+    """A pool's per-input signal, or a line logged before assignment — it must not crash
+    and must not fall back to one shared colour."""
+    E.assign_signal_colours(set())
+    assert E.signal_colour("never_declared") in E._PALETTE
 
 
 def test_a_terminal_target_carries_its_class():
