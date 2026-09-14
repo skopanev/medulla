@@ -487,3 +487,57 @@ def test_the_placeholder_verdict_is_rejected_when_it_reaches_the_hook_unfilled(t
     hook must still refuse it — otherwise the fix to the prompt would open a hole."""
     rc, err = _post(tmp_path, "## FINDINGS\nNONE\n\n## VERDICT\n<WORD> — one line: why\n")
     assert rc != 0 and "not one of GO" in err
+
+
+# ── "NO GO" is a NO-GO ──────────────────────────────────────────────────────
+#
+# Live: a panelist wrote `NO GO — <two named tables> do not belong in the canonical
+# registry because they lack the identity columns`, with its citations and the delivery
+# marker, and the round threw it away over the character between two letters. The hyphen
+# is OUR spelling of the word, not the panelist's decision. This widens how the word may
+# be SPELLED; what may be SAID is still exactly three verdicts.
+
+def test_a_space_spelled_NO_GO_is_accepted(tmp_path):
+    rc, err = _post(tmp_path, "## FINDINGS\n- (R) HIGH — x — a.py:1 — y — FIX: z\n\n"
+                              "## VERDICT\nNO GO — 1 — the registry loses its identity columns\n")
+    assert rc == 0, err
+
+
+def test_every_spelling_of_the_word_is_accepted(tmp_path):
+    for spelling in ("NO GO", "NO-GO", "NOGO", "NO_GO", "NO -GO", "NO - GO"):
+        body = (f"## FINDINGS\n- (R) HIGH — x — a.py:1 — y — FIX: z\n\n"
+                f"## VERDICT\n{spelling} — 1 — why\n")
+        rc, err = _post(tmp_path, body)
+        assert rc == 0, (spelling, err)
+
+
+def test_NO_GOOD_REASON_is_not_a_verdict(tmp_path):
+    """The load-bearing guard. Without it the normalisation turns prose that merely
+    STARTS with those letters into a refusal — a panelist's opening words deciding the
+    round."""
+    rc, err = _post(tmp_path, "## FINDINGS\nNONE\n\n## VERDICT\nNO GOOD REASON TO SHIP\n")
+    assert rc != 0 and "not one of GO" in err
+
+
+def test_the_hook_and_the_parser_spell_it_the_same_way(tmp_path):
+    """The defect class we have already paid for twice: two halves of one contract, each
+    tested alone, disagreeing in the middle. Whatever the hook accepts, the collector
+    must read as the same verdict."""
+    from verdict_parse import read_panelist
+
+    for spelling in ("NO GO", "NO-GO", "NOGO", "NO_GO"):
+        body = (f"## FINDINGS\n- (R) HIGH — x — a.py:1 — y — FIX: z\n\n"
+                f"## VERDICT\n{spelling} — 1 — why\n")
+        rc, _ = _post(tmp_path, body)
+        f = tmp_path / "gemini.md"
+        f.write_text(body + MARKER + "\n")
+        parsed = read_panelist(f)
+        assert rc == 0, (spelling, "hook refused what the parser reads")
+        assert parsed["verdict"] == "NO-GO", (spelling, parsed["verdict"])
+
+    # and they agree on the rejection too
+    prose = "## FINDINGS\nNONE\n\n## VERDICT\nNO GOOD REASON TO SHIP\n"
+    rc, _ = _post(tmp_path, prose)
+    f = tmp_path / "gemini.md"
+    f.write_text(prose + MARKER + "\n")
+    assert rc != 0 and read_panelist(f)["verdict"] != "NO-GO"

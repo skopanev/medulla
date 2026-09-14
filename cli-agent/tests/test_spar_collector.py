@@ -474,3 +474,73 @@ def test_a_malformed_handoff_does_not_cost_the_verdict(tmp_path):
     losing the verdict over it would trade a reporting gap for a total loss."""
     _, data, res = _three_of_four(tmp_path, "{not json at all")
     assert data["counts"]["NO-GO"] == 3 and res.returncode == 0
+
+
+# ── a short panel still leaves a record ─────────────────────────────────────
+#
+# A round that missed min_success used to jump from the pool straight to the terminal:
+# the synthesize node never ran, so it left individual artifacts, an outcome.json, and
+# nothing naming the subject, the counts, or the findings of the panelists who DID
+# answer. Meanwhile a round that delivered enough but could not DECIDE wrote a full
+# verdict.json saying exactly that. Same failure to the reader, two different records,
+# only one of them machine-readable. Reported from the field as "inventory contains
+# outcome.json and individual artifacts, no verdict.json".
+
+def test_the_pool_routes_a_short_panel_to_the_collector():
+    node = pyyaml.safe_load(WORKFLOW.read_text())["nodes"]["panel"]
+    assert node["on_signal"]["__failed__"] == "synthesize", (
+        "a short panel must still be collected; jumping to the terminal loses the "
+        "findings of everyone who answered")
+
+
+def test_a_short_panel_still_fails_the_round():
+    """Collecting it must not pass it. min_success and min_decided are two thresholds
+    that only happen to be equal here — a panel short on DELIVERY could otherwise clear
+    min_decided and exit ok, which is the fabricated pass this must never produce."""
+    body = pyyaml.safe_load(WORKFLOW.read_text())["nodes"]["synthesize"]["shell"]
+    assert '"$panel_signal" = "__failed__"' in body
+    assert "no_quorum" in body.split('"$panel_signal" = "__failed__"')[1][:300]
+
+
+def test_zero_artifacts_still_produce_a_machine_readable_record(tmp_path):
+    """The worst case the new route can hand the collector: nothing delivered at all.
+    It must write the record rather than crash — and it must not invent a verdict."""
+    art = tmp_path / "artifacts"
+    art.mkdir()
+    (tmp_path / "journal.jsonl").write_text(
+        '{"step":1,"node":"panel","kind":"pool","inputs_total":4}\n')
+    res = subprocess.run(
+        [sys.executable, str(COLLECTOR), str(tmp_path), str(art),
+         "--expected", "4", "--delivered", "0", "--min-decided", "3",
+         "--manifest-json",
+         '[{"key":"a","input":{"slug":"deepseek"},"ok":false,"reason":"pre",'
+         '"attempts":0,"message":"429 quota"}]',
+         "--subject", "ticket=T-42"], capture_output=True, text=True, check=False)
+    assert res.returncode == 3, res.stderr
+    data = json.loads((tmp_path / "verdict.json").read_text())
+    assert data["quorum"] == {"expected": 4, "delivered": 0, "min_decided": 3,
+                              "decided": 0, "met": False}
+    assert data["subject"]["ticket"] == "T-42"
+    assert data["panelists"] == [] and data["findings"] == []
+
+
+def test_a_short_panel_keeps_the_findings_of_whoever_answered(tmp_path):
+    """The point of collecting it: two panelists did the work, and their findings must
+    survive the round they could not carry."""
+    art = tmp_path / "artifacts"
+    art.mkdir()
+    (art / "sonnet.md").write_text(
+        "## FINDINGS\n- (R) HIGH — tenant leak — a.py:10 — cross-tenant — FIX: scope it\n\n"
+        "## VERDICT\nNO-GO — 1 — the cache leaks across tenants\n")
+    (art / "gpt5.md").write_text(
+        "## FINDINGS\n- (R) MED — slow path — b.py:4 — latency — FIX: index it\n\n"
+        "## VERDICT\nGO — nothing blocking\n")
+    res = subprocess.run(
+        [sys.executable, str(COLLECTOR), str(tmp_path), str(art),
+         "--expected", "4", "--delivered", "2", "--min-decided", "3",
+         "--subject", "ticket=T-42"], capture_output=True, text=True, check=False)
+    assert res.returncode == 3, "two opinions is short of three — still a failed round"
+    data = json.loads((tmp_path / "verdict.json").read_text())
+    assert data["quorum"]["met"] is False
+    assert len(data["findings"]) == 2
+    assert {p["slug"] for p in data["panelists"]} == {"sonnet", "gpt5"}

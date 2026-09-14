@@ -13,6 +13,17 @@ NOT_PANELISTS = {"question.md", "verdict.md", "synthesized.md", "all-findings.md
 SEVERITY_ORDER = {"HIGH": 1, "MED": 2, "LOW": 3}
 VERDICT_WORDS = ("NO-GO", "INSUFFICIENT", "GO")     # NO-GO first: it is a prefix trap
 
+# "NO GO" is a NO-GO. Live: a panelist wrote a cited, reasoned refusal and the round threw
+# it away over the character between two letters. The hyphen is OUR spelling of the word,
+# not the panelist's decision — this widens how the word may be spelled, never what may be
+# said. The trailing guard is load-bearing: without it "NO GOOD REASON TO SHIP" becomes a
+# NO-GO. Kept byte-identical to the sed in the panel's post hook; a test compares them.
+_NO_GO_RE = re.compile(r"^\s*NO[ _]*-?[ _]*GO(?=[^A-Za-z]|$)")
+
+
+def _canon_verdict(line: str) -> str:
+    return _NO_GO_RE.sub("NO-GO", line, count=1)
+
 # digits and separators only: "NO-GO — this breaks 3 callers" must not yield F3
 CITATION = re.compile(r"^\s*[Ff]?\d+(\s*(?:,|and|/|&)\s*[Ff]?\d+)*\s*$")
 
@@ -122,7 +133,7 @@ def read_panelist(path: Path) -> dict:
 
     verdict_line = next((l.strip() for l in _section(text, "## VERDICT") if l.strip()), "")
     # `**NO-GO**.` is a verdict. Emphasis is the model decorating, not deciding.
-    plain = re.sub(r"[*_`]", "", verdict_line)
+    plain = _canon_verdict(re.sub(r"[*_`]", "", verdict_line))
     # What the parser could not make sense of, kept as a fact rather than a silence.
     malformed = []
     if not re.search(r"(?im)^#+\s*FINDINGS\b", text):

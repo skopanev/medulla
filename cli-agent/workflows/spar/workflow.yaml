@@ -380,6 +380,13 @@ nodes:
       v=$(awk 'toupper($0) ~ /^#+[[:space:]]*VERDICT/{f=1; next} /^#/{f=0} f && /^```/{next} f && NF {print; exit}' "$f")
       # `**NO-GO**.` is a verdict; emphasis is the model decorating, not deciding
       v=$(printf '%s' "$v" | tr -d '*_`')
+      # "NO GO" is a NO-GO. Live: a panelist wrote a cited, reasoned refusal and the
+      # round threw it away over the character between two letters. The hyphen is our
+      # spelling of the word, not the panelist's decision, and three verdicts remain
+      # three verdicts — this widens how the word may be SPELLED, not what may be said.
+      # The trailing guard matters: without it "NO GOOD REASON TO SHIP" becomes a NO-GO.
+      # Kept byte-identical to _canon_verdict() in verdict_parse.py; a test compares them.
+      v=$(printf '%s' "$v" | sed -E 's/^[[:space:]]*NO[ _]*-?[ _]*GO([^A-Za-z]|$)/NO-GO\1/')
       printf '%s' "$v" | sed 's/^[[:space:]]*//' | grep -qE '^(GO|NO-GO|INSUFFICIENT)' \
         || { echo "VERDICT is not one of GO / NO-GO / INSUFFICIENT" >&2; exit 1; }
       # And it must say WHY. A bare "GO" is a file, not an answer: it cannot be argued
@@ -396,7 +403,20 @@ nodes:
     timeout: 1800
     on_signal:
       __done__: synthesize
-      __failed__: __exit_fail__
+      # A SHORT PANEL STILL GETS COLLECTED. This used to jump straight to the terminal,
+      # so a round that missed min_success left individual artifacts, an outcome.json and
+      # nothing that named the subject, the counts or the findings of the panelists who
+      # DID answer — while a round that delivered enough but could not decide wrote a
+      # full verdict.json saying so. Same failure, two different records, and only one of
+      # them readable by a tool.
+      #
+      # The collector already handles a short panel, down to zero artifacts: it writes
+      # quorum {met:false} with the counts and whatever findings arrived, then returns 3,
+      # which routes to no_quorum -> __exit_fail__. The round still FAILS; it just stops
+      # failing silently. Nothing here can manufacture a pass — the verdict words are
+      # counted from the panelists' own files, and with too few of them the answer is
+      # "not enough", never "clear".
+      __failed__: synthesize
 
   synthesize:
     shell: |
@@ -440,7 +460,16 @@ nodes:
 
       [ "$ok" -lt "$total" ] && echo "<signal:update>only $ok/$total panelists delivered</signal:update>"
 
-      if [ "$rc" = "3" ]; then
+      # THE PANEL'S OWN VERDICT ON ITSELF OUTRANKS THE COLLECTOR'S. Now that a short
+      # panel is collected rather than skipped, a round could reach this line having
+      # missed min_success while still clearing min_decided — two thresholds that only
+      # happen to be equal here — and a delivery failure would exit ok. It must not:
+      # that is exactly the fabricated pass this whole change exists to avoid. The file
+      # is still written, with the counts, which is the point; only the exit differs.
+      panel_signal="{{last.signal}}"
+      if [ "$panel_signal" = "__failed__" ] && [ "$rc" != "3" ]; then
+        echo "<signal:no_quorum>the panel was short ($ok/$total delivered, min_success not met) — read $out</signal:no_quorum>"
+      elif [ "$rc" = "3" ]; then
         echo "<signal:no_quorum>too few panelists could form an opinion — read $out</signal:no_quorum>"
       elif [ "$rc" != "0" ] || [ ! -s "$out" ]; then
         echo "collector failed (rc=$rc); the panelists' own files are in $ROUND_DIR:"
