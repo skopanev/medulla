@@ -197,10 +197,17 @@ nodes:
             echo "followed by its raw bytes."
             echo
             echo "Stored here: head.txt, status.txt, diff.patch, and untracked.tsv"
-            echo "(sha256<TAB>path per untracked file). Untracked CONTENT is not copied"
-            echo "— it can be a mounted sibling repository. So this record proves WHAT"
-            echo "was hashed and lets each file be re-checked against its sha256; it is"
-            echo "not a standalone offline recomputation of a dirty digest."
+            echo "(sha256<TAB>path per untracked file)."
+            echo
+            echo "UNRESOLVED LIMITATION — untracked CONTENT is not stored."
+            echo "Those bytes can be a mounted sibling repository, and a run directory is"
+            echo "no place to duplicate somebody else's project. The consequence is a"
+            echo "real gap, not a caveat: sha256 and path CANNOT reconstruct missing"
+            echo "bytes, so this dirty digest cannot be recomputed offline from this"
+            echo "record alone. What it does give: proof of WHAT was hashed and in what"
+            echo "order, and a per-file check — if a file still exists, its sha256 here"
+            echo "says whether it is the one that was hashed. If the files are gone, the"
+            echo "digest is not verifiable. Reproducibility is PARTIALLY repaired."
           } > "$inputs/MANIFEST.txt"
         fi
         echo "<signal:update>prepare: digest computed ($scope), inputs in reviewed-inputs/</signal:update>"

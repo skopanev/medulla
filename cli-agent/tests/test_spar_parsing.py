@@ -198,3 +198,15 @@ def test_a_clean_tree_writes_no_inputs_record(tmp_path):
     full traversal on the one path that exists to avoid one."""
     _res, run = _run_prepare(tmp_path, {"a.py": "x\n"})
     assert not (run / "reviewed-inputs").exists()
+
+
+def test_the_manifest_states_the_unrepaired_gap_in_plain_words(tmp_path):
+    """sha256 and a path cannot reconstruct missing bytes. A record that implies it can
+    is worse than one that admits it cannot: a reader stops looking for the real inputs.
+    The limitation is written where the evidence lives, not only in a report."""
+    _res, run = _run_prepare(tmp_path, {"a.py": "x\n"},
+                             extra_untracked={"sibling.tf": "x\n"})
+    manifest = (run / "reviewed-inputs" / "MANIFEST.txt").read_text()
+    assert "UNRESOLVED" in manifest
+    assert "CANNOT reconstruct" in manifest
+    assert "PARTIALLY repaired" in manifest
