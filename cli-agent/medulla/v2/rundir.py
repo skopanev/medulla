@@ -10,11 +10,14 @@ import datetime
 import fcntl
 import json
 import os
+import re
 import threading
 import uuid
 from pathlib import Path
 
 import yaml
+
+from .logfmt import log, paint
 
 # Re-exported: config_yaml has always been imported from here (run dirs read
 # their snapshot through it). The lookup itself now lives with the rest of the
@@ -94,6 +97,7 @@ class RunStore(SessionStore):
         # for the very same run.
         (run_dir / "launch.txt").write_text(str(Path.cwd().resolve()), encoding="utf-8")
         _record_mounts(run_dir)
+        _warn_expired_notes(config_text)
         store = cls(run_dir, run_id)
         store._acquire_flock()
         return store
@@ -281,3 +285,33 @@ def _record_mounts(run_dir: Path) -> None:
         # in and the relationship is visible without reconstructing it.
         (run_dir / "mounts.txt").write_text("\n".join(sorted(set(rows))) + "\n",
                                             encoding="utf-8")
+
+
+# A dated promise in a comment: "REVERT ON 2026-09-13", "REVIEW ON ...", "REMOVE ON ...".
+_DATED_NOTE = re.compile(
+    r"(?i)#.*?\b(REVERT|REVIEW|REMOVE|EXPIRES?|DROP)\s+ON\s+(\d{4}-\d{2}-\d{2})\b[^\n]*")
+
+
+def _warn_expired_notes(config_text: str) -> None:
+    """Say out loud when a dated note in the workflow has come due.
+
+    A temporary change with a return date written in a comment is a shelf life nobody
+    checks. Measured here: a seat was swapped "temporarily" with REVERT ON 2026-09-13 in
+    the line above it, the condition it waited for was met that day, and the note sat
+    unread for three more — outliving both reasons it existed, while every round ran a
+    seat short. A reviewer outside the project found it before anyone inside did.
+
+    The engine reads the comment because nothing else will. It does not act on it: what
+    the note asks for is a decision, and a decision is not the engine's to take. It only
+    refuses to let the date pass in silence.
+
+    Dates are read from the SNAPSHOT text, so a note is judged as it was written, and a
+    malformed one is ignored rather than crashing a run over a comment.
+    """
+    today = datetime.date.today().isoformat()
+    for match in _DATED_NOTE.finditer(config_text):
+        due = match.group(2)
+        if due > today:
+            continue
+        note = match.group(0).lstrip("# ").strip()
+        log(paint(f"note came due {due} (today {today}): {note}", "yellow"))
