@@ -21,7 +21,7 @@ from .engine_scan import (
 )
 from .errors import E_HARNESS, EngineCrash
 from .harness import resolve as resolve_harness
-from .model import HOOK_TIMEOUT_S, SIG_FAILED, Node
+from .model import HOOK_TIMEOUT_S, SIG_FAILED, SIG_TIMEOUT, Node
 from .procrun import run as proc_run
 from .secret_policy import env_keys_to_remove
 
@@ -215,6 +215,10 @@ class AttemptsMixin(BodyMixin):
                 max_attempts=phase_budget,
                 has_fallback=fallback is not None,
                 pool_mode=pool_mode,
+                # NOT from `known`: that set has the engine facts subtracted out for
+                # stdout scanning, so __timeout__ could never appear in it. The question
+                # here is a different one — did the AUTHOR write a route for it.
+                timeout_routed=(SIG_TIMEOUT in self.p.known_signals(node)),
             )
             if decision.failure_class is not None:
                 last_failure_class = ("watchdog" if result.killed_because

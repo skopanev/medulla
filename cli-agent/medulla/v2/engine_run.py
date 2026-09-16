@@ -41,7 +41,10 @@ def _normalize_outcome(outcome: dict, store, engine) -> dict:
     return outcome
 
 
-RESUMABLE_OUTCOMES = {"interrupted", "crashed"}   # + no outcome.json at all.
+# timed_out is here for a reason worth stating: WITHOUT on_timeout a deadline is a crash,
+# and `crashed` resumes. Handling the deadline gracefully must not quietly cost a run the
+# ability to continue — that would punish the workflow that cleaned up after itself.
+RESUMABLE_OUTCOMES = {"interrupted", "crashed", "timed_out"}   # + no outcome.json at all.
 # `crashed` is a documented deviation from the contract's letter: the #1 resume
 # trigger is E_DEADLINE, which is a caught crash; config-class crashes just
 # crash again identically (same immutable snapshot) — no harm, no data loss.

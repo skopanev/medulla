@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from .model import SIG_DEFAULT, SIG_FAILED
+from .model import SIG_DEFAULT, SIG_FAILED, SIG_TIMEOUT
 
 
 class Verdict(Enum):
@@ -102,6 +102,7 @@ def next_move(
     max_attempts: int,
     has_fallback: bool,
     pool_mode: bool = False,
+    timeout_routed: bool = False,   # the node named __timeout__ in on_signal
 ) -> LoopMove:
     if decision.verdict is Verdict.ROUTE:
         return LoopMove(Move.DONE, decision.signal)
@@ -122,4 +123,20 @@ def next_move(
         return LoopMove(Move.RETRY_SAME)
     if phase == "primary" and has_fallback and kind == "agent":
         return LoopMove(Move.SWITCH_FALLBACK)
+    # A step that ran out of time can say so — but ONLY to a node that asked. "did not
+    # finish" and "finished badly" call for different handling (shrink the task versus
+    # try another provider) and both used to arrive as __failed__, so an author could not
+    # tell them apart in a route.
+    #
+    # The first cut emitted __timeout__ always and resolved its ROUTE back to __failed__
+    # when unclaimed. Routing survived; the RECORD did not — the journal and outcome.json
+    # started saying __timeout__ where every existing reader looks for __failed__, and an
+    # old test caught it immediately. So the fact is offered, not imposed: a node that
+    # names __timeout__ gets it, a node that does not sees exactly what it always saw.
+    #
+    # Nothing is hidden by that. The full reason is recorded either way — reason:
+    # "timeout" in attempts.jsonl and the wall named in the step message. A signal is a
+    # routing decision, and a route nobody declared must not rewrite the record.
+    if decision.failure_class in ("timeout", "watchdog") and timeout_routed:
+        return LoopMove(Move.DONE, SIG_TIMEOUT)
     return LoopMove(Move.DONE, SIG_FAILED)

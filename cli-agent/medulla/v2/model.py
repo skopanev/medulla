@@ -12,7 +12,8 @@ SIG_DONE = "__done__"
 SIG_FAILED = "__failed__"
 SIG_EMPTY = "__empty__"
 SIG_DEFAULT = "__default__"
-ENGINE_FACTS = (SIG_DONE, SIG_FAILED, SIG_EMPTY, SIG_DEFAULT)
+SIG_TIMEOUT = "__timeout__"
+ENGINE_FACTS = (SIG_DONE, SIG_FAILED, SIG_EMPTY, SIG_DEFAULT, SIG_TIMEOUT)
 
 CHANNEL_SIGNALS = ("var", "update")  # reserved bare words; never routable
 
@@ -121,6 +122,7 @@ class Workflow:
     nodes: dict[str, Node]
     vars: dict[str, str] = field(default_factory=dict)
     timeout: int | None = DEFAULT_WORKFLOW_TIMEOUT  # whole-run deadline; None = unlimited (yaml: 0)
+    on_timeout: str | None = None       # node to run when the whole-run deadline is hit
     keep_runs: int = DEFAULT_KEEP_RUNS
     defaults: Defaults = field(default_factory=Defaults)
     path: Path | None = None            # source file

@@ -479,6 +479,31 @@ Left side: **a bare name is a signal your code emits; a dunder is an engine key.
 | `__failed__` | engine | decision: body died after attempts+fallback. Pool: join below threshold | `__exit_fail__` |
 | `__empty__` | engine | zero inputs (source rc 0 with no output, or an empty static list); bodies never run, an empty manifest is still created | `__exit_fail__` |
 | `__default__` | matcher | body exited 0 with no known signal | `__exit_fail__` |
+| `__timeout__` | engine | the step ran out of time — its own `timeout`, or the silence watchdog — after attempts+fallback | **offered, not imposed**: a node that does not name it sees `__failed__` exactly as before |
+
+`__timeout__` exists because "did not finish" and "finished badly" want different
+handling — a smaller task versus another provider — and both used to arrive as
+`__failed__`. It is **offered**: name it in `on_signal` and a timeout routes there; say
+nothing and the step reports `__failed__`, byte for byte as it always did, so no workflow
+written before it changes behaviour. Nothing is hidden by that — `attempts.jsonl` records
+`reason: "timeout"` either way, and the step message names which wall was hit. A node
+that sets a deadline and routes no `__timeout__` gets one warning per run, never an
+error.
+
+**Whole-run deadline.** `timeout:` at the top level is a wall for the entire run; when it
+is hit the run crashes with `E_DEADLINE` and no node runs — nothing saved, no lock
+released, nobody told. `on_timeout: <node>` changes that: the named node runs once, and
+the run then ends as `timed_out` (exit 2, resumable) regardless of what that node
+signals — what it managed to save does not make a run that ran out of time a success.
+
+    timeout: 3600
+    on_timeout: save_partial
+
+The handler runs on its OWN `timeout:` and is not clamped to the run's budget: that
+budget is spent by definition when it fires, so a clamped handler would be killed in the
+breath it was started. It runs exactly once and cannot route back into the graph — that
+would be a second run with no deadline at all. `on_timeout` naming an unknown node, or
+set without a `timeout:` to fire on, is a load error.
 
 Channel words `var` and `update` never route (using them as `on_signal` keys is a validation error). Terminals: `__exit_ok__` (exit 0), `__exit_fail__` (exit 2; the routing signal's message becomes the error message). User nodes may not be named `__*__` or `on/off/yes/no/true/false` (YAML 1.1 traps); node names must be env/filesystem-safe (`[A-Za-z][A-Za-z0-9_-]*`).
 

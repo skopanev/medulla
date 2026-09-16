@@ -175,8 +175,8 @@ def load_workflow(path: Path) -> Workflow:
                 f"engine. (Nothing is wrong with the workflow file.)"
             )
 
-    top_keys = {"version", "start", "vars", "timeout", "keep_runs", "defaults", "nodes",
-                "docker", "min_engine"}
+    top_keys = {"version", "start", "vars", "timeout", "on_timeout", "keep_runs",
+                "defaults", "nodes", "docker", "min_engine"}
     unknown = set(data) - top_keys
     if unknown:
         raise _err(f"unknown top-level fields: {sorted(unknown)} — if this definition "
@@ -294,8 +294,22 @@ def load_workflow(path: Path) -> Workflow:
 
     _warn_dead_budgets(nodes, timeout, defaults)
 
+    # on_timeout: where the run goes when its whole-run deadline is hit. Without it the
+    # deadline is a crash and nothing runs — no partial result saved, no lock released,
+    # nobody told. Validated here so a typo is a load error and not a surprise an hour in,
+    # when it is least affordable.
+    on_timeout = data.get("on_timeout")
+    if on_timeout is not None:
+        if not isinstance(on_timeout, str) or not on_timeout.strip():
+            raise _err("on_timeout must be a node name")
+        on_timeout = on_timeout.strip()
+        if on_timeout not in nodes:
+            raise _err(f"on_timeout: unknown node '{on_timeout}'")
+        if timeout is None:
+            raise _err("on_timeout needs a timeout to fire on (timeout: 0 is unlimited)")
+
     return Workflow(
         version="2", start=start, nodes=nodes, vars=vars_map,
-        timeout=timeout, keep_runs=keep_runs, defaults=defaults,
+        timeout=timeout, on_timeout=on_timeout, keep_runs=keep_runs, defaults=defaults,
         path=path, dir=path.parent,
     )

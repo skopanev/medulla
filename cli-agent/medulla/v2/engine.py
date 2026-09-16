@@ -16,14 +16,16 @@ from .errors import (
     EngineCrash,
 )
 from .model import (
+    EXIT_FAIL,
     EXIT_OK,
+    SIG_TIMEOUT,
     TERMINALS,
     Node,
     Workflow,
 )
 from .rundir import RunStore
 
-EXIT_CODE = {"succeeded": 0, "crashed": 1, "failed": 2, "interrupted": 130}
+EXIT_CODE = {"succeeded": 0, "crashed": 1, "failed": 2, "timed_out": 2, "interrupted": 130}
 
 # The contract promises: "Never quote signal syntax literally in prompts —
 # describe it; the engine delivers the syntax to the agent." This is that
@@ -36,7 +38,7 @@ EXIT_CODE = {"succeeded": 0, "crashed": 1, "failed": 2, "interrupted": 130}
 # the suite and several call sites have always imported them from here.
 from .engine_attempts import AttemptsMixin
 from .engine_pool import PoolMixin
-from .logfmt import assign_signal_colours  # noqa: E402
+from .logfmt import assign_signal_colours, paint  # noqa: E402
 from .engine_scan import (  # noqa: E402,F401
     AttemptsOutcome,
     ScanResult,
@@ -65,11 +67,40 @@ class Engine(VarsMixin, AttemptsMixin, PoolMixin):
             if workflow.dir else {}
         self.vars: dict[str, str] = dict(workflow.vars)
         self.last: dict = {}
+        self._in_timeout_handler = False
         self.deadline: float | None = (
             time.monotonic() + workflow.timeout if workflow.timeout else None
         )
         self.steps = 0
         self.manifests: dict[str, Path] = {}   # node -> manifest path (engine map, not vars)
+
+    def _warn_unrouted_timeouts(self) -> None:
+        """Name the nodes that set a timeout and never route the fact it produces.
+
+        __timeout__ is offered, not imposed: a node that does not name it keeps seeing
+        __failed__ exactly as before, so no workflow written earlier changes behaviour.
+        The cost of that compatibility is silence — an author sets `timeout: 3600`,
+        assumes a timeout is now distinguishable, and it is not.
+
+        So the engine says it once per run and does not repeat itself per step. A
+        warning and not an error on purpose: making it fatal would stop every workflow
+        on this machine at once — measured, 66 nodes carry a timeout and 66 of them route
+        no __timeout__, the pre-push compatibility gate among them. A rule that has to be
+        pushed past its own gate to be introduced is not ready to be a rule.
+        """
+        # Only a wall the AUTHOR put there. Every agent body has a silence watchdog by
+        # default, so testing for "can this node time out" would warn on all of them and
+        # the warning would be muted within a day. The question is narrower: did somebody
+        # write a deadline here and then not say where it goes.
+        wall_in_defaults = self.p.defaults.timeout is not None
+        for name, node in self.p.nodes.items():
+            action = node.action
+            has_wall = (action.timeout is not None or wall_in_defaults
+                        or (action.kind == "agent"
+                            and action.agent.idle_timeout is not None))
+            if has_wall and SIG_TIMEOUT not in self.p.known_signals(node):
+                log(paint(f"node '{name}' sets a timeout but routes no __timeout__ — "
+                          f"a timeout there arrives as __failed__", "yellow"))
 
     # ── deadline ──
     def _remaining(self) -> float | None:
@@ -165,6 +196,61 @@ class Engine(VarsMixin, AttemptsMixin, PoolMixin):
 
     # ── main loop ──
     def run(self, start_override: str | None = None) -> dict:
+        """Run the graph. With on_timeout set, the whole-run deadline routes instead of
+        crashing — see _run_graph and _run_timeout_handler."""
+        try:
+            return self._run_graph(start_override)
+        except EngineCrash as crash:
+            if crash.code != E_DEADLINE or self.p.on_timeout is None:
+                raise
+            if self._in_timeout_handler:
+                # The handler itself ran out of time. There is no second handler and
+                # there must not be: a cleanup that loops on the deadline that summoned
+                # it is worse than no cleanup, because it also eats the crash report.
+                log(paint(f"on_timeout node '{self.p.on_timeout}' ran out of time too",
+                          "red"))
+                raise
+            log(paint(f"deadline reached — running on_timeout node "
+                      f"'{self.p.on_timeout}'", "yellow"))
+            return self._run_timeout_handler(crash)
+
+    def _run_timeout_handler(self, crash: EngineCrash) -> dict:
+        """One pass through the on_timeout node, on its OWN budget.
+
+        The deadline is spent by definition when this is called, so a handler clamped to
+        what remains is killed in the same breath it is started — which is why the run's
+        deadline is lifted for it rather than extended by a grace figure nobody can pick
+        correctly. Its own `timeout:` is the only wall it has, and it needs one: the
+        contract's per-action default applies if the author names none.
+
+        It runs ONCE. Whatever it routes to, the run ends after it — a handler that could
+        route back into the graph would be a second run with no deadline at all.
+        """
+        self._in_timeout_handler = True
+        self.deadline = None                  # its own timeout is the only wall left
+        node = self.p.nodes[self.p.on_timeout]
+        step, step_dir = self.store.new_step_dir(node.name)
+        self.steps += 1
+        log(step_start(step, node.name))
+        t0 = time.monotonic()
+        signal, message, stats = (
+            self._run_pool(node, step_dir, step) if node.is_pool
+            else self._run_decision(node, step_dir, step))
+        duration = round(time.monotonic() - t0, 2)
+        self.store.journal_append({
+            "step": step, "node": node.name,
+            "kind": "pool" if node.is_pool else "decision",
+            "signal": signal, "next": EXIT_FAIL, "duration_s": duration,
+            "message": _tail(message, 8000), "on_timeout": True,
+        })
+        log(step_end(step, node.name, signal, EXIT_FAIL, duration))
+        # The run TIMED OUT. What the handler managed to do does not change that, and a
+        # handler that returned ok must not be able to report the run as a success.
+        return {"outcome": "timed_out", "exit_code": 2,
+                "error": {"code": crash.code, "message": crash.message,
+                          "node": crash.node, "handled_by": node.name}}
+
+    def _run_graph(self, start_override: str | None = None) -> dict:
         current = start_override or self.p.start
         if current not in self.p.nodes:
             raise EngineCrash(E_VALIDATION, f"--node: unknown node '{current}'")
@@ -173,12 +259,13 @@ class Engine(VarsMixin, AttemptsMixin, PoolMixin):
         # kept off a colour the first two already took.
         assign_signal_colours(
             {sig for n in self.p.nodes.values() for sig in self.p.known_signals(n)})
+        self._warn_unrouted_timeouts()
         self.store.write_vars(self.vars)
         started = time.monotonic()
 
         while True:
             node = self.p.nodes[current]
-            self._check_deadline()
+            self._check_deadline()   # raises E_DEADLINE; caught below when on_timeout is set
             self.steps += 1
             step, step_dir = self.store.new_step_dir(node.name)
             log(step_start(step, node.name))
