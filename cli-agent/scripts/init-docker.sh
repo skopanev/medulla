@@ -21,20 +21,24 @@ fi
 # Codex credentials (skip personal config — workflow controls model/prompt via CLI)
 #
 # Token-broker guard: when this container has a broker config
-# ($HOME/.config/hltm-broker/config.json), codex auth comes from the broker —
+# (current/legacy config, BROKER_CONFIG, or environment), auth comes from the broker —
 # either because `codex` here is a shim into the broker wrapper, or because the
 # workflow calls the wrapper directly. Copying the host's /mnt/codex/auth.json
 # into a writable $HOME/.codex/auth.json would let a plain codex refresh THAT
 # token, and OpenAI would invalidate the host's live session (token poisoning).
 # So: broker configured -> do NOT copy. No broker -> copy as before so bare
 # codex works in the default image.
-if [ -d /mnt/codex ]; then
-    if [ -f "$HOME/.config/hltm-broker/config.json" ]; then
-        : # broker configured: its wrapper owns auth, never copy the host token
-    else
-        mkdir -p "$HOME/.codex"
-        [ -f /mnt/codex/auth.json ] && cp -L /mnt/codex/auth.json "$HOME/.codex/auth.json" 2>/dev/null || true
-    fi
+if [ -n "${BROKER_CONFIG:-}" ] \
+    || [ -f "$HOME/.config/broker/config.json" ] \
+    || [ -f "$HOME/.config/hltm-broker/config.json" ] \
+    || { [ -n "${BROKER_URL:-}" ] && [ -n "${BROKER_KEY:-}" ]; }; then
+    # Keep older wrappers usable too, including hosts with no /mnt/codex mount.
+    # An explicitly selected but missing broker config must fail at the wrapper,
+    # never fall back to copying the host's credentials.
+    mkdir -p -m 700 "$HOME/.codex"
+elif [ -d /mnt/codex ]; then
+    mkdir -p "$HOME/.codex"
+    [ -f /mnt/codex/auth.json ] && cp -L /mnt/codex/auth.json "$HOME/.codex/auth.json" 2>/dev/null || true
 fi
 
 # OpenCode auth
