@@ -14,6 +14,7 @@ import sys
 import uuid
 from pathlib import Path
 
+from dockerlib import box
 from dockerlib import env as dockerenv
 from dockerlib import paths as dockerpaths
 
@@ -143,6 +144,7 @@ def run_docker(image, volumes, args, runs_under: str | None = None,
     so the container is reused across nested runs and removed at the end of the
     pipeline rather than by --rm — a conversation lives in the CLI's own state inside
     $HOME, and a fresh container is a fresh conversation whatever id we hand it."""
+    volumes, args = box.prepare(image, volumes, args)
     if keep_session:
         # local: session_run imports build_run_command from here, and a top-level
         # import either way closes the cycle — importing session_run first (a test

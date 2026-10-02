@@ -270,6 +270,7 @@ def _record_mounts(run_dir: Path) -> None:
     except OSError:
         return
     rows = []
+    header = _ro_is_enforced_header()
     for line in raw.splitlines():
         # mountinfo: id parent maj:min root MOUNTPOINT OPTIONS ... - fstype source ...
         parts = line.split()
@@ -283,8 +284,8 @@ def _record_mounts(run_dir: Path) -> None:
     if rows:
         # Sorted by PATH, so a nested mount sits directly under the mount it is nested
         # in and the relationship is visible without reconstructing it.
-        (run_dir / "mounts.txt").write_text("\n".join(sorted(set(rows))) + "\n",
-                                            encoding="utf-8")
+        body = "\n".join(sorted(set(rows))) + "\n"
+        (run_dir / "mounts.txt").write_text(header + body, encoding="utf-8")
 
 
 # A dated promise in a comment: "REVERT ON 2026-09-13", "REVIEW ON ...", "REMOVE ON ...".
@@ -315,3 +316,38 @@ def _warn_expired_notes(config_text: str) -> None:
             continue
         note = match.group(0).lstrip("# ").strip()
         log(paint(f"note came due {due} (today {today}): {note}", "yellow"))
+
+
+
+def _ro_is_enforced_header() -> str:
+    """A line saying so when this container's `ro` flags are not binding on it.
+
+    A read-only bind mount is read-only because the process lacks the capability to
+    remount it. A privileged container has that capability, so every `ro` line below is
+    DECLARED and not ENFORCED — and reads exactly the same as one from an ordinary run.
+    That is the whole problem: a mount table gets cited as evidence that nothing inside
+    could write to the reviewed tree, and here it cannot carry that meaning.
+
+    Detected from CapEff rather than from our own --docker-engine marker, because the
+    question is about the container and not about which flag created it: anything granting
+    CAP_SYS_ADMIN makes the same line untrue, whoever asked for it.
+    """
+    try:
+        status = Path("/proc/self/status").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    for line in status.splitlines():
+        if not line.startswith("CapEff:"):
+            continue
+        try:
+            caps = int(line.split()[1], 16)
+        except (IndexError, ValueError):
+            return ""
+        if caps & (1 << _CAP_SYS_ADMIN):
+            return ("# PRIVILEGED: this container holds CAP_SYS_ADMIN, so the ro flags\n"
+                    "# below are DECLARED, NOT ENFORCED against it — they cannot be read\n"
+                    "# as evidence that nothing inside could write to these paths.\n")
+    return ""
+
+
+_CAP_SYS_ADMIN = 21        # linux/capability.h

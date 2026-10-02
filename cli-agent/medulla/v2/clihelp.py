@@ -78,6 +78,13 @@ docker (host-side, handled by scripts/docker.py before the engine starts):
     medulla --docker -w <dir> ...   run inside the workflow's image
     --build                         force a no-cache image rebuild
     --mount <dir> / --mount-rw <dir>  extra mounts under /workspace/<name>
+    --docker-engine                 start the image's own dockerd inside the run, for
+                                    integration tests against real services. Needs an
+                                    image declaring a numeric non-root USER as uid:gid
+                                    and an absolute HOME. The container runs PRIVILEGED
+                                    AS ROOT, so it cannot be combined with --cwd-ro:
+                                    a read-only mount does not bind root, and the run
+                                    would record a guarantee it does not hold.
     image resolution precedence:    MEDULLA_IMAGE env > --var IMAGE >
                                     vars.IMAGE > build from (--var DOCKERFILE >
                                     vars.DOCKERFILE > packaged default)

@@ -94,7 +94,10 @@ def test_the_engine_removes_its_own_containers_on_exit(monkeypatch):
     engine_run._remove_session_containers("run-9")
 
     assert any("label=medulla.session-owner=run-9" in " ".join(c) for c in calls)
-    assert sum(1 for c in calls if c[:3] == ["docker", "rm", "-f"]) == 2
+    # -fv, not -f: the anonymous volume a container was given goes with it. Without the
+    # v, every kept container that ever declared one left its store behind on the host —
+    # invisible in `docker ps`, counted only by `docker system df`.
+    assert sum(1 for c in calls if c[:3] == ["docker", "rm", "-fv"]) == 2
 
 
 def test_inside_a_container_it_reaps_nothing(monkeypatch):
@@ -227,6 +230,6 @@ def test_a_finished_container_is_swept_immediately(monkeypatch):
     assert "status=exited" in query and "status=dead" in query
     assert "status=created" not in query        # someone may be starting it right now
     assert f"label={keep.LABEL}" in query           # ours only: the daemon is shared
-    assert sum(1 for c in calls if c[:3] == ["docker", "rm", "-f"]) == 2
+    assert sum(1 for c in calls if c[:3] == ["docker", "rm", "-fv"]) == 2
 
 

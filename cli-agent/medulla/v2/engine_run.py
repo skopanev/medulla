@@ -231,6 +231,10 @@ def _remove_session_containers(run_id: str) -> None:
     except (OSError, subprocess.SubprocessError):
         return
     for cid in found:
-        subprocess.run(["docker", "rm", "-f", cid], capture_output=True, check=False)
+        # -fv: the container's anonymous volumes go with it. keep.py was given the v and
+        # this path was not, so half of the leak stayed — a session container that
+        # declared a store left it behind here, invisible to `docker ps` and counted only
+        # by `docker system df`. Both paths remove the same kind of container.
+        subprocess.run(["docker", "rm", "-fv", cid], capture_output=True, check=False)
     if found:
         log(f"removed {len(found)} session container(s)")

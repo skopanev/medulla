@@ -12,7 +12,7 @@ import sys
 import time
 import uuid
 
-from dockerlib import keep
+from dockerlib import box, keep
 from dockerlib import paths as dockerpaths
 from dockerlib.process import (
     build_run_command,
@@ -92,6 +92,8 @@ def _run_kept(image, volumes, args, runs_under, run_dir_name):
         return 1
 
     cmd = ["docker", "exec"]
+    if user := box.exec_user(volumes):
+        cmd += ["--user", user]
     if sys.stdin.isatty():
         cmd.append("-i")
     if interactive_stdio():

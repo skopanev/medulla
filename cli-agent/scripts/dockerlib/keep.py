@@ -70,7 +70,7 @@ def is_running(name: str) -> bool:
 
 
 def remove(name: str) -> None:
-    subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
+    subprocess.run(["docker", "rm", "-fv", name], capture_output=True, check=False)
 
 
 def remove_for_owner(owner: str) -> int:
@@ -84,7 +84,7 @@ def remove_for_owner(owner: str) -> int:
         return 0
     ids = [i for i in out.split() if i]
     for cid in ids:
-        subprocess.run(["docker", "rm", "-f", cid], capture_output=True, check=False)
+        subprocess.run(["docker", "rm", "-fv", cid], capture_output=True, check=False)
     return len(ids)
 
 
@@ -112,7 +112,7 @@ def sweep_stale(now: float | None = None) -> int:
         cid, created = parts[0], parts[1]
         age = _age_seconds(created, now)
         if age is not None and age > STALE_AFTER_S:
-            subprocess.run(["docker", "rm", "-f", cid], capture_output=True, check=False)
+            subprocess.run(["docker", "rm", "-fv", cid], capture_output=True, check=False)
             removed += 1
     return removed
 
@@ -138,7 +138,7 @@ def _remove_dead() -> int:
         return 0
     ids = [i for i in out.split() if i]
     for cid in ids:
-        subprocess.run(["docker", "rm", "-f", cid], capture_output=True, check=False)
+        subprocess.run(["docker", "rm", "-fv", cid], capture_output=True, check=False)
     return len(ids)
 
 

@@ -121,3 +121,68 @@ nodes:
 """
     path, work = write_workflow(tmp_path, text)
     assert run_workflow(path, workdir=work) == 0
+
+
+# ── when ro is not a guarantee, the file says so ────────────────────────────
+#
+# A read-only bind mount is read-only because the process lacks the capability to remount
+# it. A privileged container has that capability, so its `ro` lines are DECLARED and not
+# ENFORCED — while reading exactly like an ordinary run's. That line gets cited as
+# evidence that nothing inside could write to the reviewed tree; I have cited it myself,
+# twice, in incident answers. It cannot carry that meaning here, so the file admits it.
+
+def _status(cap_eff: str):
+    """Answer /proc/self/status with this CapEff, /proc/self/mountinfo with one ro mount."""
+    import pathlib as _p
+    real = _p.Path.read_text
+
+    def fake(self, *a, **kw):
+        if str(self) == "/proc/self/status":
+            return f"Name:\tpython\nCapEff:\t{cap_eff}\n"
+        if str(self) == "/proc/self/mountinfo":
+            return _mountinfo(("/workspace", "ro"))
+        return real(self, *a, **kw)
+    return fake
+
+
+def test_a_privileged_container_is_declared_in_the_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(pathlib.Path, "read_text", _status("000001ffffffffff"))
+    rundir._record_mounts(tmp_path)
+    text = (tmp_path / "mounts.txt").read_text()
+    assert "PRIVILEGED" in text and "NOT ENFORCED" in text
+    assert "ro\t/workspace" in text, "the mounts themselves are still recorded"
+
+
+def test_an_ordinary_container_gets_no_such_line(tmp_path, monkeypatch):
+    """CAP_SYS_ADMIN absent — a normal run, where the ro line means what it says. A
+    header on every run would train readers to ignore it."""
+    monkeypatch.setattr(pathlib.Path, "read_text", _status("00000000a80425fb"))
+    rundir._record_mounts(tmp_path)
+    assert "PRIVILEGED" not in (tmp_path / "mounts.txt").read_text()
+
+
+def test_it_reads_capabilities_not_our_own_flag(tmp_path, monkeypatch):
+    """Detected from CapEff rather than from the --docker-engine marker: the question is
+    about the container, not about which flag created it. Anything granting CAP_SYS_ADMIN
+    makes the same line untrue, whoever asked for it."""
+    monkeypatch.delenv("BROKER_BOX_DOCKER", raising=False)
+    monkeypatch.setattr(pathlib.Path, "read_text", _status("000001ffffffffff"))
+    rundir._record_mounts(tmp_path)
+    assert "PRIVILEGED" in (tmp_path / "mounts.txt").read_text()
+
+
+def test_unreadable_capabilities_add_nothing(tmp_path, monkeypatch):
+    """No /proc/self/status, or a CapEff that will not parse: say nothing rather than
+    guess. A false "PRIVILEGED" would discredit honest evidence."""
+    import pathlib as _p
+    real = _p.Path.read_text
+
+    def fake(self, *a, **kw):
+        if str(self) == "/proc/self/status":
+            return "CapEff:\tnot-a-number\n"
+        if str(self) == "/proc/self/mountinfo":
+            return _mountinfo(("/workspace", "ro"))
+        return real(self, *a, **kw)
+    monkeypatch.setattr(pathlib.Path, "read_text", fake)
+    rundir._record_mounts(tmp_path)
+    assert "PRIVILEGED" not in (tmp_path / "mounts.txt").read_text()
