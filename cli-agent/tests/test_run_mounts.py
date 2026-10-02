@@ -131,14 +131,21 @@ nodes:
 # evidence that nothing inside could write to the reviewed tree; I have cited it myself,
 # twice, in incident answers. It cannot carry that meaning here, so the file admits it.
 
-def _status(cap_eff: str):
-    """Answer /proc/self/status with this CapEff, /proc/self/mountinfo with one ro mount."""
+def _status(cap_bnd: str, cap_eff: str = "0000000000000000"):
+    """Answer /proc/self/status with these caps, /proc/self/mountinfo with one ro mount.
+
+    CapEff defaults to ZERO on purpose: that is the real shape of the run this annotation
+    exists for. The engine inside the container starts after setpriv / `docker exec
+    --user`, uid already dropped, so an effective-set check sees nothing — which is how
+    the first version of this managed to stay silent on exactly the run it was written
+    for. The bounding set is what survives that drop.
+    """
     import pathlib as _p
     real = _p.Path.read_text
 
     def fake(self, *a, **kw):
         if str(self) == "/proc/self/status":
-            return f"Name:\tpython\nCapEff:\t{cap_eff}\n"
+            return f"Name:\tpython\nCapEff:\t{cap_eff}\nCapBnd:\t{cap_bnd}\n"
         if str(self) == "/proc/self/mountinfo":
             return _mountinfo(("/workspace", "ro"))
         return real(self, *a, **kw)
@@ -146,6 +153,7 @@ def _status(cap_eff: str):
 
 
 def test_a_privileged_container_is_declared_in_the_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("MEDULLA_DOCKER", "1")
     monkeypatch.setattr(pathlib.Path, "read_text", _status("000001ffffffffff"))
     rundir._record_mounts(tmp_path)
     text = (tmp_path / "mounts.txt").read_text()
@@ -156,19 +164,44 @@ def test_a_privileged_container_is_declared_in_the_file(tmp_path, monkeypatch):
 def test_an_ordinary_container_gets_no_such_line(tmp_path, monkeypatch):
     """CAP_SYS_ADMIN absent — a normal run, where the ro line means what it says. A
     header on every run would train readers to ignore it."""
+    monkeypatch.setenv("MEDULLA_DOCKER", "1")
     monkeypatch.setattr(pathlib.Path, "read_text", _status("00000000a80425fb"))
     rundir._record_mounts(tmp_path)
     assert "PRIVILEGED" not in (tmp_path / "mounts.txt").read_text()
 
 
 def test_it_reads_capabilities_not_our_own_flag(tmp_path, monkeypatch):
-    """Detected from CapEff rather than from the --docker-engine marker: the question is
-    about the container, not about which flag created it. Anything granting CAP_SYS_ADMIN
-    makes the same line untrue, whoever asked for it."""
+    """The question is about the container, not about which flag created it. Anything
+    granting CAP_SYS_ADMIN makes the same line untrue, whoever asked for it — so the
+    --docker-engine marker is not consulted."""
+    monkeypatch.setenv("MEDULLA_DOCKER", "1")
     monkeypatch.delenv("BROKER_BOX_DOCKER", raising=False)
     monkeypatch.setattr(pathlib.Path, "read_text", _status("000001ffffffffff"))
     rundir._record_mounts(tmp_path)
     assert "PRIVILEGED" in (tmp_path / "mounts.txt").read_text()
+
+
+def test_it_survives_the_uid_drop(tmp_path, monkeypatch):
+    """THE defect PK found, pinned. The inner engine runs after setpriv / `docker exec
+    --user`, so CapEff is 0 — and the first version of this checked CapEff and therefore
+    said nothing on a real privileged kept run. Verified on the actual published release
+    before it was caught: the run completed, the annotation was absent. A guard that
+    reports nothing is worse than the silence it replaced, because I had already told them
+    the evidence was honest."""
+    monkeypatch.setenv("MEDULLA_DOCKER", "1")
+    monkeypatch.setattr(pathlib.Path, "read_text",
+                        _status("000001ffffffffff", cap_eff="0000000000000000"))
+    rundir._record_mounts(tmp_path)
+    assert "PRIVILEGED" in (tmp_path / "mounts.txt").read_text()
+
+
+def test_a_native_run_says_nothing_however_full_its_bounding_set(tmp_path, monkeypatch):
+    """An ordinary Linux login shell carries a full bounding set too. Annotating every
+    native run would train readers to ignore the line, which costs more than it buys."""
+    monkeypatch.delenv("MEDULLA_DOCKER", raising=False)
+    monkeypatch.setattr(pathlib.Path, "read_text", _status("000001ffffffffff"))
+    rundir._record_mounts(tmp_path)
+    assert "PRIVILEGED" not in (tmp_path / "mounts.txt").read_text()
 
 
 def test_unreadable_capabilities_add_nothing(tmp_path, monkeypatch):
@@ -177,9 +210,11 @@ def test_unreadable_capabilities_add_nothing(tmp_path, monkeypatch):
     import pathlib as _p
     real = _p.Path.read_text
 
+    monkeypatch.setenv("MEDULLA_DOCKER", "1")
+
     def fake(self, *a, **kw):
         if str(self) == "/proc/self/status":
-            return "CapEff:\tnot-a-number\n"
+            return "CapBnd:\tnot-a-number\n"
         if str(self) == "/proc/self/mountinfo":
             return _mountinfo(("/workspace", "ro"))
         return real(self, *a, **kw)

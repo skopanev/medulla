@@ -328,25 +328,38 @@ def _ro_is_enforced_header() -> str:
     That is the whole problem: a mount table gets cited as evidence that nothing inside
     could write to the reviewed tree, and here it cannot carry that meaning.
 
-    Detected from CapEff rather than from our own --docker-engine marker, because the
-    question is about the container and not about which flag created it: anything granting
-    CAP_SYS_ADMIN makes the same line untrue, whoever asked for it.
+    Read from the BOUNDING set, not the effective one. The first cut checked CapEff and
+    the annotation never appeared on the run it was written for: the engine inside the
+    container starts after setpriv / `docker exec --user`, with the uid already dropped, so
+    CapEff is 0 by then. Found by the lane that needed the annotation, on a real kept run
+    — a guard that reports nothing is worse than the silence it replaced, because I had
+    already told them the evidence was honest.
+    CapBnd survives the uid drop: it is the ceiling of what any process in this container
+    can ever regain, which is exactly the question. Root is one `setpriv` away.
+
+    MEDULLA_DOCKER is required with it. On native Linux an ordinary login shell also
+    carries a full bounding set, and annotating every native run would train readers to
+    ignore the line. Default Docker keeps CAP_SYS_ADMIN out of the bounding set, so an
+    ordinary container stays quiet too — only a privileged one speaks.
     """
+    if not os.environ.get("MEDULLA_DOCKER"):
+        return ""                       # native host: the bounding set says nothing here
     try:
         status = Path("/proc/self/status").read_text(encoding="utf-8")
     except OSError:
         return ""
     for line in status.splitlines():
-        if not line.startswith("CapEff:"):
+        if not line.startswith("CapBnd:"):
             continue
         try:
             caps = int(line.split()[1], 16)
         except (IndexError, ValueError):
             return ""
         if caps & (1 << _CAP_SYS_ADMIN):
-            return ("# PRIVILEGED: this container holds CAP_SYS_ADMIN, so the ro flags\n"
-                    "# below are DECLARED, NOT ENFORCED against it — they cannot be read\n"
-                    "# as evidence that nothing inside could write to these paths.\n")
+            return ("# PRIVILEGED: CAP_SYS_ADMIN is in this container's capability\n"
+                    "# bounding set, so the ro flags below are DECLARED, NOT ENFORCED —\n"
+                    "# a process here can regain root and remount them. They cannot be\n"
+                    "# read as evidence that nothing inside could write to these paths.\n")
     return ""
 
 
