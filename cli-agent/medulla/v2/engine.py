@@ -290,7 +290,17 @@ class Engine(VarsMixin, AttemptsMixin, PoolMixin):
                            "signal": signal_name, "next": target, "duration_s": duration,
                            # resume rebuilds last.message from this; 400 bytes broke
                            # payload-carrying {{last.message}} templates (audit G8)
-                           "message": _tail(message, 8000)}
+                           "message": _tail(message, 8000),
+                           # WHERE THE UNABRIDGED OUTPUT IS. `message` is a sentence
+                           # assembled for a reader and its stderr quote is the last 400
+                           # bytes; the body's full stdout and stderr are on disk,
+                           # unbounded, in this directory — attempt-N-<tag>.txt per
+                           # attempt, post-N.txt, pre.txt, input-NNNN/ per pool seat.
+                           # Nothing was lost, but the address was not written down, so a
+                           # reader had to reconstruct "steps/001-<node>" from the step
+                           # number and guess the file. Asked for the real reason behind a
+                           # clipped one, that guess is the whole gap.
+                           "log_dir": str(step_dir.relative_to(self.store.dir))}
             if journal_kind == "pool":
                 journal_row.update({k: stats.get(k) for k in
                                     ("inputs_total", "inputs_ok", "min_success")})

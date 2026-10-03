@@ -505,6 +505,20 @@ breath it was started. It runs exactly once and cannot route back into the graph
 would be a second run with no deadline at all. `on_timeout` naming an unknown node, or
 set without a `timeout:` to fire on, is a load error.
 
+**Finding the full failure output.** `message` in the journal is a sentence assembled for
+a reader, and the stderr it quotes is the LAST 400 bytes — a preview, never the record.
+The body's complete stdout and stderr are on disk, unbounded, written as the process runs:
+
+    <run>/steps/NNN-<node>/attempt-N-<tag>.txt   per attempt, the body's full output
+    <run>/steps/NNN-<node>/post-N.txt            the post hook's own output
+    <run>/steps/NNN-<node>/pre.txt               the pre hook's
+    <run>/steps/NNN-<node>/input-NNNN/…          the same, per pool seat
+
+Every journal row carries `log_dir` — that directory, relative to the run — so a clipped
+message always says where its unabridged original is. A post hook is handed
+`MEDULLA_ATTEMPT_LOG`, the body's log path, so a hook that wants to report WHY reads the
+output rather than a quote of it. Nothing is discarded; only the summary is short.
+
 Channel words `var` and `update` never route (using them as `on_signal` keys is a validation error). Terminals: `__exit_ok__` (exit 0), `__exit_fail__` (exit 2; the routing signal's message becomes the error message). User nodes may not be named `__*__` or `on/off/yes/no/true/false` (YAML 1.1 traps); node names must be env/filesystem-safe (`[A-Za-z][A-Za-z0-9_-]*`).
 
 ### Render model
