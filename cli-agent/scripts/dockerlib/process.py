@@ -98,6 +98,13 @@ def run_labels(workflow, run_dir_name: str | None, runs_under: str | None) -> di
     }.items() if v}
 
 
+def _add_host_values(items: list[str]) -> list[str]:
+    """The values of any --add-host already present, in either flag list."""
+    return [v for i, v in enumerate(items)
+            if i > 0 and items[i - 1] == "--add-host"] + \
+           [v[len("--add-host="):] for v in items if v.startswith("--add-host=")]
+
+
 def build_run_command(image, volumes, args, container_name: str,
                       run_dir_name: str | None = None,
                       runs_under: str | None = None,
@@ -117,6 +124,22 @@ def build_run_command(image, volumes, args, container_name: str,
     if forward_env:
         for key in forwarded_env_values():
             cmd.extend(["-e", key])
+
+    # host.docker.internal — THE HOST, FROM INSIDE. Docker Desktop answers that name
+    # from its own DNS, so a mac never needed the flag and nobody noticed it was
+    # missing. WSL and plain Linux do not: the name simply does not resolve, and a
+    # connector pointed at it fails with a DNS error that says nothing about docker.
+    # Reported from a WSL host, where every lane container hit it.
+    #
+    # host-gateway is resolved by the daemon, so the value is correct on each host
+    # without us guessing an address. It needs Docker 20.10 or newer (2020).
+    #
+    # Skipped when the caller already mapped the name: a later --add-host for the same
+    # name leaves two entries in /etc/hosts, and overriding somebody's deliberate
+    # choice is not ours to do.
+    if not any(a.startswith("host.docker.internal:")
+               for a in _add_host_values(volumes) + _add_host_values(args)):
+        cmd.extend(["--add-host", "host.docker.internal:host-gateway"])
 
     cmd.extend(volumes)
     # shadow: an empty tmpfs mounted OVER a workspace subpath — the more
