@@ -41,12 +41,14 @@ def test_opencode_continues_by_session_flag(tmp_path):
     assert "--session" in argv and argv[argv.index("--session") + 1] == "ses_fd138290"
 
 
-def test_agy_continues_by_conversation_flag_before_print(tmp_path):
-    """--print consumes the NEXT token as the prompt, so anything after it is lost."""
-    argv = _build("agy", tmp_path, resume="47adffb5").argv
-    assert "--conversation" in argv
-    assert argv.index("--conversation") < argv.index("--print")
-    assert argv[argv.index("--conversation") + 1] == "47adffb5"
+def test_agy_continues_by_conversation_flag(tmp_path):
+    """Ordering no longer matters: the prompt rides stdin, so no flag can swallow it.
+    Verified live that resume still works that way — the model recalled a word from
+    the first turn."""
+    inv = _build("agy", tmp_path, resume="47adffb5")
+    assert "--conversation" in inv.argv
+    assert inv.argv[inv.argv.index("--conversation") + 1] == "47adffb5"
+    assert "--print" not in inv.argv
 
 
 # ── the adapters: output in, id out ──────────────────────────────────────────

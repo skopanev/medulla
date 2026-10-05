@@ -97,14 +97,20 @@ def test_codex_user_args_come_last(tmp_path):
     assert inv.argv[-2:] == ["-c", "model_reasoning_effort=low"]
 
 
-def test_agy_print_is_last_flag(tmp_path):
+def test_agy_flags_and_stdin_prompt(tmp_path):
     a = H.AgyAdapter.__new__(H.AgyAdapter)
     inv = a.build(AgentSpec(harness="agy", model="gemini-3.1-pro",
                             args=["--add-dir", "/x"]),
                   tmp_path / "p.md", "THE PROMPT", 120)
-    # THE trap: --print consumes the next token as the prompt; it must be last
-    assert inv.argv[-2] == "--print" and inv.argv[-1] == "THE PROMPT"
-    assert inv.argv.index("--add-dir") < inv.argv.index("--print")
+    # The prompt rides stdin now. --print is gone, and with it the trap that it
+    # consumed the next token: argv carries only flags, so order no longer decides
+    # whether a prompt survives. An argv string also cannot exceed MAX_ARG_STRLEN,
+    # which is what killed a 113694-byte prompt before exec.
+    import json as _json
+    assert "--print" not in inv.argv
+    assert "THE PROMPT" not in " ".join(inv.argv)
+    assert _json.loads(inv.stdin)["message"]["content"][0]["text"] == "THE PROMPT"
+    assert "--add-dir" in inv.argv                 # author flags still travel
     assert "Gemini 3.1 Pro (High)" in inv.argv     # alias resolved
     assert "--print-timeout" in inv.argv and "420s" in inv.argv
 

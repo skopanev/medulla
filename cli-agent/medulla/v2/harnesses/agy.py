@@ -89,10 +89,27 @@ class AgyAdapter(HarnessAdapter):
         if resume:
             argv += ["--conversation", resume]   # before --print; see the note below
         argv += spec.args
-        # --print MUST be last: it consumes the next token as the prompt value.
-        # Any flag placed after it silently becomes the prompt (verified v1.0.4).
-        argv += ["--print", prompt_text]
-        return Invoke(argv=argv)
+        # THE PROMPT RIDES STDIN, not argv. `--print <text>` put the whole prompt in one
+        # argv string, and Linux caps a single argument at MAX_ARG_STRLEN = 131072 bytes.
+        # A planning round died on it: argv[10] was 113694 bytes, the engine's own guard
+        # stopped it before exec, and the manifest said reason=harness attempts=0 — a
+        # harness that never ran, for a prompt that was merely long.
+        #
+        # --input-format stream-json reads ONE NDJSON message per line from stdin and runs
+        # a turn for it. It needs --output-format stream-json, which this adapter already
+        # asks for, so nothing else moves — the output parsing is untouched.
+        #
+        # The envelope is agy's own, NOT the claude-compatible one: it keys on "event",
+        # and a {"type": "user"} message is rejected with 'stream input message is missing
+        # the "event" field'. Measured on agy 1.1.18, together with the rest:
+        #   113040 bytes through stdin -> status SUCCESS
+        #   --conversation <id> still resumes -> the model recalled the earlier word
+        # No --print at all: --input-format already selects print mode.
+        argv += ["--input-format", "stream-json"]
+        message = {"event": "user",
+                   "message": {"role": "user",
+                               "content": [{"type": "text", "text": prompt_text}]}}
+        return Invoke(argv=argv, stdin=json.dumps(message) + "\n")
 
     def stream_line(self, line: str) -> str | None:
         """One NDJSON event -> what a watcher should see, or nothing."""

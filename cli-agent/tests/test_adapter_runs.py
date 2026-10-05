@@ -92,15 +92,20 @@ nodes:
     assert rc == 2                                  # forged signal dropped -> __default__
 
 
-def test_agy_e2e_prompt_via_print(tmp_path, on_path, monkeypatch):
+def test_agy_e2e_prompt_via_stdin(tmp_path, on_path, monkeypatch):
     monkeypatch.setenv("MEDULLA_DOCKER", "1")       # skip trust preflight
-    # fake agy: last two args must be --print <prompt>; echoes plain text
+    # fake agy: the prompt arrives as ONE NDJSON line on stdin, keyed on "event".
+    # argv must not carry it — that is what MAX_ARG_STRLEN made unusable.
     make_bin(on_path, "agy", r'''
-args=("$@")
-n=${#args[@]}
-[ "${args[$((n-2))]}" = "--print" ] || { echo "flag order broken" >&2; exit 3; }
+for a in "$@"; do [ "$a" = "--print" ] && { echo "prompt must not be on argv" >&2; exit 3; }; done
+line=$(cat)
 echo "thinking about the task..."
-echo "<signal:ok>${args[$((n-1))]}</signal:ok>"
+python3 -c "
+import json, sys
+msg = json.loads(sys.argv[1])
+assert msg['event'] == 'user', msg
+print('<signal:ok>' + msg['message']['content'][0]['text'] + '</signal:ok>')
+" "$line"
 ''')                                                    # tag must START a line (heuristic filter)
     text = """
 version: "2"

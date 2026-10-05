@@ -61,7 +61,7 @@ def test_agy_sandbox_read_only_maps_to_plan_mode(tmp_path):
     inv = a.build(AgentSpec(harness="agy", sandbox="read-only"), tmp_path / "p.md", "P", 60)
     assert "--mode" in inv.argv and inv.argv[inv.argv.index("--mode") + 1] == "plan"
     assert "--dangerously-skip-permissions" not in inv.argv
-    assert inv.argv[-2] == "--print"          # still last: it eats the next token
+    assert "--print" not in inv.argv          # the prompt rides stdin
 
 
 def test_agy_without_sandbox_keeps_full_permissions(tmp_path):
