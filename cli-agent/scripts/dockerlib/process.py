@@ -55,11 +55,36 @@ ORCHESTRATION_ENV_KEYS = (
     "MEDULLA_BRIDGE",
 )
 
+# EVERY KNOB THE ENGINE READS FROM ITS ENVIRONMENT, so one set on the host means the
+# same thing in the container. Only the three ids above travelled, so the engine INSIDE
+# ran on its built-in defaults whatever the host was told. Reported from a loaded host:
+# MEDULLA_FIRST_OUTPUT_S=180 was set, the inner watchdog used its 60s default, and a
+# coder was killed with "no output at all in 60s" — rc=124, reason watchdog. An operator
+# turned the knob and nothing moved.
+#
+# Forwarded by NAME, not by value: docker reads them from its own environment, so a
+# value never lands in `ps`. Absent on the host means absent inside — nothing here
+# invents a value or changes a default, and a real timeout still fires exactly as before.
+#
+# The whole class at once rather than the one that bit. The engine reads these from
+# os.environ and nowhere else, so missing one leaves the same defect under another name.
+# Not listed: MEDULLA_DOCKER, MEDULLA_RUNS_UNDER and MEDULLA_RUN_DIR_NAME, which
+# docker.py sets for the container itself a few lines below.
+TUNING_ENV_KEYS = (
+    "MEDULLA_FIRST_OUTPUT_S",     # watchdog: no first byte (default 60)
+    "MEDULLA_IDLE_OUTPUT_S",      # watchdog: silence after output (default 900)
+    "MEDULLA_RETRY_DELAY_S",      # pause between attempts (default 2)
+    "MEDULLA_SHELL",              # which shell a shell body gets (default bash)
+    "MEDULLA_STREAM",             # 0 silences the live operator stream
+    "MEDULLA_COLOR",              # always|never, overrides the tty check
+)
+
 
 def forwarded_env_values() -> dict[str, str]:
     """Values explicitly forwarded into a workflow container."""
     values = dict(dockerenv.env_values_for_run)
-    values.update({key: os.environ[key] for key in ORCHESTRATION_ENV_KEYS
+    values.update({key: os.environ[key]
+                   for key in ORCHESTRATION_ENV_KEYS + TUNING_ENV_KEYS
                    if os.environ.get(key)})
     return values
 

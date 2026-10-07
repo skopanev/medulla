@@ -78,6 +78,8 @@ docker (host-side, handled by scripts/docker.py before the engine starts):
     medulla --docker -w <dir> ...   run inside the workflow's image
     --build                         force a no-cache image rebuild
     --mount <dir> / --mount-rw <dir>  extra mounts under /workspace/<name>
+    every MEDULLA_* knob above is forwarded into the container by NAME, so one set on
+    the host means the same inside. Absent on the host stays absent inside.
     --docker-engine                 start the image's own dockerd inside the run, for
                                     integration tests against real services. Needs an
                                     image declaring a numeric non-root USER as uid:gid
@@ -92,6 +94,9 @@ docker (host-side, handled by scripts/docker.py before the engine starts):
 subcommands: init <name> [--skill] (deploy a bundled template or scaffold a new workflow; --skill registers it with Claude Code), upgrade
 
 environment the engine reads:
+    MEDULLA_FIRST_OUTPUT_S  watchdog: kill a body that produced NO output at all within
+                            this many seconds (default 60). Raise it on a loaded host,
+                            where a harness can take minutes to say its first word.
     MEDULLA_IDLE_OUTPUT_S   agent silence fallback when idle_timeout is absent (default 900)
     MEDULLA_RETRY_DELAY_S   pause between attempts / before fallback (default 2)
     MEDULLA_RUN_ID          pre-seed the run id
