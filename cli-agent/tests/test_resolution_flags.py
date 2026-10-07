@@ -31,7 +31,7 @@ def test_cwd_ro_makes_the_mount_points_it_needs(dockerpy, world, tmp_path, monke
     monkeypatch.setattr(dockerpy, "assert_runs_folder_reaches_the_container",
                         lambda *a, **k: None)
     monkeypatch.setattr(dockerpy, "ensure_image", lambda *a, **k: 0)
-    monkeypatch.setattr(dockerpy, "image_home", lambda image, fallback: fallback)
+    monkeypatch.setattr(dockerpy, "image_home", lambda image, fallback=None: "/home/test")
 
     assert dockerpy.main() == 0                                  # the point existed
     assert not point.exists()                                    # and was taken away again

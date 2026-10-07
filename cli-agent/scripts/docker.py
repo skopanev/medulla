@@ -149,7 +149,11 @@ def main():
     # config, opencode/ntk, .gitconfig, the overlay home/ tree) mount where the
     # container's user actually looks. hltm and medulla images differ here.
     # The probe's answer belongs where the mounts are built, not here.
-    dockermounts.CONTAINER_HOME = image_home(image, dockermounts.CONTAINER_HOME)
+    # No fallback passed on purpose. The old call handed CONTAINER_HOME over as a
+    # default, so a probe that timed out under load mounted credentials at /home/hltm
+    # for an image whose home is /home/medulla — and the lane reported a missing key
+    # instead of a wrong path. Let it fail loudly here, where the image is still named.
+    dockermounts.CONTAINER_HOME = image_home(image)
 
     # Before anything is mounted: a runs folder the container cannot see fails much
     # later and says nothing useful about why.

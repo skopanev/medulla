@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import time
 import sys
 from pathlib import Path
 
@@ -99,24 +100,75 @@ def image_tag_for(workflow: str, dockerfile: Path) -> str:
     return f"medulla-{name}:{digest}"
 
 
-def image_home(image, fallback):
-    """The non-root user's $HOME inside the resolved image, read from the image
-    itself. The two images in play run as different users (hltm vs medulla), so a
-    hardcode is wrong for one of them and silently drops every $HOME-based cred —
-    most visibly the broker config cx needs, failing the gpt panelist. Docker sets
-    HOME from the image's USER at run time, so a one-shot probe is authoritative;
-    fall back to the default only if the probe cannot answer."""
-    try:
-        out = subprocess.run(
-            ["docker", "run", "--rm", "--entrypoint", "sh", image,
-             "-c", 'printf %s "$HOME"'],
-            capture_output=True, text=True, timeout=30)
-        home = out.stdout.strip()
-        if out.returncode == 0 and home.startswith("/") and home != "/":
-            return home
-    except Exception:
-        pass
-    return fallback
+def image_home(image, fallback=None):
+    """The non-root user's $HOME inside the resolved image, read from the image.
+
+    The images in play run as different users, so a hardcoded home is wrong for one of
+    them and drops every $HOME-based credential — the broker config cx reads, a lane's
+    NTK key. The symptom lands far from the cause: the harness reports a missing key, and
+    nothing says the mount went to the wrong path.
+
+    THE OLD VERSION FELL BACK SILENTLY. One 30s probe, and `except: pass; return
+    fallback` on any failure. Under host load the probe does not finish, so the
+    credentials mounted at /home/hltm for an image whose home is /home/medulla, and the
+    lane reported a missing key. Reported from a live run. A guess that looks like an
+    answer is the defect; the probe timing out is just weather.
+
+    Two sources now, and a failure instead of a guess:
+
+    1. Image metadata. `docker image inspect` reads a local file — no container, no
+       daemon scheduling, nothing to time out under load. Measured here: every image
+       that declares HOME reports the same value the probe returns
+       (two images here report /home/medulla and /home/node).
+
+    2. The probe, for images that declare no HOME — and ours is one of them
+       (medulla-default declares none, so metadata alone would break every panel).
+       Docker derives HOME from the image's USER via /etc/passwd at run time, which only
+       a run can see. Retried once: a single timeout under load was the whole bug.
+
+    Do NOT derive it from Config.User. A uid is not a home — the two differ, and
+    guessing /home/<user> is how this class of defect starts.
+    """
+    env = subprocess.run(
+        ["docker", "image", "inspect", "--format",
+         "{{range .Config.Env}}{{println .}}{{end}}", image],
+        capture_output=True, text=True, check=False)
+    for line in env.stdout.splitlines():
+        if line.startswith("HOME="):
+            home = line[len("HOME="):].strip()
+            if home.startswith("/") and home != "/":
+                return home
+
+    last = ""
+    for attempt in (1, 2):
+        try:
+            out = subprocess.run(
+                ["docker", "run", "--rm", "--entrypoint", "sh", image,
+                 "-c", 'printf %s "$HOME"'],
+                capture_output=True, text=True, timeout=30)
+            home = out.stdout.strip()
+            if out.returncode == 0 and home.startswith("/") and home != "/":
+                return home
+            last = (out.stderr or out.stdout or "").strip().splitlines()[-1:] or [""]
+            last = last[0]
+        except subprocess.TimeoutExpired:
+            last = "the probe did not finish in 30s"
+        except OSError as exc:
+            last = str(exc)
+        if attempt == 1:
+            time.sleep(2)      # a busy daemon, not a broken image
+
+    # EXPLICIT, because the alternative is credentials at the wrong path and a harness
+    # blaming a missing key. A caller may still pass a fallback when it genuinely has a
+    # safe default; nothing in medulla does.
+    if fallback:
+        return fallback
+    print(f"[docker.py] cannot determine $HOME for image '{image}': {last}\n"
+          f"    The image declares no HOME, and the probe failed twice. Credentials are\n"
+          f"    mounted under it, so continuing would put them where nothing reads them.\n"
+          f"    Declare HOME in the image (ENV HOME=/home/<user>) or retry on a less\n"
+          f"    loaded host.", file=sys.stderr)
+    raise SystemExit(1)
 
 
 def ensure_image(image, build, workflow, cli_vars, dockerfile=None, ready_image=False):
