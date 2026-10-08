@@ -1,19 +1,11 @@
 """A body and a hook must get the tools the engine was started with.
 
-Bodies and hooks ran under `bash -lc`. A login shell re-reads the operator's profile and
-REPLACES the PATH medulla itself inherited, so a workflow saw different tools than the
-engine running it. Measured on this host:
+Bodies and hooks ran under `bash -lc`. A login shell re-reads the profile and can replace
+the PATH medulla inherited, so a workflow saw a different interpreter than the engine
+running it — and a body calling python3 got an older one than the package requires.
 
-    bash -lc  -> /usr/bin/python3          3.9.6   (no tomllib)
-    bash -c   -> /opt/homebrew/bin/python3 3.14.7  (tomllib present)
-
-A planner died on exactly that: a launcher called `env python3`, got 3.9.6 from the
-profile, and failed importing tomllib, which arrived in 3.11. Our own scripts survived
-3.9 by luck — this package requires >=3.10, so the trap was loaded here too.
-
-The trade, recorded on purpose: a workflow that relied on the profile for a tool must now
-set it up itself. Inheriting the caller's PATH is reproducible; re-reading whatever
-.bash_profile says is not.
+The trade: a workflow that needs a tool must put it on PATH itself. Inheriting the
+caller's PATH is reproducible; re-reading a login profile is not. BASH_ENV still applies.
 """
 import os
 import sys
@@ -72,9 +64,8 @@ nodes:
 
 
 def test_the_same_python_the_engine_runs_is_the_one_a_body_finds(tmp_path):
-    """The reported shape. A body calling python3 must not get an older interpreter than
-    the engine's — this package requires >=3.10, and a 3.9 from a login profile breaks
-    tomllib and more."""
+    """A body calling python3 must not get an older interpreter than the engine's. This
+    package requires >=3.10, and a login profile can put an older one first."""
     text = """
 version: "2"
 start: a

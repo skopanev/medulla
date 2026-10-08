@@ -112,10 +112,8 @@ def run(
         # change meaning because the operator's login shell differs (zsh does no word
         # splitting on `$var`). MEDULLA_SHELL overrides for a deliberate choice.
         #
-        # -c, not -lc, for the reason spelled out in engine_body.py: a login shell
-        # replaces the PATH medulla was started with, so a hook sees different tools than
-        # the engine. Both places take the same flag — a hook and a body that disagree
-        # about their PATH is worse than either choice.
+        # -c, not -lc: preserve the caller's PATH (see engine_body.py). A hook and a
+        # body that disagree about their PATH is worse than either choice.
         shell = os.environ.get("MEDULLA_SHELL", "bash")
         argv = [shell, "-c", command]
     else:
