@@ -95,7 +95,12 @@ def test_shell_bodies_use_bash_not_the_login_shell(monkeypatch, tmp_path):
     monkeypatch.setattr(P.subprocess, "Popen", fake_popen)
     with pytest.raises(RuntimeError):
         P.run("for x in $list; do echo $x; done", cwd=tmp_path, timeout_s=5)
-    assert captured["argv"][0] == "bash" and captured["argv"][1] == "-lc"
+    # -c, not -lc: a login shell re-reads the profile and REPLACES the PATH medulla was
+    # started with, so a body gets different tools than the engine. Measured here:
+    # bash -lc gave /usr/bin/python3 3.9.6 while the engine runs 3.14.7, and a launcher
+    # calling `env python3` failed importing tomllib. The bash-not-zsh choice above is
+    # unrelated and stays.
+    assert captured["argv"][0] == "bash" and captured["argv"][1] == "-c"
 
 
 def test_medulla_shell_overrides_the_default(monkeypatch, tmp_path):

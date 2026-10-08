@@ -60,9 +60,26 @@ class BodyMixin:
             # Found live: a stage read a 40-line list, looped once, produced nothing, and
             # still signalled ready; in the container ($SHELL unset → bash) the same file
             # worked. Honour MEDULLA_SHELL for anyone who deliberately wants another one.
+            #
+            # -c, NOT -lc. A login shell re-reads the operator's profile and REPLACES the
+            # PATH medulla itself was started with, so a body gets different tools than
+            # the engine running it. Measured on this host:
+            #     bash -lc  -> /usr/bin/python3        3.9.6   (no tomllib)
+            #     bash -c   -> /opt/homebrew/bin/python3 3.14.7 (tomllib present)
+            # A planner died on that: a launcher called `env python3`, got 3.9.6 from the
+            # profile, and failed importing tomllib — which arrived in 3.11.
+            #
+            # Our own scripts survive 3.9 by luck, not design: this package requires
+            # >=3.10, so the same trap was already loaded here and had simply not fired.
+            #
+            # The trade, stated: a workflow that relied on the profile to put a tool on
+            # PATH must now set it up explicitly. That is the right way round — a
+            # workflow is code committed to a repo, and inheriting the caller's PATH is
+            # reproducible, while re-reading whatever .bash_profile happens to say is
+            # not. BASH_ENV still applies for anyone who needs a hook.
             shell = os.environ.get("MEDULLA_SHELL", "bash")
             rendered = render_fn(action.shell, "shell")
-            return Invoke(argv=[shell, "-lc", rendered]), None, None
+            return Invoke(argv=[shell, "-c", rendered]), None, None
 
         spec = action.agent
         harness = render_fn(spec.harness, "agent.harness").strip()
