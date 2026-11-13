@@ -57,7 +57,21 @@ if [ -d /mnt/gemini ]; then
     [ -e "$HOME/.gemini/oauth_creds.json" ] && chmod 600 "$HOME/.gemini/oauth_creds.json"
     # agy (antigravity CLI) config
     if [ -d /mnt/gemini/antigravity-cli ]; then
-        cp -rL /mnt/gemini/antigravity-cli "$HOME/.gemini/antigravity-cli" 2>/dev/null || true
+        # Copy credentials, configuration and tools. Skip session history.
+        #
+        # NOT bin/. It holds a helper binary of 15 MB whose ELF interpreter is absent
+        # from the image, so it exits 127 and has never run here. Copying it cost
+        # 15 MB of every container start for a file nothing could execute. Measured
+        # with it removed: the CLI starts and authenticates, and the copied tree falls
+        # from 17 MB to 1.8 MB.
+        mkdir -p "$HOME/.gemini/antigravity-cli/brain"
+        for name in antigravity-oauth-token installation_id mcp_oauth_tokens.json settings.json \
+            mcp builtin implicit updater jetski_state.pbtxt knowledge skills; do
+            [ -e "/mnt/gemini/antigravity-cli/$name" ] && \
+                cp -rL "/mnt/gemini/antigravity-cli/$name" "$HOME/.gemini/antigravity-cli/" 2>/dev/null || true
+        done
+        chmod 600 "$HOME/.gemini/antigravity-cli/antigravity-oauth-token" 2>/dev/null || true
+        chmod 600 "$HOME/.gemini/antigravity-cli/mcp_oauth_tokens.json" 2>/dev/null || true
     fi
 fi
 
