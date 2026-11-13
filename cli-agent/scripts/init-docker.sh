@@ -65,12 +65,26 @@ if [ -d /mnt/gemini ]; then
         # with it removed: the CLI starts and authenticates, and the copied tree falls
         # from 17 MB to 1.8 MB.
         mkdir -p "$HOME/.gemini/antigravity-cli/brain"
+        AGY_TOKEN="$HOME/.gemini/antigravity-cli/antigravity-oauth-token"
+        AGY_TOKEN_COPIED=0
         for name in antigravity-oauth-token installation_id mcp_oauth_tokens.json settings.json \
             mcp builtin implicit updater jetski_state.pbtxt knowledge skills; do
+            # NEVER WRITE OVER A TOKEN THAT IS ALREADY HERE. A token placed by the
+            # credential broker is a BIND of the broker's own file, so `cp` writes
+            # THROUGH the bind into that file, and the next start carries the value
+            # back into the account profile. A refresh also makes a successor: the
+            # holder who spends the refresh token first keeps it, and the other
+            # holder is left with one the server has already revoked. The file is
+            # the honest signal, because a container has no broker binary to ask.
+            if [ "$name" = "antigravity-oauth-token" ]; then
+                [ -e "$AGY_TOKEN" ] && continue
+                AGY_TOKEN_COPIED=1
+            fi
             [ -e "/mnt/gemini/antigravity-cli/$name" ] && \
                 cp -rL "/mnt/gemini/antigravity-cli/$name" "$HOME/.gemini/antigravity-cli/" 2>/dev/null || true
         done
-        chmod 600 "$HOME/.gemini/antigravity-cli/antigravity-oauth-token" 2>/dev/null || true
+        # Only a token THIS script copied. A chmod on a bind changes the broker's file.
+        [ "$AGY_TOKEN_COPIED" = "1" ] && chmod 600 "$AGY_TOKEN" 2>/dev/null || true
         chmod 600 "$HOME/.gemini/antigravity-cli/mcp_oauth_tokens.json" 2>/dev/null || true
     fi
 fi
