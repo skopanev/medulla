@@ -6,13 +6,24 @@ halves — finding the id in the output, and asking to continue from it.
 import json
 from pathlib import Path
 
+import pytest
 from conftest import fake_script, read_run
 from conftest import write_workflow as setup
 from medulla.v2.engine import run_workflow
+from medulla.v2.harness import reset_registry
 from medulla.v2.harness import resolve as resolve_harness
 from medulla.v2.model import AgentSpec
 
 # ── the adapters: id in, command out ─────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def harness_binaries_are_not_host_dependencies(monkeypatch):
+    monkeypatch.setattr("medulla.v2.harness_base.shutil.which", lambda binary: binary)
+    reset_registry()
+    yield
+    reset_registry()
+
 
 def _build(harness: str, tmp_path: Path, resume=None):
     spec = AgentSpec(harness=harness, model=None)

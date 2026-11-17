@@ -41,6 +41,9 @@ packages = [
 "medulla.v2" = ["*.json"]
 "medulla.workflows" = ["**/*"]
 
+[tool.setuptools.exclude-package-data]
+"medulla.workflows" = ["**/runs", "**/runs/**"]
+
 # One rule, deliberately: file length. ruff has no equivalent (pylint's C0302 is not
 # among the pylint rules it reimplements), and a second linter earns its keep only if
 # it is not a second opinion on everything else — so everything else is off.

@@ -26,6 +26,7 @@ set -uo pipefail
 # its full path so two worktrees of the same project never share.
 # MEDULLA_PANEL_RUNS overrides it whole.
 WORKFLOW="spar"               # a bare name: local .medulla/workflows/spar wins, else machine-wide
+CONTAINER_RUNTIME="${MEDULLA_CONTAINER_RUNTIME:-docker}"
 FALLBACK_TIMEOUT=3900         # only when the workflow's own deadline cannot be read
 
 # How long to wait is not an independent opinion — it is the workflow's deadline plus
@@ -74,6 +75,17 @@ alive_count() {
     # rc 0 = a real count on stdout; rc 2 = could not ask, and the caller must not
     # treat it as absence.
     local run="${1:-}"
+    if [ "$CONTAINER_RUNTIME" = apple ]; then
+        local out name
+        out=$(container list 2>/dev/null) || return 2
+        if [ -n "$run" ]; then
+            name="medulla-$(basename "$run" | sed 's/[^[:alnum:]_.-]/-/g')"
+            printf '%s\n' "$out" | awk -v name="$name" '$1 == name && $5 == "running" {n++} END {print n+0}'
+        else
+            printf '%s\n' "$out" | awk '$1 ~ /^medulla-/ && $5 == "running" {n++} END {print n+0}'
+        fi
+        return 0
+    fi
     # THE OUTER BRANCH CAN FAIL THE SAME WAY. `docker info` failing means one of two
     # very different things: docker is not installed here (this round is native, and
     # counting host processes is the right question), or docker IS installed and the
@@ -119,6 +131,10 @@ alive_count() {
 preflight() {
     # Fail HERE, not halfway through a session, and say which piece is missing.
     command -v medulla >/dev/null 2>&1 || die "medulla is not installed (see the medulla repo)"
+    if [ "$CONTAINER_RUNTIME" = apple ]; then
+        command -v container >/dev/null 2>&1 || die "Apple container CLI is not installed"
+        container system status >/dev/null 2>&1 || die "Apple container service is not responding"
+    fi
     # Docker is PREFERRED, not required. It gives the panel a clean box and a
     # read-only tree. When the container runtime is down, a panel that refuses to
     # start is worse than a smaller panel that does: a whole container fault once
@@ -149,6 +165,17 @@ box_for() {
     slug=$(basename "$root")
     tag=$(printf '%s' "$root" | shasum 2>/dev/null | cut -c1-8)
     printf '%s\n' "$HOME/.medulla/panel-runs/${slug}-${tag}"
+}
+
+input_box_for() {
+    local root="$1" slug tag
+    if [ -n "${MEDULLA_PANEL_INPUTS:-}" ]; then
+        printf '%s\n' "$MEDULLA_PANEL_INPUTS"
+        return 0
+    fi
+    slug=$(basename "$root")
+    tag=$(printf '%s' "$root" | shasum 2>/dev/null | cut -c1-8)
+    printf '%s\n' "$HOME/.medulla/panel-inputs/${slug}-${tag}"
 }
 
 force_repo_root() {
@@ -210,10 +237,13 @@ cmd_start() {
     force_repo_root
     preflight
 
-    local box; box=$(box_for "$PWD")
-    mkdir -p "$box" || die "cannot create $box"
-    # The engine prints physical paths. Resolve after mkdir so a symlinked run
-    # root (or a relative override) is compared using the same spelling below.
+    local box input_box
+    box=$(box_for "$PWD")
+    input_box="$box"
+    if [ "$CONTAINER_RUNTIME" = apple ]; then
+        input_box=$(input_box_for "$PWD")
+    fi
+    mkdir -p "$box" "$input_box" || die "cannot create panel run/input folders"
     box=$(cd "$box" && pwd -P) || die "cannot resolve $box"
     # A fixed name races: fire-and-forget is the whole design, and a second start
     # before the first medulla read its var-file would silently swap the question.
@@ -223,13 +253,17 @@ cmd_start() {
     # panel. Seen live — the script printed a run from eight minutes earlier.
     local id qfile log err
     id=$(date +%H%M%S)-$$
-    qfile="$box/question.$id.md"; log="$box/run.$id.log"; err="$box/err.$id.log"
+    # Apple Container rejects a nested read-only file mount inside the writable runs
+    # mount. Keep immutable question snapshots in a sibling tree, never in $box.
+    qfile="$input_box/question.$id.md"; log="$box/run.$id.log"; err="$box/err.$id.log"
     cp "$question" "$qfile" || die "cannot write $qfile"
 
     # Container mode also mounts the tree read-only; native mode cannot, so the
     # panel is trusted with the working tree it reviews. Say so rather than let it
     # be discovered.
-    if [ "$DOCKER_OK" = yes ]; then
+    if [ "$CONTAINER_RUNTIME" = apple ]; then
+        set -- --apple --cwd-ro "$@"
+    elif [ "$DOCKER_OK" = yes ]; then
         set -- --docker --cwd-ro "$@"
     else
         echo "spar-run: $DOCKER_WHY — running the panel NATIVELY on the host." >&2

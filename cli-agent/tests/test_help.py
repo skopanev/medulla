@@ -151,9 +151,10 @@ def test_refresh_updates_the_machine_wide_copy_too(sandbox, monkeypatch, capsys)
     assert "machine-wide" in capsys.readouterr().out
 
 
-def test_refresh_updates_machine_wide_skills_including_profiles(sandbox, monkeypatch, capsys):
+def test_refresh_updates_supported_machine_wide_skills_including_profiles(
+        sandbox, monkeypatch, capsys):
     """A skill installed in $HOME is never under the search root either — and Claude
-    Code profiles (~/.claude-<name>) multiply the copies. Five of them stayed stale
+    Code profiles (~/.claude-<name>) multiply the copies. Those copies stayed stale
     while refresh reported success."""
     from medulla.refresh import refresh_skill
 
@@ -165,7 +166,7 @@ def test_refresh_updates_machine_wide_skills_including_profiles(sandbox, monkeyp
     monkeypatch.setattr("medulla.refresh._bundle_dir", lambda _n: bundle)
 
     installed = []
-    for rel in (".claude/skills", ".agents/skills", ".config/opencode/skills",
+    for rel in (".claude/skills", ".agents/skills", ".codex/skills",
                 ".claude-work/skills", ".claude-personal/skills"):
         d = home / rel / "spar"
         d.mkdir(parents=True)
@@ -188,14 +189,15 @@ def test_codex_gets_the_skill_where_it_actually_reads(sandbox, monkeypatch):
     from medulla.init import skill_dests_global
 
     home, _cwd = sandbox
-    for rel in (".claude/skills", ".agents/skills", ".codex/skills",
-                ".config/opencode/skills"):
+    for rel in (".claude/skills", ".agents/skills", ".codex/skills"):
         (home / rel).mkdir(parents=True)
 
     dests = [str(d).replace(str(home), "~") for d in skill_dests_global()]
     assert "~/.codex/skills" in dests
     assert "~/.claude/skills" in dests
-    assert "~/.config/opencode/skills" in dests
+    assert "~/.agents/skills" in dests
+    assert "~/.config/opencode/skills" not in dests
+    assert "~/.gemini/skills" not in dests
 
 
 def test_refresh_reaches_the_codex_copy(sandbox, monkeypatch, capsys):

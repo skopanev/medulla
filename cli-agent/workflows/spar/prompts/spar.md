@@ -55,7 +55,7 @@ Rules:
   abstract advice ("handle the edge case"), write EXACTLY what to change — function
   names, specific lines, or shell commands. "Crash instead of warning" is an
   instruction with no mechanism. "Raise EngineCrash in record_session() when the name
-  already holds a different id — a warning there is invisible in a pool of five" is a
+  already holds a different id — a warning there is invisible in a model pool" is a
   proposal: it names the place, the change and the reason, so the reader can accept,
   adapt, or refuse it on evidence. Without the reason there is nothing to refuse
   except your authority.

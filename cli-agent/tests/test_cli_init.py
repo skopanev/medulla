@@ -67,9 +67,14 @@ def test_init_skill_flag(tmp_path, monkeypatch):
     assert shim.entry() == 0
     # machine-wide skill dirs: usable from every repo, no per-checkout install
     for root in (home / ".claude" / "skills", home / ".agents" / "skills",
-                 home / ".config" / "opencode" / "skills"):
+                 home / ".codex" / "skills"):
         skill = root / "spar" / "SKILL.md"
-        assert skill.is_file() and "spar" in skill.read_text()
+        text = skill.read_text()
+        assert skill.is_file() and "spar" in text
+        assert "medulla launch spar start" in text
+        assert "medulla launch spar --apple" not in text
+    assert not (home / ".config" / "opencode" / "skills" / "spar").exists()
+    assert not (home / ".gemini" / "skills" / "spar").exists()
     # a scaffold is this repo's own work: it stays local, skill included
     monkeypatch.setattr("sys.argv", ["medulla", "init", "fresh", "--skill"])
     assert shim.entry() == 0
@@ -86,6 +91,10 @@ def test_init_local_flag_keeps_everything_in_the_project(tmp_path, monkeypatch):
     assert shim.entry() == 0
     assert (tmp_path / ".medulla" / "workflows" / "spar" / "workflow.yaml").is_file()
     assert (tmp_path / ".claude" / "skills" / "spar" / "SKILL.md").is_file()
+    assert (tmp_path / ".agents" / "skills" / "spar" / "SKILL.md").is_file()
+    assert (tmp_path / ".codex" / "skills" / "spar" / "SKILL.md").is_file()
+    assert not (tmp_path / ".opencode" / "skills" / "spar").exists()
+    assert not (tmp_path / ".gemini" / "skills" / "spar").exists()
     assert not (home / ".medulla" / "workflows" / "spar").exists()
     assert not (home / ".claude" / "skills" / "spar").exists()
 
@@ -137,12 +146,16 @@ def test_refresh_never_clobbers_through_symlink(tmp_path):
     from medulla.init import refresh_skill
     victim = tmp_path / "victim.txt"
     victim.write_text("SECRET", encoding="utf-8")
+    skill_victim = tmp_path / "skill-victim.txt"
+    skill_victim.write_text("medulla --apple -w SECRET", encoding="utf-8")
     wf = tmp_path / "proj" / ".medulla" / "workflows" / "spar"
     wf.mkdir(parents=True)
     (wf / "workflow.yaml").symlink_to(victim)        # deploy's workflow.yaml -> victim
+    (wf / "SKILL.md").symlink_to(skill_victim)
     assert refresh_skill("spar", str(tmp_path)) == 0
     assert victim.read_text() == "SECRET"            # NOT clobbered
     assert (wf / "workflow.yaml").is_symlink()        # symlink left untouched
+    assert skill_victim.read_text() == "medulla --apple -w SECRET"
 
 
 def test_empty_local_workflow_does_not_shadow_the_shared_one(tmp_path, monkeypatch):

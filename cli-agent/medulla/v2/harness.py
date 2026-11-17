@@ -36,6 +36,12 @@ _ADAPTERS = {
 _instances: dict[str, HarnessAdapter] = {}
 
 
+def harness_binary(name: str) -> str | None:
+    """Canonical host executable for a known harness; None for custom names."""
+    cls = _ADAPTERS.get(name)
+    return cls.binary if cls is not None else None
+
+
 def resolve(spec: AgentSpec) -> HarnessAdapter:
     cls = _ADAPTERS.get(spec.harness)
     if cls is None:

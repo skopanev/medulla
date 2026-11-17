@@ -56,6 +56,65 @@ def test_the_launcher_runs_in_the_callers_directory(tmp_path):
     assert res.stdout.strip() == str(elsewhere.resolve())
 
 
+def test_apple_runtime_flag_reaches_the_launcher(tmp_path):
+    home = tmp_path / "home"; home.mkdir()
+    _machine_wide(
+        home, "spar",
+        "#!/bin/sh\necho \"$MEDULLA_CONTAINER_RUNTIME:$*\"\n")
+
+    res = _run(tmp_path, home, "spar", "--apple", "start", "q.md")
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip() == "apple:start q.md"
+
+
+def test_spar_question_snapshot_is_outside_the_runs_mount(tmp_path):
+    """Apple rejects a nested read-only file mount inside the writable runs mount."""
+    home = tmp_path / "home"; home.mkdir()
+    _machine_wide(home, "spar")
+    repo = tmp_path / "repo"; repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    question = tmp_path / "question.md"
+    question.write_text("Can we ship?\n", encoding="utf-8")
+    fake_bin = tmp_path / "bin"; fake_bin.mkdir()
+    recorded = tmp_path / "medulla.args"
+
+    medulla = fake_bin / "medulla"
+    medulla.write_text("""#!/bin/sh
+runs=""
+previous=""
+for arg in "$@"; do
+  if [ "$previous" = "--runs-folder" ]; then runs="$arg"; fi
+  printf '%s\n' "$arg" >> "$RECORDED_ARGS"
+  previous="$arg"
+done
+printf '%s/fake-run\n' "$runs"
+""", encoding="utf-8")
+    medulla.chmod(0o755)
+    container = fake_bin / "container"
+    container.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    container.chmod(0o755)
+
+    script = REPO / "workflows" / "spar" / "scripts" / "spar-run.sh"
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{fake_bin}:/usr/bin:/bin",
+        "MEDULLA_CONTAINER_RUNTIME": "apple",
+        "RECORDED_ARGS": str(recorded),
+    }
+    result = subprocess.run(
+        ["bash", str(script), "start", str(question)], cwd=repo, env=env,
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    args = recorded.read_text().splitlines()
+    runs = Path(args[args.index("--runs-folder") + 1])
+    variable = args[args.index("--var-file") + 1]
+    snapshot = Path(variable.removeprefix("QUESTION="))
+    assert snapshot.read_text() == question.read_text()
+    assert runs not in snapshot.parents
+
+
 def test_a_local_copy_wins_exactly_as_for_the_workflow(tmp_path):
     home = tmp_path / "home"; home.mkdir()
     _machine_wide(home, "spar", "#!/bin/sh\necho machine-wide\n")

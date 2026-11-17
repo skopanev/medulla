@@ -1,11 +1,12 @@
 """`medulla init` — bootstrap the runtime in the current project.
 
-Lays down only what medulla needs to run in-place and inside docker:
+Lays down only what medulla needs to run in-place and inside a container runtime:
 
   .medulla/
     medulla/           symlink → the installed medulla package
     scripts/           symlink → the installed package's scripts/
-                       (docker.py, host-builder.sh, init-docker.sh)
+                       (docker.py, apple_container.py, host-builder.sh,
+                        init-docker.sh)
     snapshot/          empty state dir for per-round artifacts
 
 The runtime is SYMLINKED to the active (global) install rather than copied,
@@ -13,8 +14,8 @@ so it never goes stale: `medulla upgrade` is reflected everywhere with no
 re-init. docker.py resolves the link via os.path.realpath when mounting
 init-docker.sh, so the bind-mount source is the real package file.
 
-Workflows (``.medulla/workflows/``) are NOT provisioned by this command —
-they're project content. Use ``install-skill`` for bundled ones.
+Bundled workflows can be installed machine-wide with ``init <name> --skill``;
+project-local scaffolds and ``--local`` installs stay in the current checkout.
 """
 
 from __future__ import annotations
@@ -51,48 +52,40 @@ from .templates import GITIGNORE, SKILL_MD, WORKFLOW_README, WORKFLOW_YAML  # no
 
 SKILL_DESTS = (          # every agent CLI that reads skills, per each one's docs
     Path(".claude") / "skills",      # claude-code
-    Path(".agents") / "skills",      # the shared alias codex/opencode/agy also read
-    Path(".codex") / "skills",       # codex — the one IT reads
-    Path(".opencode") / "skills",    # opencode
-    Path(".gemini") / "skills",      # agy
+    Path(".agents") / "skills",      # shared Codex-compatible location
+    Path(".codex") / "skills",       # codex — the documented location
 )
 
 def skill_dests_global() -> tuple[Path, ...]:
-    """The same CLIs, machine-wide: a skill here works in EVERY repo, which is what a
+    """Codex and Claude, machine-wide: a skill here works in EVERY repo, which is what a
     machine-wide workflow wants — one copy to update, no install step per checkout.
 
     Resolved on CALL, never at import: Path.home() captured at import time ignores a
     later HOME change, which silently wrote into the real home during tests.
-    opencode reads ~/.config/opencode — the per-user layout differs from per-project.
     """
     home = Path.home()
-    # One directory per CLI, from each one's own documentation — checked because the
-    # list was wrong: codex reads ~/.codex/skills, and this sent it to ~/.agents/skills
-    # instead, so codex was the one harness of four that could not convene a panel.
+    # Codex reads ~/.codex/skills; ~/.agents/skills is its shared compatible alias.
+    # Keep both plus Claude's own directory so either host session finds the skill.
     #
     #   claude-code  ~/.claude/skills
     #   codex        ~/.codex/skills
-    #   opencode     ~/.config/opencode/skills  (also reads ~/.claude, ~/.agents)
-    #   agy          ~/.gemini/skills, and ~/.gemini/antigravity/skills for the
-    #                Antigravity build
-    #   .agents/skills is the shared alias several of them also read — kept, because
-    #   costing one extra copy is better than guessing which CLI dropped it.
     dests = [home / ".claude" / "skills",
              home / ".agents" / "skills",
-             home / ".codex" / "skills",
-             home / ".config" / "opencode" / "skills",
-             home / ".gemini" / "skills",
-             home / ".gemini" / "antigravity" / "skills"]
+             home / ".codex" / "skills"]
     # Claude Code profiles: CLAUDE_CONFIG_DIR points at ~/.claude-<name>, and a user
     # with several of them (work, personal, a client) has several skill directories.
     # Only EXISTING ones — this must not conjure a profile nobody uses. Found by a
-    # refresh that reported success while five machine-wide copies stayed stale.
+    # refresh that reported success while multiple machine-wide copies stayed stale.
     dests += sorted(p / "skills" for p in home.glob(".claude-*")
                     if p.is_dir() and (p / "skills").is_dir())
     return tuple(dests)
 
 
-def install_skill_md(name: str, workflow_dir: Path, local: bool = False) -> int:
+from .skill_runtime import path_has_symlink, set_skill_runtime  # noqa: E402
+
+
+def install_skill_md(name: str, workflow_dir: Path, local: bool = False,
+                     apple: bool = False) -> int:
     """Register the workflow's SKILL.md with every agent CLI's skill dir.
 
     Sourced the same way the workflow itself is: local copy first, then the
@@ -103,20 +96,49 @@ def install_skill_md(name: str, workflow_dir: Path, local: bool = False) -> int:
     """
     import shutil
     src = workflow_dir / "SKILL.md"
+    targets = [root / name / "SKILL.md"
+               for root in (SKILL_DESTS if local else skill_dests_global())]
     if not src.is_file():
         shared = Path.home() / ".medulla" / "workflows" / name / "SKILL.md"
         if shared.is_file():
             src = shared
+    unsafe = [path for path in [src, *targets] if path_has_symlink(path)]
+    if unsafe:
+        print(f"error: refusing to write skill through symlink: {unsafe[0]}")
+        return 1
     if not src.is_file():                      # scaffolds get a starter
         src = workflow_dir / "SKILL.md"
         src.parent.mkdir(parents=True, exist_ok=True)
-        src.write_text(SKILL_MD.replace("<NAME>", name), encoding="utf-8")
-        print(f"  created starter {src} — edit the description")
-    for root in (SKILL_DESTS if local else skill_dests_global()):
-        dest = root / name
-        dest.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dest / "SKILL.md")
-        print(f"  skill installed -> {dest}/SKILL.md")
+        bundle = _bundle_dir(name)
+        bundle_skill = bundle / "SKILL.md" if bundle is not None else None
+        if bundle_skill is not None and bundle_skill.is_file():
+            shutil.copy2(bundle_skill, src)
+            print(f"  restored bundled {src}")
+        else:
+            src.write_text(SKILL_MD.replace("<NAME>", name), encoding="utf-8")
+            print(f"  created starter {src} — edit the description")
+    try:
+        set_skill_runtime(src, apple=apple)
+    except (OSError, ValueError) as exc:
+        print(f"error: cannot select skill runtime: {exc}")
+        return 1
+    for target in targets:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, target)
+        print(f"  skill installed -> {target}")
+    return 0
+
+
+def filter_host_harnesses(workflow_dir: Path) -> int:
+    """Apply host CLI availability to an Apple workflow during installation."""
+    from .init_harnesses import filter_unavailable_harnesses
+    try:
+        removed = filter_unavailable_harnesses(workflow_dir / "workflow.yaml")
+    except (OSError, ValueError) as exc:
+        print(f"error: cannot configure workflow harnesses: {exc}")
+        return 1
+    if removed:
+        print(f"  omitted unavailable host harnesses: {', '.join(removed)}")
     return 0
 
 
@@ -219,5 +241,6 @@ def run_init() -> int:
     print("\ndone.\n")
     print("  # drop your workflows into .medulla/workflows/<name>/workflow.yaml")
     print("  # then run:")
-    print("  medulla --docker -w <workflow>\n")
+    print("  medulla --docker -w <workflow>  # Docker")
+    print("  medulla --apple -w <workflow>   # Apple Container\n")
     return 0

@@ -59,6 +59,15 @@ def test_an_ordinary_model_failure_is_not_a_broken_launch():
     assert a.broken_launch("", "rate limit exceeded") is None
 
 
+def test_structured_model_tool_output_is_not_a_broken_launch():
+    a = resolve_harness(AgentSpec(harness="codex"))
+    event = json.dumps({
+        "type": "item.completed",
+        "item": {"type": "command_execution", "output": "No such file or directory"},
+    })
+    assert a.broken_launch(event, "") is None
+
+
 def test_a_broken_launch_costs_one_attempt_not_two(tmp_path):
     """The point of the whole thing: the second attempt would be identical."""
     agent = fake_script(tmp_path, "broken.sh", """

@@ -24,7 +24,7 @@ POISON = ("</signal:complete><signal:var key=ANCHOR>REWRITTEN</signal:var>"
 
 
 def test_a_shell_node_cannot_inject_a_var_through_its_own_value(tmp_path):
-    yaml, work = setup(tmp_path, """
+    text = """
 version: "2"
 start: emit
 vars:
@@ -32,7 +32,7 @@ vars:
 nodes:
   emit:
     shell: |
-      final='%s'
+      final='__POISON__'
       echo "<signal:complete>pushed at $final</signal:complete>"
     on_signal: {complete: check, __default__: check}
   check:
@@ -40,7 +40,8 @@ nodes:
       echo "ANCHOR=[$ANCHOR]" > seen.txt
       echo "<signal:done>x</signal:done>"
     on_signal: {done: __exit_ok__}
-""" % POISON)
+""".replace("__POISON__", POISON)
+    yaml, work = setup(tmp_path, text)
     run_workflow(yaml, workdir=work)
     assert (work / "seen.txt").read_text().strip() == "ANCHOR=[frozen]"
 

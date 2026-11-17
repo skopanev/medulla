@@ -300,38 +300,12 @@ nodes:
 
   panel:
     inputs:
-      # SEAT FOUR, TEMPORARILY DEEPSEEK. zai-coding-plan answers 429 "Weekly/Monthly
-      # Limit Exhausted, resets 2026-09-13 10:00" to every request, so glm5 has been
-      # refusing before the body since the 10th and the panel has been running three
-      # seats against a threshold of three — no margin, and any format slip costs the
-      # round. Measured, not assumed: a live ping to glm-5.3 returns 429 while
-      # deepseek-v4-pro-0813 returns 200.
-      #
-      # WHY DEEPSEEK AND NOT THE OBVIOUS SUBSTITUTES. A second zai account would be
-      # rotating identities to evade a vendor limit — refused. Another model on agy or
-      # claude-code would put two seats on one account, so one exhausted quota would
-      # take both, and independence is the point of a panel. qwen3.8-max is not a
-      # candidate either: the owner removed it on measurement (three first-attempt
-      # timeouts in three runs, 100%/94%/100% of the budget, one review delivered).
-      # alibaba-token-plan is an account no other seat uses, and deepseek is a vendor
-      # no other seat uses.
-      #
-      # REVERT ON 2026-09-13: put glm5 back once the quota resets, unless deepseek has
-      # by then earned the seat on its own numbers.
-      - {slug: deepseek, harness: opencode,  model: alibaba-token-plan/deepseek-v4-pro-0813, effort: max}
+      - {slug: glm5,   harness: opencode,    model: zai-coding-plan/glm-5.3, effort: max}
       - {slug: gpt5,   harness: codex,       model: gpt-5.6-sol,             effort: high}
       - {slug: sonnet, harness: claude-code, model: claude-sonnet-5}
-      - {slug: gemini, harness: agy,         model: "Gemini 3.1 Pro (High)"}
+      - {slug: qwen38max, harness: opencode, model: opencode-go/qwen3.8-max, effort: medium}
     max_parallel: all
-    # Majority, unchanged: 3 of 4 is still a majority because 2 of 4 is a tie.
-    # qwen3.8-max was removed from the roster on 2026-09-09 by the owner, on
-    # measurement rather than impression: it timed out on its FIRST attempt in 3
-    # runs of 3, at 1800s each, and consumed 100%/94%/100% of the run budget while
-    # delivering one review in three. Every other panelist finished in 4-15 minutes.
-    # In the sharpest run all four other reviews were on disk thirteen minutes in,
-    # and the panel then waited 47 more minutes and ended with NO verdict.
-    # Removing a panelist is not an occasion to weaken quorum.
-    min_success: 3        # majority of the 4-model roster
+    min_success: 3        # strict majority of the deployed roster
     # A dead provider must not cost the panel half an hour of silence. The check is a
     # script, not an inline block: it has to validate a download and its JSON before
     # trusting one field out of it, and the six lines of awk-grade shell it used to be

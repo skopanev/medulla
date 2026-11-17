@@ -73,6 +73,39 @@ nodes:
     assert rc == 0                                  # stdin actually delivered the prompt
 
 
+def test_opencode_parallel_pool_gets_private_one_shot_state(tmp_path, on_path):
+    make_bin(on_path, "opencode", r'''
+[ "$OPENCODE_DB" = ":memory:" ] || exit 41
+case "$OPENCODE_CONFIG_CONTENT" in
+  *'"snapshot": false'*) ;;
+  *) exit 42;;
+esac
+touch ".opencode-worker-$MEDULLA_INPUT_INDEX"
+count=0
+for _ in $(seq 1 100); do
+  count=$(printf '%s\n' .opencode-worker-* | wc -l | tr -d ' ')
+  [ "$count" -ge 4 ] && break
+  sleep 0.02
+done
+[ "$count" -ge 4 ] || exit 43
+echo "<signal:ok>isolated</signal:ok>" >&2
+''')
+    text = """
+version: "2"
+start: panel
+nodes:
+  panel:
+    inputs: [one, two, three, four]
+    max_parallel: 4
+    agent: {harness: opencode}
+    prompt: "{{input}}"
+    on_signal: {__done__: __exit_ok__}
+"""
+    rc, _ = run_pipe(tmp_path, text)
+    assert rc == 0
+    assert len(list((tmp_path / "work").glob(".opencode-worker-*"))) == 4
+
+
 def test_claude_e2e_tool_echo_never_routes(tmp_path, on_path):
     # fake claude: emits a tool_result echoing signal text, then clean assistant text
     make_bin(on_path, "claude", r'''
@@ -162,4 +195,3 @@ def test_claude_fatal_error_signature():
 
 
 # ── sandbox: read-only maps to each CLI's native lock ───────────────────────
-

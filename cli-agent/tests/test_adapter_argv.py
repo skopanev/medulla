@@ -160,11 +160,35 @@ def test_opencode_config_rides_in_env(tmp_path):
     a = H.OpenCodeAdapter.__new__(H.OpenCodeAdapter)
     spec = AgentSpec(harness="opencode", model="zai/glm-5.3", effort="high")
     inv = a.build(spec, tmp_path / "p.md", "P", 600)
+    assert inv.env["OPENCODE_DB"] == ":memory:"
     cfg = json.loads(inv.env["OPENCODE_CONFIG_CONTENT"])
     assert cfg["permission"] == "allow"
+    assert cfg["snapshot"] is False
     assert cfg["provider"]["zai"]["options"]["timeout"] == (600 + 300) * 1000
     assert cfg["provider"]["zai"]["models"]["glm-5.3"]["options"]["reasoningEffort"] == "high"
     assert not (tmp_path / "opencode.json").exists()
+
+
+@pytest.mark.parametrize("args", [
+    ["--continue"], ["--continue=true"], ["-c"], ["-c=true"],
+    ["--session", "ses_123"], ["-s=ses_123"], ["--fork"], ["--fork=true"],
+])
+def test_opencode_explicit_session_keeps_persistent_db(tmp_path, args):
+    a = H.OpenCodeAdapter.__new__(H.OpenCodeAdapter)
+    spec = AgentSpec(harness="opencode", model="zai/glm-5.2", args=args)
+    inv = a.build(spec, tmp_path / "p.md", "P", 60)
+    assert "OPENCODE_DB" not in inv.env
+    assert "snapshot" not in json.loads(inv.env["OPENCODE_CONFIG_CONTENT"])
+
+
+@pytest.mark.parametrize("session,resume", [("work", None), (None, "ses_123")])
+def test_opencode_named_or_resumed_session_keeps_persistent_db(
+        tmp_path, session, resume):
+    a = H.OpenCodeAdapter.__new__(H.OpenCodeAdapter)
+    spec = AgentSpec(harness="opencode", model="zai/glm-5.2", session=session)
+    inv = a.build(spec, tmp_path / "p.md", "P", 60, resume=resume)
+    assert "OPENCODE_DB" not in inv.env
+    assert "snapshot" not in json.loads(inv.env["OPENCODE_CONFIG_CONTENT"])
 
 
 def test_agy_untrusted_workspace_is_e_harness(tmp_path, monkeypatch):
@@ -195,5 +219,4 @@ def test_unknown_harness_is_e_harness():
     with pytest.raises(EngineCrash) as exc:
         H.resolve(AgentSpec(harness="nonsense"))
     assert exc.value.code == "E_HARNESS"
-
 
