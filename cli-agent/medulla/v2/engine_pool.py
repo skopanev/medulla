@@ -24,6 +24,7 @@ from .model import (
     Node,
 )
 from .render import RenderError, render
+from .stopflag import stop_requested
 
 
 class PoolMixin(InputsMixin):
@@ -180,6 +181,8 @@ class PoolMixin(InputsMixin):
                     "log": None}
 
         def guarded_run(idx: int, value):
+            if stop_requested():
+                return None                            # stop ordered: no row, resume re-runs it
             if self._remaining() is not None and self._remaining() <= 0:
                 return None                            # never started: no row, resume re-runs it
             try:

@@ -20,6 +20,7 @@ from .model import TIMEOUT_RC
 from .procrun_io import STOP_GRACE_S, OutputCapture
 from .procrun_io import defer_reap as _defer_reap
 from .procrun_io import watch_output as _watch_output
+from .stopflag import stop_requested
 
 # every live child, registered for signal-time group-kill: an interrupt must
 # reach POOL WORKERS' children too (the exception only lands in the main
@@ -149,8 +150,14 @@ def run(
             deadline = min(deadline, hard_deadline)
         cleanup_deadline = deadline
         pgid = proc.pid  # start_new_session makes it the process-group leader
-        registered = True
         with _LIVE_LOCK:
+            # Registration and the stop question are ONE step, under one lock. A
+            # worker that passed the attempt loop's check a moment before the signal
+            # would otherwise register this child AFTER the handler took its snapshot
+            # of the live ones, and nothing would ever kill it.
+            if stop_requested():
+                raise KeyboardInterrupt      # the BaseException arm kills this child
+            registered = True
             _LIVE[proc] = pgid
         capture = OutputCapture(proc, log_file, echo)
         if not capture.start(deadline):

@@ -85,6 +85,7 @@ def run_workflow(
     import threading as _threading
 
     from .procrun import kill_live_processes
+    from .stopflag import clear_stop, request_stop
     workdir = workdir or Path.cwd()
     store = None
     engine = None
@@ -94,9 +95,14 @@ def run_workflow(
     # ordinary interrupt flow -> outcome interrupted, exit 130, resumable.
     # v1 had this handler; the rewrite lost it (spar panel, sonnet).
     run_started_now()          # the +MM:SS in every log line counts from HERE
+    clear_stop()               # a stop ordered to an EARLIER run in this process is not ours
     prev_handlers = {}
     if _threading.current_thread() is _threading.main_thread():
         def _graceful(signum, frame):
+            # The flag FIRST, the kills second. A pool worker is a thread and this
+            # exception reaches the main thread only, so without the flag the worker
+            # reads its killed child as a failed attempt and starts a new paid one.
+            request_stop()
             kill_live_processes()
             raise KeyboardInterrupt
         for sig in (_signal.SIGTERM, _signal.SIGINT):

@@ -24,6 +24,7 @@ from .harness import resolve as resolve_harness
 from .model import HOOK_TIMEOUT_S, SIG_FAILED, SIG_TIMEOUT, Node
 from .procrun import run as proc_run
 from .secret_policy import env_keys_to_remove
+from .stopflag import stop_requested
 
 
 class AttemptsMixin(BodyMixin):
@@ -98,6 +99,11 @@ class AttemptsMixin(BodyMixin):
         n_fallback = 0
         last_failure_class: str | None = None
         while True:
+            if stop_requested():
+                # A stop was ordered while the last attempt ran. Its child is dead, so
+                # the rc reads as a failure and the retry would be a NEW paid call,
+                # made after the operator asked for none. Unwind instead.
+                raise KeyboardInterrupt
             attempt += 1
             total += 1
             if phase == "primary":
@@ -246,6 +252,14 @@ class AttemptsMixin(BodyMixin):
                     "max_gap_s": result.max_gap_s,
                 })
 
+            if move.move in (Move.RETRY_SAME, Move.SWITCH_FALLBACK) \
+                    and stop_requested():
+                # Checked before the log, not after it: the first build of this fix
+                # printed "retrying" and then correctly did not retry, which reads
+                # as a lost retry rather than as an obeyed stop.
+                log(f"attempt {attempt_id} failed (rc={result.rc}), "
+                    f"stop requested — no further attempt")
+                raise KeyboardInterrupt
             if move.move is Move.RETRY_SAME:
                 log(f"attempt {attempt_id} failed (rc={result.rc}), retrying")
                 _retry_delay(self.deadline)      # a zero-delay retry on a 429 is a provider-ban request
