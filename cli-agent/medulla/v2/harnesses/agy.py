@@ -56,13 +56,24 @@ class AgyAdapter(HarnessAdapter):
         # --print-timeout bounds any residual hang, so the guard is host-only.
         if os.environ.get("MEDULLA_DOCKER") == "1":
             return
+        # A read-only step passes `--mode plan` and never passes the dangerous flag,
+        # so the hang this guard exists for cannot happen to it. Measured on agy
+        # 1.5.12 in an empty directory absent from trustedWorkspaces: plan mode
+        # reached status SUCCESS, and an explicit order to write a file left the
+        # directory empty. The guard used to stop such a step anyway, and the message
+        # named a flag the step does not pass — so the reader looked for the wrong
+        # cause. A critic that runs in a fresh temporary directory can never be
+        # trusted in advance, which made the whole read-only lane unreachable.
+        if _read_only(spec):
+            return
         if not _agy_trusted(workdir):
             raise EngineCrash(
                 E_HARNESS,
                 f"agy: workspace '{workdir}' is not in trustedWorkspaces — "
                 f"`agy --dangerously-skip-permissions` would hang forever. Trust it "
                 f"once (open `agy` there interactively, or add the path to "
-                f"\"trustedWorkspaces\" in {_AGY_SETTINGS}).")
+                f"\"trustedWorkspaces\" in {_AGY_SETTINGS}), or declare the step "
+                f"`sandbox: read-only`, which needs no trust.")
 
     def build(self, spec, prompt_file, prompt_text, timeout_s, resume=None):
         # sandbox → agy `--mode plan`, exactly as claude maps it to `--permission-mode

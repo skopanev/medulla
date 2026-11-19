@@ -182,6 +182,18 @@ def test_agy_trust_skipped_in_docker(tmp_path, monkeypatch):
     H.AgyAdapter.__new__(H.AgyAdapter).prepare(AgentSpec(harness="agy"), tmp_path)
 
 
+def test_agy_read_only_needs_no_trust(tmp_path, monkeypatch):
+    # A read-only step passes `--mode plan`, never the dangerous flag, so the hang
+    # this guard exists for cannot reach it. A critic that runs in a fresh temporary
+    # directory can never be trusted in advance, and the guard made the whole lane
+    # unreachable. Measured on agy 1.5.12: plan mode in an untrusted empty directory
+    # answered, and an explicit order to write a file left the directory empty.
+    monkeypatch.delenv("MEDULLA_DOCKER", raising=False)
+    monkeypatch.setattr(H, "_agy_trusted", lambda wd: False)
+    H.AgyAdapter.__new__(H.AgyAdapter).prepare(
+        AgentSpec(harness="agy", sandbox="read-only"), tmp_path)
+
+
 # ── resolve: binary check = the E_HARNESS razor ─────────────────────────────
 
 def test_missing_binary_is_e_harness(monkeypatch):
