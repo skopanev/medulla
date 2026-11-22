@@ -78,6 +78,12 @@ docker (host-side, handled by scripts/docker.py before the engine starts):
     medulla --docker -w <dir> ...   run inside the workflow's image
     --build                         force a no-cache image rebuild
     --mount <dir> / --mount-rw <dir>  extra mounts under /workspace/<name>
+    --mount-file <host>:<container>   one host FILE, read-only, at the container path
+                                    you name. Repeatable. Never under /workspace, and
+                                    never over a path medulla mounts itself. Do not
+                                    replace the host file while the run holds it: a
+                                    file mount binds the inode, so a rename over it
+                                    costs the container the file for the whole run.
     every MEDULLA_* knob above is forwarded into the container by NAME, so one set on
     the host means the same inside. Absent on the host stays absent inside.
     --docker-engine                 start the image's own dockerd inside the run, for

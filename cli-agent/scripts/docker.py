@@ -54,6 +54,8 @@ if str(SCRIPT_DIR) not in sys.path:
 from dockerlib import (
     announce,  # noqa: E402
     cliargs,  # noqa: E402
+    definition,  # noqa: E402
+    mountfiles,  # noqa: E402
     mountpoints,  # noqa: E402
 )
 from dockerlib import env as dockerenv  # noqa: E402
@@ -67,9 +69,9 @@ from dockerlib.env import (  # noqa: E402
     _add_claude_token_fallback,
     _collect_dotenv,
 )
-from dockerlib.image import (  # noqa: E402
+from dockerlib.image import (  # noqa: E402,F401
     DEFAULT_IMAGE,
-    _config_yaml,
+    _config_yaml,  # re-exported: the suite drives the resolver through this module
     ensure_image,
     image_home,
     image_tag_for,
@@ -77,10 +79,10 @@ from dockerlib.image import (  # noqa: E402
     resolve_dockerfile,
 )
 from dockerlib.mounts import build_volumes, workflow_uses_agy  # noqa: E402,F401
-from dockerlib.paths import (  # noqa: E402
+from dockerlib.paths import (  # noqa: E402,F401
     _remove_made_mountpoints,
     assert_runs_folder_reaches_the_container,
-    definition_is_outside_workspace,
+    definition_is_outside_workspace,  # re-exported, with runs_under_for, for the suite
     read_shadow_paths,
     runs_under_for,
 )
@@ -119,6 +121,7 @@ def main():
     extra_mounts = opts["extra_mounts"]
     var_files = opts["var_files"]
     cli_vars = opts["cli_vars"]
+    mount_files = opts["mount_files"]
     workflow = opts["workflow"]
 
     # Image resolution, two distinct concepts with symmetric surfaces:
@@ -180,67 +183,16 @@ def main():
         credential_env=selected_env,
     )
 
-    # A SHARED definition lives outside the workspace (~/.medulla/workflows/<name>), and
-    # only cwd is mounted — so the container would not find it. Mount it OUTSIDE
-    # /workspace, never into it (reported live): a mount target inside a bind mount
-    # is created by the daemon when missing, and for a file that means an EMPTY FILE
-    # appearing in the user's repo. That debris then outranked the shared definition and
-    # broke every run, and the symptom read as panelists failing to deliver — a day went
-    # into chasing provider quotas. Whether the daemon creates it varies by driver
-    # (colima did not here, Docker Desktop does), which is exactly why the workspace must
-    # not be the target at all. runs/ still land in the project: MEDULLA_RUNS_UNDER tells
-    # the engine where, since the yaml now sits on a read-only path.
-    shared_runs_under = None
-    if workflow:
-        resolved = _config_yaml(Path(workflow))
-        if definition_is_outside_workspace(resolved):
-            if resolved.is_file():
-                dest = runs_under_for(Path(workflow))
-                name = resolved.parent.name
-                mnt = f"/mnt/medulla-workflows/{name}"
-                # MOUNT THE DIRECTORY, NOT THE FILE. A bind mount of a FILE is bound to
-                # its inode, and `medulla refresh` replaces definitions atomically —
-                # write a temp file, os.replace it into place — which is the right way
-                # to publish a file somebody may be reading. But the new name points at
-                # a new inode, and every container already mounting the old one loses
-                # it outright: measured here, `cat` inside the container goes from the
-                # file's contents to "No such file or directory" the instant the host
-                # replaces it.
-                #
-                # That is the FileNotFoundError on medulla's own workflow.yaml that
-                # killed rounds all day. It looked environmental because it only hits
-                # rounds launched inside the second or two a refresh takes, and it
-                # presents as a healthy start: the launcher prints the run directory
-                # and the pid, then nothing is ever created. Two lanes three seconds
-                # apart, with different flags, died identically — and the refresh that
-                # did it was usually mine, run right after a release.
-                #
-                # A directory mount survives it: the directory keeps its inode while
-                # files inside it are replaced, and the container sees the new content.
-                # Verified both ways before changing this.
-                volumes.extend(["-v", f"{resolved.parent}:{mnt}:ro"])
-                # EVERY directory the workflow ships, not a hardcoded list. It was
-                # ("prompts",) — so scripts/ never reached the container, and the
-                # synthesize node's `$MEDULLA_WORKFLOW_DIR/scripts/spar-run.sh` did not
-                # exist there. The panel then wrote no verdict.md at all while the node
-                # still reported success. A workflow that ships a directory ships it
-                # because a node needs it; runs/ is the one exception, being history
-                # rather than definition.
-                # The subdirectories come with it now — prompts/, scripts/ and
-                # anything else the workflow ships. runs/ comes too, read-only and
-                # unread; shadowing it would mean a second mount inside this one, and
-                # a nested mount is what the file mount already cost us.
-                args = [f"{mnt}/workflow.yaml" if a == str(workflow) else a for a in args]
-                # RELATIVE, not /workspace/...: --print-run-dir hands this path back to
-                # the caller, who is on the HOST while the run happened inside the
-                # container. An absolute container path does not exist for them (found
-                # live: the panel printed a run dir that could not be listed).
-                shared_runs_under = str(dest)
+    # A shared definition lives outside the mounted workspace and has to be brought
+    # in — dockerlib/definition.py holds the two reasons it is a DIRECTORY mount
+    # outside /workspace, both of which cost a day before they were understood.
+    args, shared_runs_under = definition.mount_shared_definition(volumes, args, workflow)
 
-    # --var-file sources: mounted at their own absolute path, so the argument the engine
-    # receives is valid on both sides of the boundary.
-    for src in var_files:
-        volumes.extend(["-v", f"{src}:{src}:ro"])
+    # Single host files, read-only: --var-file sources at their own path, and whatever
+    # --mount-file names. dockerlib/mountfiles.py carries the inode warning that
+    # applies to all of them.
+    mountfiles.mount_var_files(volumes, var_files)
+    mountfiles.mount_secret_files(volumes, mount_files)
 
     made_mountpoints, rc = mountpoints.prepare(volumes, extra_mounts, cwd_ro)
     if rc:

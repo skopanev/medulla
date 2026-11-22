@@ -404,7 +404,7 @@ nodes:
 
 ## Docker
 
-`medulla --docker -w <dir>` re-runs the workflow inside its image; `scripts/docker.py` owns mounts and credential forwarding, `--build` forces a rebuild, `--mount <dir>` / `--mount-rw <dir>` add extra mounts under `/workspace/<name>`.
+`medulla --docker -w <dir>` re-runs the workflow inside its image; `scripts/docker.py` owns mounts and credential forwarding, `--build` forces a rebuild, `--mount <dir>` / `--mount-rw <dir>` add extra mounts under `/workspace/<name>`, and `--mount-file <host>:<container>` binds one host file read-only at a container path you choose.
 
 Image resolution: `MEDULLA_IMAGE` env → `--var IMAGE` → `vars.IMAGE` (a ready tag: pulled, never built) → otherwise **build** from `--var DOCKERFILE` → `vars.DOCKERFILE` → the packaged default (all four harnesses). Built tags are per-workflow and content-addressed (`medulla-<name>:<sha of Dockerfile>`) — workflows never share a tag by accident, and editing a Dockerfile rebuilds automatically.
 

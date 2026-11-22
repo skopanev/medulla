@@ -2,14 +2,20 @@
 
 Split out of docker.py under the project's 250-line rule ($MAX_LOC). Two kinds of flag
 meet here and must not be confused: OURS, consumed and never passed on (--build,
---cwd-ro, --mount), and the engine's, which travel through untouched and are only read
-in passing (--var, --var-file, -w). Mixing them up means a flag either vanishes or is
-handed to something that has never heard of it.
+--cwd-ro, --mount, --mount-file), and the engine's, which travel through untouched and
+are only read in passing (--var, --var-file, -w). Mixing them up means a flag either
+vanishes or is handed to something that has never heard of it.
+
+Every fault here raises SystemExit. It used to `return 1`, and the caller unpacks the
+answer into two names — so a missing --var-file printed its correct message and then
+died on `cannot unpack non-iterable int object`. The operator read a traceback about
+unpacking instead of the line above it that named their file.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+
+from dockerlib import mountfiles
 
 
 def parse(args: list[str]) -> tuple[list[str], dict]:
@@ -37,15 +43,19 @@ def parse(args: list[str]) -> tuple[list[str], dict]:
             args[j + 1] = str(runs_folder)
             break
     if cwd_ro and runs_folder is None:
-        print("error: --cwd-ro requires --runs-folder (a read-only workspace leaves the "
-              "run nowhere to write)", file=sys.stderr)
-        return 1
+        raise SystemExit("error: --cwd-ro requires --runs-folder (a read-only "
+                         "workspace leaves the run nowhere to write)")
     if runs_folder is not None:
         runs_folder.mkdir(parents=True, exist_ok=True)
 
     # Extract --mount / --mount-rw; also peek --var for Dockerfile resolution
     extra_mounts = []  # list of (path, ro:bool)
     var_files: list[Path] = []          # --var-file sources, mounted at their own paths
+    # --mount-file targets, keyed BY CONTAINER PATH: the key is what must be unique, so
+    # the duplicate check is the data structure rather than a second loop. Insertion
+    # order is kept, and it decides the order of the -v flags — which the session
+    # container's identity digest hashes, so it must not depend on anything but argv.
+    mount_files: dict[str, Path] = {}
     cli_vars: dict[str, str] = {}
     clean_args = []
     i = 0
@@ -56,6 +66,13 @@ def parse(args: list[str]) -> tuple[list[str], dict]:
         elif args[i] == "--mount-rw" and i + 1 < len(args):
             extra_mounts.append((args[i + 1], False))
             i += 2
+        elif args[i] == "--mount-file" and i + 1 < len(args):
+            # OURS, like --mount: the engine has no container to mount anything into.
+            # Read-only always, and the flag takes no mode — dockerlib/mountfiles.py
+            # holds the contract and every refusal.
+            src, target = mountfiles.parse_mount_file(args[i + 1], mount_files)
+            mount_files[target] = src
+            i += 2
         elif args[i] == "--var-file" and i + 1 < len(args):
             # The file has to exist INSIDE too, and its host path is what the engine
             # will open. Mount it at that same absolute path (the trick --runs-folder
@@ -64,8 +81,7 @@ def parse(args: list[str]) -> tuple[list[str], dict]:
             key, _, raw = args[i + 1].partition("=")
             src = Path(raw).expanduser()
             if raw and not src.is_file():
-                print(f"[docker.py] --var-file {key}: no such file: {src}", file=sys.stderr)
-                return 1
+                raise SystemExit(f"error: --var-file {key}: no such file: {src}")
             src = src.resolve()
             var_files.append(src)
             clean_args.append(args[i])
@@ -93,5 +109,6 @@ def parse(args: list[str]) -> tuple[list[str], dict]:
 
     out.update(build=build, cwd_ro=cwd_ro, runs_folder=runs_folder,
                extra_mounts=extra_mounts, var_files=var_files, cli_vars=cli_vars,
+               mount_files=[(src, target) for target, src in mount_files.items()],
                workflow=workflow)
     return args, out
