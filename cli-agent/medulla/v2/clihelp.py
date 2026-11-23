@@ -90,9 +90,9 @@ docker (host-side, handled by scripts/docker.py before the engine starts):
                                     integration tests against real services. Needs an
                                     image declaring a numeric non-root USER as uid:gid
                                     and an absolute HOME. The container runs PRIVILEGED
-                                    AS ROOT, so it cannot be combined with --cwd-ro:
-                                    a read-only mount does not bind root, and the run
-                                    would record a guarantee it does not hold.
+                                    AS ROOT. It still accepts --cwd-ro and warns: a
+                                    read-only mount does not bind root, so the ro lines
+                                    of that run are declared, not enforced.
     image resolution precedence:    MEDULLA_IMAGE env > --var IMAGE >
                                     vars.IMAGE > build from (--var DOCKERFILE >
                                     vars.DOCKERFILE > packaged default)
